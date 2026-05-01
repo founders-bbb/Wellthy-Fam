@@ -1,0 +1,15 @@
+﻿
+FullName                                                                                             Length
+--------                                                                                             ------
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\screens\AuthScreen.js             196
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\screens\FamilySetupScreen.js      203
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\screens\InviteJoinScreen.js       202
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\screens\QuestionnaireScreen.js    205
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\screens\SettingsScreen.js       12070
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\tabs\FamilyTab.js                 195
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\tabs\FinanceTab.js                196
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\tabs\HomeTab.js                   193
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\tabs\InsightsTab.js               197
+C:\Users\cthiv\OneDrive\Desktop\Family App\Claude\FamilyApp\FamilyApp\tabs\WellnessTab.js               197
+
+
