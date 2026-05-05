@@ -2002,12 +2002,17 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
       }).select().single();
       if(userUpsert.error)throw userUpsert.error;
 
+      // Fix V (build #8) — family_members table does NOT have an invited_by column
+      // (verified against information_schema). Trying to insert it caused every drain
+      // attempt to fail silently with "column invited_by of relation family_members
+      // does not exist", which is THE root cause of the questionnaire-loop bug for
+      // tsp.chinnu and the missing-family_members-row bug. The "who invited me"
+      // relationship is preserved via family_invites.invited_by + invite_code linkage.
       await supabase.from('family_members').insert({
         family_id:preview.invite.family_id,
         user_id:uid,
         role:(preview.invite.invited_member_role||'parent').toLowerCase(),
         access_role:preview.invite.invited_access_role||'member',
-        invited_by:preview.invite.invited_by||null,
       });
 
       await supabase.from('family_invites').update({status:'accepted',used_by:uid}).eq('id',preview.invite.id);
@@ -7462,12 +7467,12 @@ function AppInner(){
               if(!existingMember.data){
                 drainStep='family_members.insert';
                 await diagLog('drain step 3/4 START: family_members.insert role='+(parsed.invited_member_role||'parent').toLowerCase()+' access_role='+(parsed.invited_access_role||'member'));
+                // Fix V (build #8) — see joinAndLink edit; column invited_by does not exist on family_members.
                 var fmInsert=await supabase.from('family_members').insert({
                   family_id:parsed.family_id,
                   user_id:sessionUser.id,
                   role:(parsed.invited_member_role||'parent').toLowerCase(),
                   access_role:parsed.invited_access_role||'member',
-                  invited_by:parsed.invited_by||null,
                 });
                 if(fmInsert.error)throw fmInsert.error;
                 await diagLog('drain step 3/4 OK: family_members.insert');
@@ -7598,12 +7603,12 @@ function AppInner(){
           try{
             var existingFm=await supabase.from('family_members').select('id').eq('family_id',rescueFamilyId).eq('user_id',sessionUser.id).maybeSingle();
             if(!existingFm.data){
+              // Fix V (build #8) — see joinAndLink edit; column invited_by does not exist on family_members.
               await supabase.from('family_members').insert({
                 family_id:rescueFamilyId,
                 user_id:sessionUser.id,
                 role:((rescueQData&&rescueQData.invited_member_role)||'parent').toLowerCase(),
                 access_role:(rescueQData&&rescueQData.invited_access_role)||'member',
-                invited_by:(rescueQData&&rescueQData.invited_by)||null,
               });
             }
             if(rescueQData&&rescueQData.invite_code){
