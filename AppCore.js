@@ -7425,45 +7425,82 @@ function AppInner(){
             }
 
             console.log('[INVITE JOIN] completing deferred writes for',sessionUser.email);
-            var inviteUserUpsert=await supabase.from('users').upsert({
-              [DB_COLUMNS.USERS.ID]:sessionUser.id,
-              [DB_COLUMNS.USERS.AUTH_USER_ID]:sessionUser.id,
-              [DB_COLUMNS.USERS.USER_TYPE]:'member',
-              [DB_COLUMNS.USERS.EMAIL]:parsed.email||sessionUser.email,
-              [DB_COLUMNS.USERS.NAME]:parsed.invited_member_name||((sessionUser.email||'').split('@')[0])||'Member',
-              family_id:parsed.family_id,
-              [DB_COLUMNS.USERS.QUESTIONNAIRE_COMPLETED]:false,
-              [DB_COLUMNS.USERS.QUESTIONNAIRE_DATA]:{invite_code:parsed.invite_code,invited_member_name:parsed.invited_member_name,invited_member_role:parsed.invited_member_role},
-            }).select().single();
-            if(inviteUserUpsert.error)throw inviteUserUpsert.error;
 
-            // family_members has no unique constraint on (family_id,user_id) — explicit
-            // pre-check avoids duplicate rows on retry after partial completion.
-            var existingMember=await supabase.from('family_members').select('id').eq('family_id',parsed.family_id).eq('user_id',sessionUser.id).maybeSingle();
-            if(existingMember.error)throw existingMember.error;
-            if(!existingMember.data){
-              var fmInsert=await supabase.from('family_members').insert({
+            // Fix Y (build #7) — step-by-step instrumentation. Each drain step now logs its
+            // start and end with the SQL error if any. The previous single-try block swallowed
+            // failures with no diagLog visibility, so we couldn't see WHY family_members.insert
+            // was failing for tsp.chinnu (build #6 → questionnaire-loop bug).
+            var drainStep='users.upsert';
+            try{
+              await diagLog('drain step 1/4 START: users.upsert (set user_type=member, family_id='+parsed.family_id+'; QC unchanged)');
+              // Fix X (build #7) — REMOVED questionnaire_completed:false from this payload.
+              // It was overwriting TRUE→FALSE on every drain retry whenever a later step
+              // (family_members.insert, etc.) failed and pendingInviteJoin wasn't cleared.
+              // Result was the user being asked to fill the questionnaire on every app reopen.
+              // Default value (false) applies on first INSERT via column default; on retry the
+              // existing value is preserved.
+              var inviteUserUpsert=await supabase.from('users').upsert({
+                [DB_COLUMNS.USERS.ID]:sessionUser.id,
+                [DB_COLUMNS.USERS.AUTH_USER_ID]:sessionUser.id,
+                [DB_COLUMNS.USERS.USER_TYPE]:'member',
+                [DB_COLUMNS.USERS.EMAIL]:parsed.email||sessionUser.email,
+                [DB_COLUMNS.USERS.NAME]:parsed.invited_member_name||((sessionUser.email||'').split('@')[0])||'Member',
                 family_id:parsed.family_id,
-                user_id:sessionUser.id,
-                role:(parsed.invited_member_role||'parent').toLowerCase(),
-                access_role:parsed.invited_access_role||'member',
-                invited_by:parsed.invited_by||null,
-              });
-              if(fmInsert.error)throw fmInsert.error;
-            }else{
-              console.log('[INVITE JOIN] family_members row already exists, skipping insert');
-            }
+                [DB_COLUMNS.USERS.QUESTIONNAIRE_DATA]:{invite_code:parsed.invite_code,invited_member_name:parsed.invited_member_name,invited_member_role:parsed.invited_member_role},
+              }).select().single();
+              if(inviteUserUpsert.error)throw inviteUserUpsert.error;
+              await diagLog('drain step 1/4 OK: users.upsert');
 
-            if(!alreadyAcceptedByUs){
-              var inviteUpd=await supabase.from('family_invites').update({status:'accepted',used_by:sessionUser.id}).eq('id',parsed.invite_id);
-              if(inviteUpd.error)throw inviteUpd.error;
-            }
+              drainStep='family_members.select';
+              await diagLog('drain step 2/4 START: family_members.select (existing-row check)');
+              // family_members has no unique constraint on (family_id,user_id) — explicit
+              // pre-check avoids duplicate rows on retry after partial completion.
+              var existingMember=await supabase.from('family_members').select('id').eq('family_id',parsed.family_id).eq('user_id',sessionUser.id).maybeSingle();
+              if(existingMember.error)throw existingMember.error;
+              await diagLog('drain step 2/4 OK: family_members.select existed='+!!existingMember.data);
 
-            await AsyncStorage.removeItem('pendingInviteJoin');
-            console.log('[INVITE JOIN] deferred writes complete; user lookup will pick up the new row');
+              if(!existingMember.data){
+                drainStep='family_members.insert';
+                await diagLog('drain step 3/4 START: family_members.insert role='+(parsed.invited_member_role||'parent').toLowerCase()+' access_role='+(parsed.invited_access_role||'member'));
+                var fmInsert=await supabase.from('family_members').insert({
+                  family_id:parsed.family_id,
+                  user_id:sessionUser.id,
+                  role:(parsed.invited_member_role||'parent').toLowerCase(),
+                  access_role:parsed.invited_access_role||'member',
+                  invited_by:parsed.invited_by||null,
+                });
+                if(fmInsert.error)throw fmInsert.error;
+                await diagLog('drain step 3/4 OK: family_members.insert');
+              }else{
+                await diagLog('drain step 3/4 SKIPPED: family_members row exists');
+              }
+
+              if(!alreadyAcceptedByUs){
+                drainStep='family_invites.update';
+                await diagLog('drain step 4/4 START: family_invites.update code='+parsed.invite_code);
+                var inviteUpd=await supabase.from('family_invites').update({status:'accepted',used_by:sessionUser.id}).eq('id',parsed.invite_id);
+                if(inviteUpd.error)throw inviteUpd.error;
+                await diagLog('drain step 4/4 OK: family_invites.update');
+              }else{
+                await diagLog('drain step 4/4 SKIPPED: invite already accepted by us');
+              }
+
+              await AsyncStorage.removeItem('pendingInviteJoin');
+              await diagLog('drain COMPLETE: pendingInviteJoin cleared');
+              console.log('[INVITE JOIN] deferred writes complete; user lookup will pick up the new row');
+            }catch(stepErr){
+              // Re-throw so the outer drain catch handles it, but FIRST log which step
+              // failed and the SQL error message/code/details. This is the visibility
+              // we were missing in build #6.
+              await diagLog('drain step '+drainStep+' THREW. msg='+(stepErr&&stepErr.message)+' code='+(stepErr&&stepErr.code)+' details='+(stepErr&&stepErr.details)+' hint='+(stepErr&&stepErr.hint));
+              throw stepErr;
+            }
           }
         }
       }catch(drainErr){
+        // Fix Y (build #7) — also log to AsyncStorage diag, not just console. The console-only
+        // log in build #6 meant we had zero visibility on drain failures from the user's device.
+        await diagLog('drain OUTER catch: '+(drainErr&&drainErr.message)+' code='+(drainErr&&drainErr.code));
         console.log('[INVITE JOIN DRAIN ERROR]',drainErr);
         // Fall through — user lookup will reflect whatever DB state we managed to write.
         // Drain errors don't block normal flow; AsyncStorage left intact for retry on next session.
@@ -7517,8 +7554,17 @@ function AppInner(){
               rescueType='member';
               rescueFamilyId=parsed2.family_id||null;
               rescueName=parsed2.invited_member_name||rescueName;
-              rescueQData={invite_code:parsed2.invite_code,invited_member_name:parsed2.invited_member_name||null,invited_member_role:parsed2.invited_member_role||null};
-              await diagLog('checkAuthState no-userDoc rescue from pendingInviteJoin → user_type=member family_id='+rescueFamilyId);
+              // Fix Z (build #7) — also carry invited_access_role + invited_by so the
+              // family_members.insert below uses the right access level (e.g. co_admin),
+              // not a hardcoded 'member'.
+              rescueQData={
+                invite_code:parsed2.invite_code,
+                invited_member_name:parsed2.invited_member_name||null,
+                invited_member_role:parsed2.invited_member_role||null,
+                invited_access_role:parsed2.invited_access_role||null,
+                invited_by:parsed2.invited_by||null,
+              };
+              await diagLog('checkAuthState no-userDoc rescue from pendingInviteJoin → user_type=member family_id='+rescueFamilyId+' access_role='+(parsed2.invited_access_role||'member'));
             }else{
               await diagLog('checkAuthState no-userDoc — pendingInviteJoin present but uid mismatch. fallback to primary. parsedUid='+(parsed2&&parsed2.auth_user_id)+' authUid='+sessionUser.id);
             }
@@ -7556,7 +7602,8 @@ function AppInner(){
                 family_id:rescueFamilyId,
                 user_id:sessionUser.id,
                 role:((rescueQData&&rescueQData.invited_member_role)||'parent').toLowerCase(),
-                access_role:'member',
+                access_role:(rescueQData&&rescueQData.invited_access_role)||'member',
+                invited_by:(rescueQData&&rescueQData.invited_by)||null,
               });
             }
             if(rescueQData&&rescueQData.invite_code){
