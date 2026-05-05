@@ -1628,6 +1628,31 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
 
       console.log('[AUTH] Login successful user id:',authUser.id);
 
+      // Fix 2 (build #6) — when a deferred-invite-join is pending for THIS auth user, do NOT
+      // fall through to ensurePublicUser('primary'). The auth listener's checkAuthState drain
+      // will run with this same SIGNED_IN event and write the row with user_type='member' +
+      // family_id from the invite payload. Routing here would race the drain and (worse) the
+      // ensurePublicUser INSERT below would hardcode user_type='primary', which is the bug we
+      // saw with ethiven44@gmail.com on build #5: the user ended up self-creating a family
+      // instead of joining the inviting one.
+      try{
+        var pendingRaw=await AsyncStorage.getItem('pendingInviteJoin');
+        if(pendingRaw){
+          var parsed=JSON.parse(pendingRaw);
+          var matches=parsed&&parsed.auth_user_id===authUser.id;
+          await diagLog('handleLogin pendingInviteJoin check. found=true matches='+matches+' parsedUid='+(parsed&&parsed.auth_user_id)+' authUid='+authUser.id);
+          if(matches){
+            // Hand off to checkAuthState's drain. Don't navigate — the auth listener will.
+            return;
+          }
+        }else{
+          await diagLog('handleLogin pendingInviteJoin check. found=false authUid='+authUser.id);
+        }
+      }catch(e){
+        await diagLog('handleLogin pendingInviteJoin read threw: '+(e&&e.message));
+        // Fall through — better to attempt normal login than to block the user on a storage error.
+      }
+
       var userFetch=await supabase
         .from('users')
         .select('*')
@@ -2018,11 +2043,23 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
 
   async function handleDifferentEmail(){
     haptic('light');
+    await diagLog('handleDifferentEmail (explicit) — clearing pendingInviteJoin and signing out');
     try{await AsyncStorage.removeItem('pendingInviteJoin');}catch(e){console.log('[INVITE JOIN] clear pending failed',e);}
     try{await supabase.auth.signOut();}catch(e){console.log('[INVITE JOIN] signOut failed',e);}
     setPendingConfirmation(null);
     setEmail('');
     setPass('');
+  }
+
+  // Fix 1 (build #6) — back-arrow on the "Check your email" interstitial used to call
+  // handleDifferentEmail, which silently nuked pendingInviteJoin AND signed the user out.
+  // That broke recovery via password sign-in (the email link gets pre-consumed by Gmail/Outlook
+  // scanners, so users routinely fall back to password). New handler ONLY navigates: keeps
+  // AsyncStorage state and the auth session intact so the drain can still fire later.
+  async function handleBackFromConfirmation(){
+    haptic('light');
+    await diagLog('handleBackFromConfirmation (back-arrow) — preserving pendingInviteJoin + session');
+    setPendingConfirmation(null);
   }
 
   var codeChars=String(code||'').toUpperCase().padEnd(6,' ').slice(0,6).split('');
@@ -2032,7 +2069,7 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
       <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
       <NavBar
         title={pendingConfirmation?'Check your email':'Join your family'}
-        leading={<TouchableOpacity onPress={pendingConfirmation?handleDifferentEmail:(step===1?onBack:function(){setStep(1);setPreview(null);})} style={{width:32,height:32,borderRadius:9999,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center'}}>
+        leading={<TouchableOpacity onPress={pendingConfirmation?handleBackFromConfirmation:(step===1?onBack:function(){setStep(1);setPreview(null);})} style={{width:32,height:32,borderRadius:9999,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center'}}>
           <Text style={{fontFamily:FF.sansSemi,fontSize:18,fontWeight:'600',color:theme.text}}>←</Text>
         </TouchableOpacity>}
       />
@@ -7463,24 +7500,77 @@ function AppInner(){
       var userDoc=userLookup&&userLookup.data;
 
       if(!userDoc){
-        console.log('[AUTH STATE] No public.users row found. Creating for auth user:',sessionUser.id);
+        // Fix 3 (build #6) — belt-and-braces. The drain block at L7256 SHOULD have already
+        // written this user's row if pendingInviteJoin was set + matched. If we're still here
+        // with no userDoc, drain either didn't run or threw (caught silently above). Re-check
+        // pendingInviteJoin and use its values — never silently hardcode 'primary' when the
+        // user is actually an invited member.
+        var rescueType='primary';
+        var rescueFamilyId=null;
+        var rescueName=normalizeText((sessionUser.email||'').split('@')[0])||'User';
+        var rescueQData=null;
+        try{
+          var pendingRaw2=await AsyncStorage.getItem('pendingInviteJoin');
+          if(pendingRaw2){
+            var parsed2=JSON.parse(pendingRaw2);
+            if(parsed2&&parsed2.auth_user_id===sessionUser.id){
+              rescueType='member';
+              rescueFamilyId=parsed2.family_id||null;
+              rescueName=parsed2.invited_member_name||rescueName;
+              rescueQData={invite_code:parsed2.invite_code,invited_member_name:parsed2.invited_member_name||null,invited_member_role:parsed2.invited_member_role||null};
+              await diagLog('checkAuthState no-userDoc rescue from pendingInviteJoin → user_type=member family_id='+rescueFamilyId);
+            }else{
+              await diagLog('checkAuthState no-userDoc — pendingInviteJoin present but uid mismatch. fallback to primary. parsedUid='+(parsed2&&parsed2.auth_user_id)+' authUid='+sessionUser.id);
+            }
+          }else{
+            await diagLog('checkAuthState no-userDoc — no pendingInviteJoin. creating primary.');
+          }
+        }catch(e){
+          await diagLog('checkAuthState no-userDoc — pendingInviteJoin read threw: '+(e&&e.message)+'. fallback to primary.');
+        }
+        console.log('[AUTH STATE] No public.users row found. Creating for auth user:',sessionUser.id,'as',rescueType);
+        var createPayload={
+          id:sessionUser.id,
+          auth_user_id:sessionUser.id,
+          user_type:rescueType,
+          email:sessionUser.email,
+          name:rescueName,
+          [DB_COLUMNS.USERS.QUESTIONNAIRE_COMPLETED]:false,
+        };
+        if(rescueFamilyId)createPayload.family_id=rescueFamilyId;
+        if(rescueQData)createPayload[DB_COLUMNS.USERS.QUESTIONNAIRE_DATA]=rescueQData;
         var createRes=await supabase
           .from('users')
-          .insert({
-            id:sessionUser.id,
-            auth_user_id:sessionUser.id,
-            user_type:'primary',
-            email:sessionUser.email,
-            name:normalizeText((sessionUser.email||'').split('@')[0])||'User',
-            [DB_COLUMNS.USERS.QUESTIONNAIRE_COMPLETED]:false,
-          })
+          .insert(createPayload)
           .select()
           .single();
         if(createRes.error)throw createRes.error;
         userDoc=createRes.data;
+        // If we rescued via invite, also write the family_members row + mark the invite accepted.
+        // These would normally be done by the drain; do them here too in case drain failed.
+        if(rescueType==='member' && rescueFamilyId){
+          try{
+            var existingFm=await supabase.from('family_members').select('id').eq('family_id',rescueFamilyId).eq('user_id',sessionUser.id).maybeSingle();
+            if(!existingFm.data){
+              await supabase.from('family_members').insert({
+                family_id:rescueFamilyId,
+                user_id:sessionUser.id,
+                role:((rescueQData&&rescueQData.invited_member_role)||'parent').toLowerCase(),
+                access_role:'member',
+              });
+            }
+            if(rescueQData&&rescueQData.invite_code){
+              await supabase.from('family_invites').update({status:'accepted',used_by:sessionUser.id}).eq('invite_code',rescueQData.invite_code).eq('status','pending');
+            }
+            await AsyncStorage.removeItem('pendingInviteJoin');
+            await diagLog('checkAuthState no-userDoc rescue completed family_members + invite + cleared AsyncStorage.');
+          }catch(rescueErr){
+            await diagLog('checkAuthState no-userDoc rescue family_members/invite write failed: '+(rescueErr&&rescueErr.message));
+          }
+        }
         setCurrentUser(userDoc);
         setCurrentScreen('questionnaire');
-        console.log('[AUTH STATE] Route -> questionnaire (new user)');
+        console.log('[AUTH STATE] Route -> questionnaire (new user, type='+rescueType+')');
       }else if(!userDoc[DB_COLUMNS.USERS.QUESTIONNAIRE_COMPLETED]){
         setCurrentUser(userDoc);
         setCurrentScreen('questionnaire');
