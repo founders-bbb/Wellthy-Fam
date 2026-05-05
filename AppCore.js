@@ -1,10 +1,10 @@
 import 'react-native-url-polyfill/auto';
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import {
-  View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Pressable,
   TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
   Animated, Dimensions, BackHandler, Share, Clipboard, Image, Switch, Linking,
-  Appearance, RefreshControl,
+  Appearance, RefreshControl, AppState,
 } from 'react-native';
 import { NavigationContainer, useNavigation, useNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -15,15 +15,42 @@ import * as ImagePicker from 'expo-image-picker';
 // B8: Haptics and gesture handler
 import * as Haptics from 'expo-haptics';
 import { GestureHandlerRootView, PanGestureHandler, State as GHState } from 'react-native-gesture-handler';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { PieChart, BarChart, LineChart } from 'react-native-chart-kit';
-import { supabase, EDGE_MEAL, EDGE_NUDGE } from './utils/supabaseClient';
+import Svg, { Path, Circle } from 'react-native-svg';
+import { supabase, EDGE_MEAL, EDGE_NUDGE, SUPABASE_ANON_KEY } from './utils/supabaseClient';
 import { DB_COLUMNS } from './utils/constants';
+
+// ─────────────────────────────────────────────────────────────────
+// FONT FAMILIES — DM Sans + DM Serif Display per FamilyOS Design Guide
+// Loaded by App.js via useFonts(); these strings reference the keys we
+// registered in @expo-google-fonts/dm-sans + dm-serif-display imports.
+// ─────────────────────────────────────────────────────────────────
+var FF = {
+  sans:        'DMSans-Regular',
+  sansLight:   'DMSans-Light',
+  sansMed:     'DMSans-Medium',
+  sansSemi:    'DMSans-SemiBold',
+  sansBold:    'DMSans-Bold',
+  sansItalic:  'DMSans-Italic',
+  serif:       'DMSerif-Regular',
+  serifItalic: 'DMSerif-Italic',
+};
+// Use weight + family pair so DM Sans renders correctly across iOS/Android
+function fontW(weight){
+  if(weight==='300'||weight===300) return FF.sansLight;
+  if(weight==='500'||weight===500) return FF.sansMed;
+  if(weight==='600'||weight===600) return FF.sansSemi;
+  if(weight==='700'||weight===700||weight==='800'||weight===800||weight==='900'||weight===900) return FF.sansBold;
+  return FF.sans; // default 400
+}
 
 // Notification handler — shows alert when app is in foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
@@ -41,17 +68,18 @@ var SLOTS = [
   { bg:'#EEEDFE', text:'#3C3489' },
 ];
 var CATS = {
-  'Daily Essentials':{bg:'#E1F5EE',text:'#085041'},
-  'House Bills':{bg:'#E6F1FB',text:'#0C447C'},
-  Travel:{bg:'#FAEEDA',text:'#633806'},
-  Health:{bg:'#FBEAF0',text:'#72243E'},
-  Lifestyle:{bg:'#EEEDFE',text:'#3C3489'},
-  Savings:{bg:'#E8F6EE',text:'#0F6E56'},
-  Income:{bg:'#E1F5EE',text:'#085041'},
-  Uncat:{bg:'#F2F2EE',text:'#555555'},
+  // Per Design Guide — Category Colour Coding (section 05)
+  'Daily Essentials':{bg:'#E4F2EC',text:'#085041'},
+  'House Bills':     {bg:'#E4EDFB',text:'#1A4A8A'},
+  Travel:            {bg:'#FDF0E4',text:'#7A4A10'},
+  Health:            {bg:'#FBE4EE',text:'#7A1A3A'},
+  Lifestyle:         {bg:'#EDECFB',text:'#3A2A8A'},
+  Savings:           {bg:'#E4F2EC',text:'#085041'},
+  Income:            {bg:'#E4F2EC',text:'#085041'},
+  Uncat:             {bg:'#F2F2EE',text:'#555555'},
 };
 var CAT_LIST = ['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings'];
-var CAT_COLORS = {'Daily Essentials':'#085041','House Bills':'#0C447C',Travel:'#BA7517',Health:'#D85A30',Lifestyle:'#534AB7',Savings:'#0F6E56'};
+var CAT_COLORS = {'Daily Essentials':'#085041','House Bills':'#1A4A8A',Travel:'#7A4A10',Health:'#7A1A3A',Lifestyle:'#3A2A8A',Savings:'#085041'};
 var ROLES = ['Earning Member','Homemaker','Student','Child','Elder'];
 var CARD_BG = ['#D85A30','#993556','#085041','#534AB7','#534AB7'];
 var PROFILE_GENDER_OPTIONS=[
@@ -84,52 +112,65 @@ var WELLNESS_GOAL_CATEGORY_OPTIONS=[
 ];
 
 // ─────────────────────────────────────────────────────────────────
-// THEME TOKENS — Warm Cream (Light) + Warm Dark
-// Matches Claude Design redesign spec.
+// THEME TOKENS — Olive Grove (Light + Dark)
+// Source of truth: _design/all-screens.jsx → PALETTES.{light,dark}.
+// Canonical keys match the design (bg, surface, surfaceElevated, primary,
+// primaryLight, primaryDeep, accent, accentLight, text, textSecondary,
+// muted, border, danger). Legacy keys (background, card, primaryOn,
+// warning, success, overlay, navBar*, statusBar) are kept as aliases /
+// derivations so existing AppCore consumers keep working.
 // ─────────────────────────────────────────────────────────────────
 var LIGHT_THEME={
   mode:'light',
-  background:'#FAF8F5',
+  // Canonical (design)
+  bg:'#F7F3EA',
   surface:'#FFFFFF',
-  surfaceElevated:'#F3EFE9',
-  card:'#FFFFFF',
+  surfaceElevated:'#EFEADE',
+  primary:'#4A5A2C',
+  primaryLight:'rgba(74,90,44,0.12)',
+  primaryDeep:'#3A481F',
+  accent:'#A85436',
+  accentLight:'rgba(168,84,54,0.12)',
   text:'#1A1208',
   textSecondary:'#6B5E52',
   muted:'#A89D95',
-  primary:'#1C6B50',
-  primaryLight:'#E4F2EC',
-  primaryOn:'#FFFFFF',
-  accent:'#C4773B',
-  accentLight:'#FDF0E4',
-  border:'#EDE8E2',
+  border:'#E8E2D4',
   danger:'#C94040',
-  warning:'#C4773B',
-  success:'#1C6B50',
+  // Legacy aliases / derivations
+  background:'#F7F3EA',
+  card:'#FFFFFF',
+  primaryOn:'#FFFFFF',
+  warning:'#A85436',
+  success:'#4A5A2C',
   overlay:'rgba(0,0,0,0.4)',
-  navBarBg:'#FFFFFF',
-  navBarShadow:'rgba(28,107,80,0.18)',
+  navBarBg:'#F7F3EA',
+  navBarShadow:'rgba(74,90,44,0.18)',
   statusBar:'dark-content',
 };
 var DARK_THEME={
   mode:'dark',
-  background:'#1A1612',
-  surface:'#221D17',
-  surfaceElevated:'#2C261F',
-  card:'#221D17',
-  text:'#F5EFE6',
-  textSecondary:'#B8AC9F',
-  muted:'#7A6F65',
-  primary:'#3A9778',
-  primaryLight:'#1F3B33',
-  primaryOn:'#FFFFFF',
-  accent:'#E89A5C',
-  accentLight:'#3A2A1C',
-  border:'#3A3128',
-  danger:'#E26B6B',
-  warning:'#E89A5C',
-  success:'#3A9778',
+  // Canonical (design)
+  bg:'#161310',
+  surface:'#211D18',
+  surfaceElevated:'#2C2720',
+  primary:'#9DB066',
+  primaryLight:'rgba(157,176,102,0.16)',
+  primaryDeep:'#B8CC81',
+  accent:'#E08967',
+  accentLight:'rgba(224,137,103,0.16)',
+  text:'#F2EDE3',
+  textSecondary:'#A89D8B',
+  muted:'#6B5E52',
+  border:'#332D26',
+  danger:'#E26666',
+  // Legacy aliases / derivations
+  background:'#161310',
+  card:'#211D18',
+  primaryOn:'#1A1208',
+  warning:'#E08967',
+  success:'#9DB066',
   overlay:'rgba(0,0,0,0.6)',
-  navBarBg:'#221D17',
+  navBarBg:'#211D18',
   navBarShadow:'rgba(0,0,0,0.5)',
   statusBar:'light-content',
 };
@@ -195,9 +236,109 @@ function normWellness(rows){return(rows||[]).map(function(w){return Object.assig
 var LIMITS={
   finance:{amountMin:0.01,amountMax:1000000,descMax:100},
   meal:{descMax:200,allowedTypes:['breakfast','lunch','dinner']},
-  wellness:{waterMin:1,waterMax:20,screenMaxHours:24},
+  wellness:{waterMin:1,waterMax:20,screenMaxHours:24,waterTargetMinL:0.5,waterTargetMaxL:6,screenTargetMinH:1,screenTargetMaxH:12},
   goals:{nameMax:50},
 };
+
+// ─────────────────────────────────────────────────────────────────
+// PHASE 6: SCORING SYSTEM
+// Member scores, family = sum. Both daily and weekly views.
+// Daily caps documented per rule; NOT currently enforced (recordScore fires unconditionally).
+// If abuse surfaces, wrap recordScore() in a recordScoreCapped() helper that checks the per-day total.
+// ─────────────────────────────────────────────────────────────────
+var SCORE_RULES={
+  manual_tx:           {points:5,  dailyCap:25, label:'Logged a transaction'},
+  all_tx_confirmed:    {points:20, dailyCap:20, label:'Confirmed all pending'},
+  goal_contribution:   {points:10, dailyCap:20, label:'Contributed to a goal'},
+  meal_logged:         {points:10, dailyCap:30, label:'Logged a meal'},
+  protein_target_hit:  {points:25, dailyCap:25, label:'Hit your protein target'},
+  water_target_hit:    {points:15, dailyCap:15, label:'Hit your water target'},
+  screen_under_limit:  {points:15, dailyCap:15, label:'Screen time under limit'},
+  activity_logged:     {points:10, dailyCap:30, label:'Logged an activity'},
+  streak_3:            {points:10, dailyCap:50, label:'3-day streak'},
+  streak_7:            {points:25, dailyCap:75, label:'7-day streak'},
+  streak_30:           {points:100,dailyCap:200,label:'30-day streak'},
+  goal_half:           {points:50, dailyCap:100,label:'Goal at 50%'},
+  goal_complete:       {points:150,dailyCap:300,label:'Goal complete!'},
+};
+
+// ─────────────────────────────────────────────────────────────────
+// PHASE 6: PROTEIN GUIDE — Indian foods, fallback inline list
+// Used when the foods table is empty or unreachable. Real source = `foods` table.
+// ─────────────────────────────────────────────────────────────────
+var PROTEIN_GUIDE_FALLBACK=[
+  {name:'Paneer',          category:'Dairy & Eggs',  protein:18},
+  {name:'Greek Yogurt',    category:'Dairy & Eggs',  protein:10},
+  {name:'Curd / Dahi',     category:'Dairy & Eggs',  protein:11},
+  {name:'Egg (boiled)',    category:'Dairy & Eggs',  protein:13},
+  {name:'Egg whites',      category:'Dairy & Eggs',  protein:11},
+  {name:'Cottage cheese',  category:'Dairy & Eggs',  protein:18},
+  {name:'Milk (full fat)', category:'Dairy & Eggs',  protein:3},
+  {name:'Toor Dal (cooked)',     category:'Pulses & Lentils', protein:8},
+  {name:'Moong Dal (cooked)',    category:'Pulses & Lentils', protein:7},
+  {name:'Masoor Dal (cooked)',   category:'Pulses & Lentils', protein:9},
+  {name:'Urad Dal (cooked)',     category:'Pulses & Lentils', protein:8},
+  {name:'Chana Dal (cooked)',    category:'Pulses & Lentils', protein:8},
+  {name:'Sambar',                category:'Pulses & Lentils', protein:6},
+  {name:'Chickpeas / Chana',     category:'Legumes',  protein:19},
+  {name:'Rajma (cooked)',        category:'Legumes',  protein:9},
+  {name:'Black-eyed peas',       category:'Legumes',  protein:8},
+  {name:'Soya chunks (dry)',     category:'Legumes',  protein:52},
+  {name:'Soya chunks (cooked)',  category:'Legumes',  protein:14},
+  {name:'Tofu',                  category:'Legumes',  protein:8},
+  {name:'Hummus',                category:'Legumes',  protein:8},
+  {name:'Chicken breast',        category:'Meat & Fish', protein:31},
+  {name:'Chicken curry',         category:'Meat & Fish', protein:18},
+  {name:'Chicken tikka',         category:'Meat & Fish', protein:25},
+  {name:'Mutton',                category:'Meat & Fish', protein:26},
+  {name:'Fish (rohu)',           category:'Meat & Fish', protein:17},
+  {name:'Tuna',                  category:'Meat & Fish', protein:23},
+  {name:'Prawns',                category:'Meat & Fish', protein:24},
+  {name:'Almonds',               category:'Nuts & Seeds', protein:21},
+  {name:'Peanuts',               category:'Nuts & Seeds', protein:25},
+  {name:'Cashews',               category:'Nuts & Seeds', protein:18},
+  {name:'Walnuts',               category:'Nuts & Seeds', protein:15},
+  {name:'Pumpkin seeds',         category:'Nuts & Seeds', protein:30},
+  {name:'Chia seeds',            category:'Nuts & Seeds', protein:17},
+  {name:'Flax seeds',            category:'Nuts & Seeds', protein:18},
+  {name:'Roti (whole wheat)',    category:'Grains',    protein:8},
+  {name:'Brown rice (cooked)',   category:'Grains',    protein:3},
+  {name:'White rice (cooked)',   category:'Grains',    protein:2},
+  {name:'Oats (dry)',            category:'Grains',    protein:13},
+  {name:'Quinoa (cooked)',       category:'Grains',    protein:4},
+  {name:'Poha',                  category:'Grains',    protein:7},
+  {name:'Upma',                  category:'Grains',    protein:6},
+  {name:'Dosa (plain)',          category:'Grains',    protein:5},
+  {name:'Idli',                  category:'Grains',    protein:4},
+  {name:'Besan (gram flour)',    category:'Snacks & Misc', protein:22},
+  {name:'Chana (roasted)',       category:'Snacks & Misc', protein:19},
+  {name:'Sprouts (mixed)',       category:'Snacks & Misc', protein:9},
+  {name:'Peanut butter',         category:'Snacks & Misc', protein:25},
+  {name:'Protein bar',           category:'Snacks & Misc', protein:20},
+  {name:'Whey protein (1 scoop)',category:'Snacks & Misc', protein:80},
+];
+
+// ─────────────────────────────────────────────────────────────────
+// PHASE 6: CALENDAR ICON (replaces "July 17" emoji glyph)
+// Pure View-based implementation — no SVG/extra imports needed.
+// ─────────────────────────────────────────────────────────────────
+function CalendarIcon(props){
+  var size=props.size||20;
+  var color=props.color||'#1A1208';
+  return (
+    <View style={{width:size,height:size,alignItems:'center',justifyContent:'center'}}>
+      <View style={{position:'absolute',top:size*0.18,left:0,right:0,height:size*0.78,borderWidth:1.6,borderColor:color,borderRadius:Math.max(2,size*0.12),backgroundColor:'transparent'}}/>
+      <View style={{position:'absolute',top:size*0.30,left:size*0.10,right:size*0.10,height:size*0.10,backgroundColor:color,borderRadius:1}}/>
+      <View style={{position:'absolute',top:0,left:size*0.22,width:size*0.14,height:size*0.30,borderWidth:1.4,borderColor:color,borderRadius:Math.max(1,size*0.04)}}/>
+      <View style={{position:'absolute',top:0,right:size*0.22,width:size*0.14,height:size*0.30,borderWidth:1.4,borderColor:color,borderRadius:Math.max(1,size*0.04)}}/>
+      <View style={{position:'absolute',top:size*0.55,left:size*0.20,width:size*0.10,height:size*0.10,borderRadius:size*0.05,backgroundColor:color,opacity:0.7}}/>
+      <View style={{position:'absolute',top:size*0.55,left:size*0.45,width:size*0.10,height:size*0.10,borderRadius:size*0.05,backgroundColor:color,opacity:0.7}}/>
+      <View style={{position:'absolute',top:size*0.55,right:size*0.20,width:size*0.10,height:size*0.10,borderRadius:size*0.05,backgroundColor:color,opacity:0.7}}/>
+      <View style={{position:'absolute',top:size*0.75,left:size*0.20,width:size*0.10,height:size*0.10,borderRadius:size*0.05,backgroundColor:color,opacity:0.5}}/>
+      <View style={{position:'absolute',top:size*0.75,left:size*0.45,width:size*0.10,height:size*0.10,borderRadius:size*0.05,backgroundColor:color,opacity:0.5}}/>
+    </View>
+  );
+}
 
 function normalizeText(v){return(v||'').trim();}
 function getDisplayName(userRecord,fallbackEmail){
@@ -225,6 +366,43 @@ async function checkForInviteCode(){
     if(match&&match[1])return String(match[1]).toUpperCase();
   }catch(e){console.log('[INVITE LINK PARSE ERROR]',e);}
   return null;
+}
+
+// ─── INVITE-JOIN DIAGNOSTIC LOGGER (build #5) ────────────────────────────
+// Captures invite-join flow diagnostics to AsyncStorage so the user can share
+// them via the "Send debug logs" Share intent without needing adb. Safe by
+// design: never logs passwords, JWT contents, or token bytes — only UIDs,
+// emails (already in app context), booleans, and Supabase error messages.
+// Capped at 200 entries to prevent unbounded storage growth.
+async function diagLog(msg){
+  try{
+    var entry='['+new Date().toISOString()+'] [INVITE JOIN DIAG] '+msg;
+    console.log(entry);
+    var existing=await AsyncStorage.getItem('inviteJoinDiagLogs');
+    var arr=existing?JSON.parse(existing):[];
+    arr.push(entry);
+    if(arr.length>200)arr=arr.slice(-200);
+    await AsyncStorage.setItem('inviteJoinDiagLogs',JSON.stringify(arr));
+  }catch(e){
+    console.log('[INVITE JOIN DIAG] (storage failed)',e&&e.message);
+  }
+}
+
+// Shared by the "Send debug logs" buttons on AuthScreen, InviteJoinScreen, and SettingsScreen.
+// Uses the React Native Share intent; the user picks WhatsApp / email / copy from the system sheet.
+async function shareDiagLogs(){
+  try{
+    var raw=await AsyncStorage.getItem('inviteJoinDiagLogs');
+    var arr=raw?JSON.parse(raw):[];
+    var blob='Wellthy Fam — Invite-Join Diagnostic Logs\n'
+      +'Captured: '+new Date().toISOString()+'\n'
+      +'Entries: '+arr.length+'\n\n'
+      +(arr.join('\n')||'(no diagnostic logs captured yet)');
+    await Share.share({message:blob,title:'Wellthy Fam debug logs'});
+  }catch(e){
+    console.log('[DIAG SHARE ERROR]',e);
+    Alert.alert('Could not share logs',(e&&e.message)||'Unknown error');
+  }
 }
 function formatINRCurrency(n){
   return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(n||0));
@@ -277,7 +455,44 @@ function canModifyMemberData(isAdmin,members,userId,memberId){
 function isMemberAdmin(member){
   if(!member)return false;
   var roleValue=String(member.accessRole||member.access_role||'').toLowerCase();
-  return roleValue==='admin';
+  return roleValue==='admin'||roleValue==='co_admin';
+}
+// Phase A1: Two-tier permission model (PERMISSIONS_SPEC.md).
+// Three tiers: 'creator' (users.user_type==='primary'), 'co_admin' (family_members.access_role==='co_admin'),
+// 'member' (default). Legacy access_role==='admin' rows are treated as 'co_admin' for backwards compatibility.
+function getAccessTier(userType,accessRole){
+  if(userType==='primary')return 'creator';
+  var r=String(accessRole||'').toLowerCase();
+  if(r==='co_admin'||r==='admin')return 'co_admin';
+  return 'member';
+}
+function canTierModifyMember(tier,currentMemberId,targetMemberId){
+  if(tier==='creator'||tier==='co_admin')return true;
+  if(!targetMemberId||targetMemberId==='joint')return true; // joint/unscoped data is owner-less; permit
+  return targetMemberId===currentMemberId;
+}
+function canTierModifyFamilySettings(tier){
+  return tier==='creator'||tier==='co_admin';
+}
+// Phase A1: convenience hook that wraps the tier-aware helpers with current-user state from AppContext.
+// Components call: var perms=useFamilyPermissions(); if(!perms.canModifyMemberData(t.memberId))return;
+// or destructure: var{canModifyMemberData,canModifyFamilySettings,tier}=useFamilyPermissions();
+// The destructured names intentionally match PERMISSIONS_SPEC.md so component code reads naturally.
+function useFamilyPermissions(){
+  var ctx=useApp();
+  var userType=ctx&&ctx.userProfile&&ctx.userProfile.user_type;
+  var accessRole=ctx&&ctx.currentUserAccessRole;
+  var tier=getAccessTier(userType,accessRole);
+  var members=(ctx&&ctx.members)||[];
+  var userId=ctx&&ctx.userId;
+  var currentMember=members.find(function(m){return m.userId===userId;});
+  var currentMemberId=currentMember&&currentMember.id;
+  return{
+    tier:tier,
+    currentMemberId:currentMemberId,
+    canModifyMemberData:function(targetMemberId){return canTierModifyMember(tier,currentMemberId,targetMemberId);},
+    canModifyFamilySettings:function(){return canTierModifyFamilySettings(tier);},
+  };
 }
 function getMemberRoleDisplay(member){
   var accessLabel=isMemberAdmin(member)?'Family Admin':'Member';
@@ -305,6 +520,21 @@ function calcDayCompletion(familyId,date,transactions,meals,wellness){
     percent:Math.round((completed/5)*100),
     flags:{transaction:hasTx,breakfast:hasBreakfast,lunch:hasLunch,dinner:hasDinner,screen:hasScreen,meal:hasMeal,water:hasWater},
   };
+}
+// Phase 2.1.A: streak counter uses a 4-item rule — 3 meals + screen time.
+// Transactions are excluded (money entries are optional; not every member earns).
+// Water is target-based, tracked separately. Display "X/5" capture rates and
+// daily-percent rendering still use calcDayCompletion above; only the streak
+// loops on Home and Reflect call this helper.
+function calcStreakCompletion(familyId,date,meals,wellness){
+  var iso=isoDate(date);
+  var dayMeals=(meals||[]).filter(function(m){return m.family_id===familyId && isoDate(m.date)===iso;});
+  function mealOf(type){return dayMeals.some(function(m){return String(m.mealTime||m.meal_time||'').toLowerCase()===type;});}
+  if(!mealOf('breakfast'))return false;
+  if(!mealOf('lunch'))return false;
+  if(!mealOf('dinner'))return false;
+  var dayWell=(wellness||[]).filter(function(w){return w.family_id===familyId && w.date===iso;});
+  return dayWell.some(function(w){return (w.screenHrs||0)>0 || (w.screen_hrs||0)>0;});
 }
 function getCompletionColor(percent){
   if(percent>=100)return '#0F6E56';
@@ -365,6 +595,14 @@ function buildActivityMessage(activity){
     return actor+' logged '+(data.meal_time||'meal');
   }
   if(activity.activity_type==='wellness')return actor+' logged '+(data.log_type==='screen_time'?'screen time':'water');
+  if(activity.activity_type==='activity_logged'){
+    var typeName=String(data.activity_type||'activity').toLowerCase();
+    var dur=Number(data.duration_minutes)||0;
+    var who=data.member_name&&data.member_name!==actor?(data.member_name+' '):'';
+    var base=actor+(who?(' logged '+who):' logged ')+'a '+dur+' min '+typeName;
+    if(data.note)base+=' · '+data.note;
+    return base;
+  }
   if(activity.activity_type==='goal'){
     if(data.action==='created')return actor+' created goal: '+(data.goal_name||'Goal');
     if(data.action==='updated')return actor+' updated goal progress for '+(data.goal_name||'goal');
@@ -484,7 +722,10 @@ function useThemeColors(){
   return getThemeColors();
 }
 
-function Pill({label}){
+// Legacy category-color pill (looks up CATS[label]). The design's general
+// Pill atom is defined below in DESIGN ATOMS. This stays for the existing
+// transaction/category UI until those screens are redesigned.
+function CategoryPill({label}){
   var c=CATS[label]||CATS.Uncat;
   var theme=useThemeColors();
   return<View style={[z.pill,{backgroundColor:c.bg,borderWidth:0.5,borderColor:theme.border}]}><Text style={[z.pillTx,{color:c.text}]}>{label}</Text></View>;
@@ -507,22 +748,24 @@ function Inp({label,value,onChangeText,secure,placeholder,keyboardType,multiline
   </View>);
 }
 
-function DateField({label,value,onChange,minimumDate,maximumDate}){
+function DateField({label,value,onChange,minimumDate,maximumDate,placeholder,defaultPickerDate}){
   var[show,setShow]=useState(false);
   var theme=useThemeColors();
   function handleChange(event,selectedDate){
     if(Platform.OS==='android')setShow(false);
     if(selectedDate)onChange(selectedDate);
   }
+  var hasValue=!!value;
+  var pickerInitial=value||defaultPickerDate||new Date();
   return(<View style={{marginBottom:12}}>
     <Text style={[z.inpLabel,{color:theme.textSecondary}]}>{label||'Date'}</Text>
     <TouchableOpacity style={[z.inp,z.dateBtn,{backgroundColor:theme.surface,borderColor:theme.border}]} onPress={function(){setShow(true);}}>
-      <Text style={[z.dateBtnTx,{color:theme.text}]}>{displayDate(value)}</Text>
-      <Text style={[z.cap,{color:theme.muted}]}>Change</Text>
+      <Text style={[z.dateBtnTx,{color:hasValue?theme.text:theme.muted}]}>{hasValue?displayDate(value):(placeholder||'Tap to select')}</Text>
+      <Text style={[z.cap,{color:theme.muted}]}>{hasValue?'Change':'Select'}</Text>
     </TouchableOpacity>
     {Platform.OS==='web'&&<Text style={[z.cap,{marginTop:6,color:theme.muted}]}>Date picker is not supported on web preview. Use mobile app for calendar picker.</Text>}
-    {show&&Platform.OS!=='web'&&<DateTimePicker value={value||new Date()} mode="date" display={Platform.OS==='ios'?'spinner':'default'} minimumDate={minimumDate||undefined} maximumDate={maximumDate||new Date()} onChange={handleChange}/>}
-    {show&&Platform.OS==='ios'&&<TouchableOpacity style={[z.bSec,{marginTop:8,borderColor:theme.primary}]} onPress={function(){setShow(false);}}><Text style={[z.bSecT,{color:theme.primary}]}>Done</Text></TouchableOpacity>}
+    {show&&Platform.OS!=='web'&&<DateTimePicker value={pickerInitial} mode="date" display={Platform.OS==='ios'?'spinner':'default'} minimumDate={minimumDate||undefined} maximumDate={maximumDate||new Date()} onChange={handleChange}/>}
+    {show&&Platform.OS==='ios'&&<View style={{marginTop:8}}><SecondaryButton full onPress={function(){setShow(false);}}>Done</SecondaryButton></View>}
   </View>);
 }
 
@@ -536,23 +779,419 @@ function SelectField({label,value,onChange,options,placeholder,disabled}){
       <Text style={[z.dateBtnTx,{color:theme.text},!selected&&{color:theme.muted}]}>{selected?selected.label:(placeholder||'Select')}</Text>
       <Text style={[z.cap,{color:theme.muted}]}>▾</Text>
     </TouchableOpacity>
-    {open&&<Modal visible={true} transparent animationType="fade"><View style={[z.modalWrap,{justifyContent:'center',backgroundColor:theme.overlay}]}><View style={[z.modal,{margin:20,maxHeight:420,backgroundColor:theme.card}]}>
-      <View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}> 
-        <Text style={[z.h1,{color:theme.text}]}>{label||'Select'}</Text>
-        <TouchableOpacity onPress={function(){setOpen(false);}}><Text style={[z.bSecT,{color:theme.primary}]}>Close</Text></TouchableOpacity>
+    <ModalSheet visible={open} title={label||'Select'} onClose={function(){setOpen(false);}}>
+      {(options||[]).map(function(opt){
+        var sel=opt.value===value;
+        return <TouchableOpacity key={String(opt.value)} onPress={function(){onChange&&onChange(opt.value);setOpen(false);}} style={{
+          flexDirection:'row',justifyContent:'space-between',alignItems:'center',
+          paddingVertical:12,paddingHorizontal:14,marginBottom:6,
+          backgroundColor:sel?theme.primaryLight:theme.surface,
+          borderRadius:14,
+          borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,
+        }}>
+          <Text style={{fontFamily:sel?FF.sansSemi:FF.sans,fontSize:14,color:sel?theme.primary:theme.text}}>{opt.label}</Text>
+          {sel?<Text style={{fontFamily:FF.sansBold,fontSize:14,color:theme.primary}}>✓</Text>:null}
+        </TouchableOpacity>;
+      })}
+    </ModalSheet>
+  </View>;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DESIGN ATOMS — Olive Grove
+// Source: _design/all-screens.jsx atoms section.
+// RN translations of the design's web atoms. Use these on redesigned
+// screens; legacy primitives (Bar, CategoryPill) stay until consumers
+// are migrated.
+// ═══════════════════════════════════════════════════════════════
+
+function Caps({children,color,size,ls,style}){
+  var theme=useThemeColors();
+  return <Text style={[{
+    fontFamily:FF.sansBold,fontWeight:'700',
+    fontSize:size||10,
+    letterSpacing:ls!=null?ls:0.8,
+    textTransform:'uppercase',
+    color:color||theme.muted,
+  },style]}>{children}</Text>;
+}
+
+function Hero({label,value,suffix,prefix,size,color,accent}){
+  var theme=useThemeColors();
+  var fs=size||42;
+  var fg=accent||color||theme.text;
+  return <View>
+    <Caps>{label}</Caps>
+    <View style={{flexDirection:'row',alignItems:'baseline',marginTop:6}}>
+      {prefix?<Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:fs*0.5,color:fg,opacity:0.85}}>{prefix}</Text>:null}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:fs,letterSpacing:-1.5,color:fg,lineHeight:fs}}>{value}</Text>
+      {suffix?<Text style={{fontFamily:FF.sans,fontWeight:'500',fontSize:fs*0.36,color:theme.textSecondary,marginLeft:4}}>{suffix}</Text>:null}
+    </View>
+  </View>;
+}
+
+function Block({children,bg,style,padding}){
+  var theme=useThemeColors();
+  var resolvedBg=bg!==undefined?bg:theme.surface;
+  var pad=padding!=null?padding:18;
+  var borderProps=resolvedBg===theme.surface
+    ?{borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}
+    :null;
+  return <View style={[{backgroundColor:resolvedBg,borderRadius:24,padding:pad},borderProps,style]}>{children}</View>;
+}
+
+function Pill({bg,fg,children,style}){
+  return <View style={[{
+    flexDirection:'row',alignItems:'center',alignSelf:'flex-start',
+    paddingVertical:4,paddingHorizontal:10,borderRadius:9999,
+    backgroundColor:bg,
+  },style]}>
+    <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:11,color:fg}}>{children}</Text>
+  </View>;
+}
+
+function Avatar({name,color,size}){
+  var s=size||28;
+  var initials=(name||'').split(' ').filter(Boolean).map(function(p){return p.charAt(0);}).slice(0,2).join('').toUpperCase();
+  return <View style={{
+    width:s,height:s,borderRadius:9999,backgroundColor:color,
+    alignItems:'center',justifyContent:'center',
+  }}>
+    <Text style={{fontFamily:FF.sansBold,fontWeight:'700',color:'#fff',fontSize:s*0.4}}>{initials}</Text>
+  </View>;
+}
+
+function Progress({value,color,track}){
+  var theme=useThemeColors();
+  var pct=Math.min(100,Math.max(0,value||0));
+  return <View style={{height:6,backgroundColor:track||theme.surfaceElevated,borderRadius:3,overflow:'hidden'}}>
+    <View style={{height:'100%',width:pct+'%',backgroundColor:color||theme.primary,borderRadius:3}}/>
+  </View>;
+}
+
+function PrimaryButton({children,full,accent,ghost,onPress,disabled,style}){
+  var theme=useThemeColors();
+  var bg,fg;
+  if(ghost){bg=theme.surfaceElevated;fg=theme.textSecondary;}
+  else if(accent){bg=theme.accent;fg='#fff';}
+  else{bg=theme.primary;fg='#fff';}
+  return <TouchableOpacity disabled={disabled} onPress={onPress} activeOpacity={0.8} style={[{
+    height:48,borderRadius:12,paddingHorizontal:22,
+    alignItems:'center',justifyContent:'center',
+    backgroundColor:bg,opacity:disabled?0.5:1,
+    alignSelf:full?'stretch':'flex-start',
+  },style]}>
+    <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:fg,letterSpacing:0.1}}>{children}</Text>
+  </TouchableOpacity>;
+}
+
+function SecondaryButton({children,full,onPress,disabled,style}){
+  var theme=useThemeColors();
+  return <TouchableOpacity disabled={disabled} onPress={onPress} activeOpacity={0.8} style={[{
+    height:48,borderRadius:12,paddingHorizontal:22,
+    alignItems:'center',justifyContent:'center',
+    borderWidth:1.5,borderColor:theme.primary,backgroundColor:'transparent',
+    opacity:disabled?0.5:1,
+    alignSelf:full?'stretch':'flex-start',
+  },style]}>
+    <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.primary}}>{children}</Text>
+  </TouchableOpacity>;
+}
+
+function NavBar({title,leading,trailing,serif}){
+  var theme=useThemeColors();
+  return <View style={{
+    paddingTop:8,paddingBottom:12,paddingHorizontal:16,
+    flexDirection:'row',alignItems:'center',
+    backgroundColor:theme.bg,
+    borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border,
+  }}>
+    <View style={{width:44}}>{leading}</View>
+    <View style={{flex:1,alignItems:'center'}}>
+      <Text numberOfLines={1} style={{
+        fontFamily:serif?FF.serif:FF.sansBold,
+        fontWeight:serif?'400':'700',
+        fontSize:serif?22:17,
+        letterSpacing:serif?-0.4:-0.3,
+        color:theme.text,
+      }}>{title}</Text>
+    </View>
+    <View style={{width:44,alignItems:'flex-end'}}>{trailing}</View>
+  </View>;
+}
+
+function TabIcon({name,color,size,active}){
+  var s=size||20;
+  var sw=active?1.85:1.5;
+  var p={width:s,height:s,viewBox:'0 0 24 24',fill:'none',stroke:color,strokeWidth:sw,strokeLinecap:'round',strokeLinejoin:'round'};
+  if(name==='home')return <Svg {...p}><Path d="M4 11l8-7 8 7"/><Path d="M6 10v9h12v-9"/><Path d="M10 19v-5h4v5"/></Svg>;
+  if(name==='finance')return <Svg {...p}><Path d="M5 9c2-3 5-3 7 0s5 3 7 0"/><Path d="M5 15c2-3 5-3 7 0s5 3 7 0"/></Svg>;
+  if(name==='family')return <Svg {...p}><Path d="M12 20s-7-4.5-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.5-7 10-7 10z"/></Svg>;
+  if(name==='wellness')return <Svg {...p}><Path d="M12 4c-3 4-5 7-5 10a5 5 0 0010 0c0-3-2-6-5-10z"/></Svg>;
+  if(name==='reflect')return <Svg {...p}><Circle cx="12" cy="12" r="8"/><Path d="M12 4a8 8 0 010 16"/></Svg>;
+  return null;
+}
+
+function TabBar({active,onChange}){
+  var theme=useThemeColors();
+  var insets=useSafeAreaInsets();
+  var tabs=[
+    {id:'home',label:'Home'},
+    {id:'finance',label:'Finance'},
+    {id:'family',label:'Family'},
+    {id:'wellness',label:'Wellness'},
+    {id:'reflect',label:'Reflect'},
+  ];
+  return <View style={{
+    flexDirection:'row',
+    backgroundColor:theme.surface,
+    borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.border,
+    paddingTop:8,paddingBottom:Math.max(insets.bottom,18),paddingHorizontal:8,
+    gap:4,
+  }}>
+    {tabs.map(function(t){
+      var a=active===t.id;
+      return <TouchableOpacity key={t.id} onPress={function(){onChange&&onChange(t.id);}} activeOpacity={0.7} style={{flex:1,alignItems:'center',paddingVertical:4,position:'relative'}}>
+        {a?<View style={{position:'absolute',top:-8,width:22,height:2,backgroundColor:theme.accent,borderRadius:2}}/>:null}
+        <View style={{
+          width:44,height:28,borderRadius:9999,
+          alignItems:'center',justifyContent:'center',
+          backgroundColor:a?theme.primaryLight:'transparent',
+        }}>
+          <TabIcon name={t.id} color={a?theme.primary:theme.muted} active={a}/>
+        </View>
+        <Text style={{
+          fontFamily:a?FF.sansBold:FF.sansMed,
+          fontSize:10,color:a?theme.text:theme.muted,
+          marginTop:3,letterSpacing:0.2,
+        }}>{t.label}</Text>
+      </TouchableOpacity>;
+    })}
+  </View>;
+}
+
+function ModalSheet({visible,title,onClose,children,scroll}){
+  var theme=useThemeColors();
+  // scroll defaults to true. Set scroll={false} for modals that own their scrolling
+  // (e.g. comments lists with reverse layouts) or whose body is a single fixed block.
+  var Body=scroll===false?View:ScrollView;
+  var bodyProps=scroll===false?null:{showsVerticalScrollIndicator:false,keyboardShouldPersistTaps:'handled'};
+  return <Modal visible={!!visible} transparent animationType="slide" onRequestClose={onClose}>
+    <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1,backgroundColor:'rgba(0,0,0,0.4)',justifyContent:'flex-end'}}>
+      <SwipeDownDismiss onDismiss={onClose}>
+        <View style={{
+          backgroundColor:theme.bg,
+          borderTopLeftRadius:28,borderTopRightRadius:28,
+          paddingHorizontal:20,paddingTop:12,paddingBottom:24,maxHeight:'92%',
+        }}>
+          <View style={{width:36,height:4,borderRadius:2,backgroundColor:theme.muted,alignSelf:'center',marginBottom:16}}/>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+            <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:22,letterSpacing:-0.4,color:theme.text}}>{title||''}</Text>
+            <TouchableOpacity onPress={onClose} style={{
+              width:32,height:32,borderRadius:9999,
+              backgroundColor:theme.surfaceElevated,
+              alignItems:'center',justifyContent:'center',
+            }}>
+              <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:16,color:theme.textSecondary}}>×</Text>
+            </TouchableOpacity>
+          </View>
+          <Body {...(bodyProps||{})}>{children}</Body>
+        </View>
+      </SwipeDownDismiss>
+    </KeyboardAvoidingView>
+  </Modal>;
+}
+
+function MemberStatChip({label,value}){
+  var theme=useThemeColors();
+  return <View style={{
+    backgroundColor:theme.surfaceElevated,
+    paddingHorizontal:8,paddingVertical:3,
+    borderRadius:9999,flexDirection:'row',
+  }}>
+    <Text style={{fontFamily:FF.sans,fontSize:10.5,color:theme.muted}}>{label} </Text>
+    <Text style={{fontFamily:FF.sansBold,fontSize:10.5,color:theme.text}}>{value}</Text>
+  </View>;
+}
+
+function MemberStreakRing({member,onPress}){
+  var theme=useThemeColors();
+  var r=26;
+  var c=2*Math.PI*r;
+  var streak=Number(member.streak)||0;
+  var best=Math.max(Number(member.best)||1,1);
+  var pct=Math.min(100,(streak/best)*100);
+  var dashOffset=c-(c*pct)/100;
+  return <Pressable onPress={onPress} style={function(state){return {
+    backgroundColor:theme.surface,
+    borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,
+    borderRadius:20,padding:14,marginBottom:10,
+    opacity:state.pressed?0.7:1,
+  };}}>
+    <View style={{flexDirection:'row',alignItems:'center'}}>
+      <View style={{width:64,height:64,marginRight:12}}>
+        <Svg width="64" height="64" viewBox="0 0 64 64">
+          <Circle cx="32" cy="32" r={r} fill="none" stroke={theme.surfaceElevated} strokeWidth="5"/>
+          <Circle cx="32" cy="32" r={r} fill="none" stroke={theme.accent} strokeWidth="5" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={dashOffset} transform="rotate(-90 32 32)"/>
+        </Svg>
+        <View style={{position:'absolute',width:64,height:64,alignItems:'center',justifyContent:'center'}}>
+          <Text style={{fontFamily:FF.sansBold,fontSize:18,color:theme.text,letterSpacing:-0.5,lineHeight:20}}>{streak}</Text>
+          <Text style={{fontFamily:FF.sansBold,fontSize:7.5,color:theme.muted,letterSpacing:0.6,textTransform:'uppercase',marginTop:1}}>Days</Text>
+        </View>
       </View>
-      <ScrollView>
-        {(options||[]).map(function(opt){var sel=opt.value===value;return <TouchableOpacity key={String(opt.value)} style={[z.pickRow,{backgroundColor:theme.surface,borderColor:theme.border},sel&&z.pickRowSel]} onPress={function(){onChange&&onChange(opt.value);setOpen(false);}}>
-          <Text style={[z.body,{color:theme.text},sel&&{fontWeight:'600',color:theme.primary}]}>{opt.label}</Text>
-          {sel&&<Text style={[z.linkTx,{color:theme.primary}]}>✓</Text>}
-        </TouchableOpacity>;})}
-      </ScrollView>
-    </View></View></Modal>}
+      <View style={{flex:1,minWidth:0}}>
+        <View style={{flexDirection:'row',alignItems:'center'}}>
+          <View style={{
+            width:26,height:26,borderRadius:13,
+            backgroundColor:theme.primaryLight,
+            alignItems:'center',justifyContent:'center',marginRight:8,
+          }}>
+            <Text style={{fontFamily:FF.sansBold,fontSize:10.5,color:theme.primary,letterSpacing:-0.2}}>{member.initials}</Text>
+          </View>
+          <View style={{flex:1}}>
+            <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:14,color:theme.text,letterSpacing:-0.2}}>{member.name}</Text>
+              {member.isYou?<View style={{
+                backgroundColor:theme.primaryLight,
+                paddingHorizontal:6,paddingVertical:2,borderRadius:9999,marginLeft:6,
+              }}>
+                <Text style={{fontFamily:FF.sansBold,fontSize:8.5,color:theme.primary,letterSpacing:0.6,textTransform:'uppercase'}}>You</Text>
+              </View>:null}
+            </View>
+            <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.textSecondary,marginTop:1}}>{member.role}</Text>
+          </View>
+        </View>
+        <View style={{flexDirection:'row',marginTop:10,flexWrap:'wrap',gap:5}}>
+          <MemberStatChip label="Score" value={member.score}/>
+          <MemberStatChip label="Best" value={(Number(member.best)||0)+'d'}/>
+          <MemberStatChip label="Hit" value={member.hit}/>
+        </View>
+      </View>
+    </View>
+  </Pressable>;
+}
+
+function InfoIcon({title,body,color,style}){
+  var theme=useThemeColors();
+  var[open,setOpen]=useState(false);
+  var idle=color||theme.muted;
+  return <View style={style||null}>
+    <Pressable onPress={function(){setOpen(true);}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
+      {function(state){
+        var c=state.pressed?theme.primary:idle;
+        return <View style={{
+          width:16,height:16,borderRadius:9999,
+          borderWidth:1.2,borderColor:c,
+          alignItems:'center',justifyContent:'center',
+        }}>
+          <Text style={{fontFamily:FF.serifItalic,fontSize:11,lineHeight:13,color:c,marginTop:-1}}>i</Text>
+        </View>;
+      }}
+    </Pressable>
+    <ModalSheet visible={open} title={title} onClose={function(){setOpen(false);}}>
+      <Text style={{fontFamily:FF.sans,fontSize:14,lineHeight:21,color:theme.text,marginBottom:18}}>{body}</Text>
+      <PrimaryButton full onPress={function(){setOpen(false);}}>Got it</PrimaryButton>
+    </ModalSheet>
+  </View>;
+}
+
+// Phase 2.3 step 2: per-member donut ring used inside Protein Today + Time on Screens heroes.
+// Spec: _design/PROTEIN_RING_SPEC.md. Variant-driven so the same atom serves both.
+function FamilyMemberRing({member,variant,ringDiameter,ringStroke,onPress,aboveLabel}){
+  var theme=useThemeColors();
+  var d=ringDiameter||56;
+  var sw=ringStroke||(d>=52?4:3.5);
+  var cx=d/2;
+  var r=cx-sw/2-2;
+  var c=2*Math.PI*r;
+  var current=Number(member.current)||0;
+  var target=Math.max(Number(member.target)||1,1);
+  var pct=Math.min(100,(current/target)*100);
+  var dashOffset=c-(c*pct)/100;
+  var isScreentime=variant==='screentime';
+  var arcColor=isScreentime?(current>target?theme.warning:'#fff'):'#fff';
+  var trackColor='rgba(255,255,255,0.18)';
+  var initSize=d>=52?13:(d>=48?12:11);
+  var unitWord=isScreentime?'hours':'grams';
+  var a11yLabel=(member.name||'')+': '+current+' of '+target+' '+unitWord+', '+Math.round(pct)+' percent';
+  var aboveBlock=aboveLabel?<View style={{marginBottom:4,maxWidth:d+8,alignItems:'center'}}>{aboveLabel}</View>:null;
+  var ringSvg=<View style={{width:d,height:d}}>
+    <Svg width={d} height={d} viewBox={'0 0 '+d+' '+d}>
+      <Circle cx={cx} cy={cx} r={r} fill="none" stroke={trackColor} strokeWidth={sw}/>
+      <Circle cx={cx} cy={cx} r={r} fill="none" stroke={arcColor} strokeWidth={sw} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={dashOffset} transform={'rotate(-90 '+cx+' '+cx+')'}/>
+    </Svg>
+    <View style={{position:'absolute',width:d,height:d,alignItems:'center',justifyContent:'center'}}>
+      <Text style={{fontFamily:FF.sansBold,fontSize:initSize,color:'#fff',letterSpacing:-0.2}}>{member.initials||'?'}</Text>
+    </View>
+  </View>;
+  var nameLabel=<Text numberOfLines={1} ellipsizeMode="tail" style={{
+    fontFamily:FF.sansSemi,fontSize:11,
+    color:'rgba(255,255,255,0.78)',
+    marginTop:6,maxWidth:d+8,textAlign:'center',
+  }}>{member.name||'?'}</Text>;
+  if(onPress){
+    return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={a11yLabel} style={function(state){return{alignItems:'center',flex:1,opacity:state.pressed?0.7:1};}}>
+      {aboveBlock}
+      {ringSvg}
+      {nameLabel}
+    </Pressable>;
+  }
+  return <View accessibilityLabel={a11yLabel} style={{alignItems:'center',flex:1}}>
+    {aboveBlock}
+    {ringSvg}
+    {nameLabel}
+  </View>;
+}
+
+// Vertical bar — inverse semantics of FamilyMemberRing (fill grows toward a CAP, not toward a goal).
+// Used by Time on Screens hero where the daily target is a ceiling, not a target.
+// Same prop shape as FamilyMemberRing so callsites swap with a one-line change.
+function FamilyMemberBar({member,ringDiameter,ringStroke,onPress,aboveLabel}){
+  var theme=useThemeColors();
+  var d=ringDiameter||56;
+  var initSize=d>=52?13:(d>=48?12:11);
+  var current=Number(member.current)||0;
+  var target=Math.max(Number(member.target)||1,1);
+  var pct=Math.min(100,(current/target)*100);
+  var overLimit=current>target;
+  var trackColor='rgba(255,255,255,0.18)';
+  var fillColor=overLimit?theme.warning:'#fff';
+  var barWidth=Math.max(20,Math.round(d*0.45));
+  var initialsZone=18; // top zone reserved so the initials stay readable as fill rises
+  var maxFillH=d-initialsZone;
+  var fillH=(pct/100)*maxFillH;
+  var a11yLabel=(member.name||'')+': '+current+' of '+target+' hours, '+Math.round(pct)+' percent of cap'+(overLimit?' (over)':'');
+  var aboveBlock=aboveLabel?<View style={{marginBottom:4,maxWidth:d+8,alignItems:'center'}}>{aboveLabel}</View>:null;
+  var barViz=<View style={{width:d,height:d,alignItems:'center'}}>
+    <View style={{width:barWidth,height:d,borderRadius:6,backgroundColor:trackColor,overflow:'hidden',justifyContent:'flex-end'}}>
+      <View style={{height:fillH,backgroundColor:fillColor}}/>
+    </View>
+    <View style={{position:'absolute',top:3,left:0,right:0,alignItems:'center'}}>
+      <Text style={{fontFamily:FF.sansBold,fontSize:initSize,color:'#fff',letterSpacing:-0.2}}>{member.initials||'?'}</Text>
+    </View>
+  </View>;
+  var nameLabel=<Text numberOfLines={1} ellipsizeMode="tail" style={{
+    fontFamily:FF.sansSemi,fontSize:11,
+    color:'rgba(255,255,255,0.78)',
+    marginTop:6,maxWidth:d+8,textAlign:'center',
+  }}>{member.name||'?'}</Text>;
+  if(onPress){
+    return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={a11yLabel} style={function(state){return{alignItems:'center',flex:1,opacity:state.pressed?0.7:1};}}>
+      {aboveBlock}
+      {barViz}
+      {nameLabel}
+    </Pressable>;
+  }
+  return <View accessibilityLabel={a11yLabel} style={{alignItems:'center',flex:1}}>
+    {aboveBlock}
+    {barViz}
+    {nameLabel}
   </View>;
 }
 
 function DayDetailModal({visible,date,onClose,onChangeDate,onEditTransaction,onEditMeal,onAddTransaction,onAddMeal,onAddWater,onAddScreen,onAddGoal}){
-  var{transactions,meals,wellness,goals,sharedGoals,sharedGoalContributions,members,waterTrackingEnabled}=useApp();
+  var theme=useThemeColors();
+  var{transactions,meals,wellness,goals,sharedGoals,sharedGoalContributions,waterTrackingEnabled}=useApp();
   var focusDate=toDate(date||new Date());
   var dayIso=isoDate(focusDate);
   var dayTx=(transactions||[]).filter(function(t){return isoDate(t.date)===dayIso;});
@@ -564,76 +1203,92 @@ function DayDetailModal({visible,date,onClose,onChangeDate,onEditTransaction,onE
   var dayWell=(wellness||[]).filter(function(w){return w.date===dayIso;});
   var dayContribs=(sharedGoalContributions||[]).filter(function(c){return isoDate(c.contributed_at||c.created_at)===dayIso;});
   var hasData=dayTx.length>0||dayMeals.length>0||dayWell.length>0||dayContribs.length>0;
-  var header=focusDate.toLocaleDateString('en-IN',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  var titleStr=focusDate.toLocaleDateString('en-IN',{weekday:'short',month:'short',day:'numeric'});
 
-  function section(title,children){
-    return <View style={[z.card,{marginBottom:8}]}> 
-      <Text style={[z.txM,{marginBottom:6}]}>{title}</Text>
-      {children}
-    </View>;
-  }
-
-  return <Modal visible={visible} transparent animationType="slide"><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.modalWrap}><View style={z.modal}><ScrollView>
-    <View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}> 
-      <TouchableOpacity onPress={function(){onChangeDate&&onChangeDate(addDays(focusDate,-1));}}><Text style={z.linkTx}>‹ Prev</Text></TouchableOpacity>
-      <TouchableOpacity style={z.bSec} onPress={function(){onChangeDate&&onChangeDate(new Date());}}><Text style={z.bSecT}>Today</Text></TouchableOpacity>
-      <TouchableOpacity onPress={function(){onChangeDate&&onChangeDate(addDays(focusDate,1));}}><Text style={z.linkTx}>Next ›</Text></TouchableOpacity>
-    </View>
-    <View style={[z.row,{justifyContent:'space-between',marginBottom:10}]}> 
-      <View style={{flex:1,paddingRight:10}}><Text style={z.h1}>This day</Text><Text style={z.cap}>{header}</Text></View>
-      <TouchableOpacity onPress={onClose}><Text style={z.bSecT}>Back</Text></TouchableOpacity>
+  return <ModalSheet visible={visible} title={titleStr} onClose={onClose}>
+    {/* Date stepper */}
+    <View style={{flexDirection:'row',gap:8,marginBottom:14}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={function(){onChangeDate&&onChangeDate(addDays(focusDate,-1));}}>‹ Prev</SecondaryButton></View>
+      <View style={{flex:1}}><SecondaryButton full onPress={function(){onChangeDate&&onChangeDate(new Date());}}>Today</SecondaryButton></View>
+      <View style={{flex:1}}><SecondaryButton full onPress={function(){onChangeDate&&onChangeDate(addDays(focusDate,1));}}>Next ›</SecondaryButton></View>
     </View>
 
-    {!hasData&&section('No logs for this day',<View>
-      <Text style={[z.cap,{marginBottom:10}]}>No logs for this day.</Text>
-      <TouchableOpacity style={z.bPri} onPress={function(){onAddTransaction&&onAddTransaction(focusDate);}}><Text style={z.bPriT}>+ Capture entry</Text></TouchableOpacity>
-    </View>)}
+    {!hasData&&<Block style={{padding:18,marginBottom:14,alignItems:'center'}}>
+      <Caps color={theme.muted} style={{marginBottom:10}}>No logs for this day</Caps>
+      <PrimaryButton onPress={function(){onAddTransaction&&onAddTransaction(focusDate);}}>+ Capture an entry</PrimaryButton>
+    </Block>}
 
     {hasData&&<View>
-      {section('Transactions',<View>
-        <Text style={z.cap}>Income: {incomeTx.length} · Expense: {expenseTx.length}</Text>
-        {incomeTx.concat(expenseTx).slice(0,20).map(function(t){return <TouchableOpacity key={t.id} style={z.pickRow} onPress={function(){if(onEditTransaction)onEditTransaction(t);else Alert.alert('Open Finance','Go to Finance tab to edit this transaction.');}}>
-          <View style={{flex:1}}><Text style={z.body}>{t.merchant}</Text><Text style={z.cap}>{t.memberName||'Joint'} · {t.category}</Text></View>
-          <Text style={z.fv}>₹{fmt(t.amount||0)}</Text>
-        </TouchableOpacity>;})}
-        {dayTx.length===0&&<Text style={z.cap}>No entries on this day.</Text>}
-      </View>)}
+      {/* Transactions */}
+      <Caps style={{marginBottom:8}}>Transactions · {dayTx.length}</Caps>
+      <Block style={{padding:14,marginBottom:12}}>
+        {dayTx.length===0?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No entries.</Text>:
+        incomeTx.concat(expenseTx).slice(0,20).map(function(t,i,arr){
+          var isLast=i===arr.length-1;
+          return <TouchableOpacity key={t.id} activeOpacity={0.7} onPress={function(){if(onEditTransaction)onEditTransaction(t);else Alert.alert('Open Finance','Go to Finance tab to edit this transaction.');}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:10,borderBottomWidth:isLast?0:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
+            <View style={{flex:1}}>
+              <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>{t.merchant}</Text>
+              <Caps color={theme.muted} style={{marginTop:2}}>{t.memberName||'Joint'} · {t.category}</Caps>
+            </View>
+            <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:t.category==='Income'?theme.primary:theme.text}}>{t.category==='Income'?'+':'−'}₹{fmt(Math.abs(Number(t.amount)||0))}</Text>
+          </TouchableOpacity>;
+        })}
+      </Block>
 
-      {section('Meals',<View>
-        {['breakfast','lunch','dinner','snack'].map(function(mt){var rows=mealsByType[mt]||[];return <View key={mt} style={{marginBottom:6}}>
-          <Text style={[z.cap,{textTransform:'capitalize'}]}>{mt} ({rows.length})</Text>
-          {rows.map(function(m){return <TouchableOpacity key={m.id} style={z.pickRow} onPress={function(){onEditMeal&&onEditMeal(m);}}>
-            <View style={{flex:1}}><Text style={z.body}>{m.items}</Text><Text style={z.cap}>{m.memberName||'Member'} · Protein {m.protein||0}g</Text></View>
-            <Text style={z.linkTx}>Edit</Text>
-          </TouchableOpacity>;})}
-        </View>;})}
-        {dayMeals.length===0&&<Text style={z.cap}>No meals on this day.</Text>}
-      </View>)}
+      {/* Meals */}
+      <Caps style={{marginBottom:8}}>Meals · {dayMeals.length}</Caps>
+      <Block style={{padding:14,marginBottom:12}}>
+        {dayMeals.length===0?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No meals on this day.</Text>:
+        ['breakfast','lunch','dinner','snack'].map(function(mt){
+          var rows=mealsByType[mt]||[];
+          if(rows.length===0)return null;
+          return <View key={mt} style={{marginBottom:8}}>
+            <Caps>{mt}</Caps>
+            {rows.map(function(m){return <TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){onEditMeal&&onEditMeal(m);}} style={{paddingVertical:6}}>
+              <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text}}>{m.items}</Text>
+              <Caps color={theme.muted} style={{marginTop:2}}>{m.memberName||'Member'} · {m.protein||0}g protein</Caps>
+            </TouchableOpacity>;})}
+          </View>;
+        })}
+      </Block>
 
-      {section('Wellness',<View>
-        {/* M10: tap a wellness row to open the appropriate logger for that member+date */}
-        {dayWell.map(function(w){return <TouchableOpacity key={w.id||((w.memberId||'m')+'_'+w.date)} activeOpacity={0.7} onPress={function(){haptic('light');if(w.screenHrs||w.screen_hrs){onAddScreen&&onAddScreen(toDate(w.date));}else if((w.water||0)>0){onAddWater&&onAddWater(toDate(w.date));}else{onAddScreen&&onAddScreen(toDate(w.date));}}} style={z.pickRow}><View style={{flex:1}}><Text style={z.body}>{w.memberName||'Member'}</Text><Text style={z.cap}>{waterTrackingEnabled?'Water: '+formatWaterFromLitres(w.water||0)+' \u00b7 ':''}Screen: {w.screenHrs||0}h</Text></View><Text style={z.linkTx}>Edit</Text></TouchableOpacity>;})}
-        {dayWell.length===0&&<Text style={z.cap}>No wellness logs.</Text>}
-      </View>)}
+      {/* Wellness */}
+      <Caps style={{marginBottom:8}}>Wellness · {dayWell.length}</Caps>
+      <Block style={{padding:14,marginBottom:12}}>
+        {dayWell.length===0?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No wellness logs.</Text>:
+        dayWell.map(function(w,i,arr){
+          var isLast=i===arr.length-1;
+          return <TouchableOpacity key={w.id||((w.memberId||'m')+'_'+w.date)} activeOpacity={0.7} onPress={function(){haptic('light');if(w.screenHrs||w.screen_hrs){onAddScreen&&onAddScreen(toDate(w.date));}else if((w.water||0)>0){onAddWater&&onAddWater(toDate(w.date));}else{onAddScreen&&onAddScreen(toDate(w.date));}}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:10,borderBottomWidth:isLast?0:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
+            <View style={{flex:1}}>
+              <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>{w.memberName||'Member'}</Text>
+              <Caps color={theme.muted} style={{marginTop:2}}>{waterTrackingEnabled?'Water: '+formatWaterFromLitres(w.water||0)+' · ':''}Screen: {w.screenHrs||0}h</Caps>
+            </View>
+            <Caps color={theme.primary}>Edit ›</Caps>
+          </TouchableOpacity>;
+        })}
+      </Block>
 
-      {section('Goals Progress',<View>
-        {(goals||[]).slice(0,5).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return <View key={g.id} style={[z.row,{justifyContent:'space-between',marginBottom:4}]}><Text style={z.cap}>{g.name}</Text><Text style={z.cap}>{pct}%</Text></View>;})}
-        {(sharedGoals||[]).slice(0,3).map(function(g){var pct=g.target_amount>0?Math.round((Number(g.current_amount||0)/Number(g.target_amount))*100):0;return <View key={g.id} style={[z.row,{justifyContent:'space-between',marginBottom:4}]}><Text style={z.cap}>Shared: {g.goal_name}</Text><Text style={z.cap}>{pct}%</Text></View>;})}
-        {dayContribs.length>0&&<Text style={z.cap}>Contributions today: {dayContribs.length}</Text>}
-        {((goals||[]).length===0&&(sharedGoals||[]).length===0)&&<Text style={z.cap}>No goals available.</Text>}
-      </View>)}
+      {/* Goals snapshot */}
+      {((goals||[]).length>0||(sharedGoals||[]).length>0||dayContribs.length>0)&&<View>
+        <Caps style={{marginBottom:8}}>Goals progress</Caps>
+        <Block style={{padding:14,marginBottom:12}}>
+          {(goals||[]).slice(0,5).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return <View key={g.id} style={{flexDirection:'row',justifyContent:'space-between',paddingVertical:4}}><Text style={{fontFamily:FF.sans,fontSize:13,color:theme.text,flex:1,marginRight:8}} numberOfLines={1}>{g.name}</Text><Caps color={theme.primary}>{pct}%</Caps></View>;})}
+          {(sharedGoals||[]).slice(0,3).map(function(g){var pct=g.target_amount>0?Math.round((Number(g.current_amount||0)/Number(g.target_amount))*100):0;return <View key={g.id} style={{flexDirection:'row',justifyContent:'space-between',paddingVertical:4}}><Text style={{fontFamily:FF.sans,fontSize:13,color:theme.text,flex:1,marginRight:8}} numberOfLines={1}>Shared: {g.goal_name}</Text><Caps color={theme.accent}>{pct}%</Caps></View>;})}
+          {dayContribs.length>0&&<Caps color={theme.muted} style={{marginTop:6}}>Contributions today: {dayContribs.length}</Caps>}
+        </Block>
+      </View>}
     </View>}
 
-    <View style={[z.row,{flexWrap:'wrap',gap:8,marginTop:2}]}> 
-      <TouchableOpacity style={[z.bPri,{flex:1,minWidth:120}]} onPress={function(){onAddTransaction&&onAddTransaction(focusDate);}}><Text style={z.bPriT}>+ Transaction</Text></TouchableOpacity>
-      <TouchableOpacity style={[z.bSec,{flex:1,minWidth:120}]} onPress={function(){onAddMeal&&onAddMeal(focusDate);}}><Text style={z.bSecT}>+ Meal</Text></TouchableOpacity>
-      {waterTrackingEnabled&&<TouchableOpacity style={[z.bSec,{flex:1,minWidth:120}]} onPress={function(){onAddWater&&onAddWater(focusDate);}}><Text style={z.bSecT}>+ Water</Text></TouchableOpacity>}
-      <TouchableOpacity style={[z.bSec,{flex:1,minWidth:120}]} onPress={function(){onAddScreen&&onAddScreen(focusDate);}}><Text style={z.bSecT}>+ Screen</Text></TouchableOpacity>
+    <View style={{flexDirection:'row',gap:8,marginTop:4}}>
+      <View style={{flex:1}}><PrimaryButton full onPress={function(){onAddTransaction&&onAddTransaction(focusDate);}}>+ Tx</PrimaryButton></View>
+      <View style={{flex:1}}><SecondaryButton full onPress={function(){onAddMeal&&onAddMeal(focusDate);}}>+ Meal</SecondaryButton></View>
+      <View style={{flex:1}}><SecondaryButton full onPress={function(){onAddScreen&&onAddScreen(focusDate);}}>+ Screen</SecondaryButton></View>
     </View>
-  </ScrollView></View></KeyboardAvoidingView></Modal>;
+  </ModalSheet>;
 }
 
 function UnifiedCalendarModal({visible,onClose,context,selectedDate,onSelectDate,onOpenDayDetail}){
+  var theme=useThemeColors();
   var{familyId,transactions,meals,wellness,recurringTransactions}=useApp();
   var[currentMonth,setCurrentMonth]=useState(startOfDay(selectedDate||new Date()));
   var[localSelected,setLocalSelected]=useState(selectedDate||new Date());
@@ -667,39 +1322,74 @@ function UnifiedCalendarModal({visible,onClose,context,selectedDate,onSelectDate
     return getCompletionColor(stats.completion.percent);
   }
 
-  return <Modal visible={visible} transparent animationType="slide"><View style={z.modalWrap}><View style={z.modal}>
-    <View style={[z.row,{justifyContent:'space-between',marginBottom:10}]}> 
-      <Text style={z.h1}>Calendar</Text>
-      <TouchableOpacity onPress={onClose}><Text style={z.bSecT}>Close</Text></TouchableOpacity>
+  var monthTitle=currentMonth.toLocaleString('en-IN',{month:'long',year:'numeric'});
+  return <ModalSheet visible={visible} title={monthTitle} onClose={onClose}>
+    {/* Month stepper */}
+    <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+      <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()-1,1));}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
+        <Caps color={theme.primary}>‹ Prev</Caps>
+      </TouchableOpacity>
+      <Caps color={theme.muted}>From {context==='finance'?'Finance':context==='wellness'?'Wellness':'Reflections'}</Caps>
+      <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()+1,1));}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
+        <Caps color={theme.primary}>Next ›</Caps>
+      </TouchableOpacity>
     </View>
-    <Text style={[z.cap,{marginBottom:10}]}>Opened from {context==='finance'?'Finance':context==='wellness'?'Wellness':'Insights'}</Text>
-    <View style={[z.row,{justifyContent:'space-between',marginBottom:10}]}> 
-      <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()-1,1));}}><Text style={z.linkTx}>‹ Prev</Text></TouchableOpacity>
-      <Text style={z.txM}>{currentMonth.toLocaleString('en-IN',{month:'long',year:'numeric'})}</Text>
-      <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()+1,1));}}><Text style={z.linkTx}>Next ›</Text></TouchableOpacity>
+
+    {/* Day-of-week header */}
+    <View style={{flexDirection:'row',marginBottom:6}}>
+      {['M','T','W','T','F','S','S'].map(function(d,idx){return <View key={d+'_'+idx} style={{flex:1,alignItems:'center',paddingVertical:4}}><Caps color={theme.muted} ls={0.4}>{d}</Caps></View>;})}
     </View>
-    <View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}>{['M','T','W','T','F','S','S'].map(function(d,idx){return<Text key={d+'_'+idx} style={[z.cap,{width:'14%',textAlign:'center'}]}>{d}</Text>;})}</View>
+
+    {/* 6×7 grid */}
     <View style={{flexDirection:'row',flexWrap:'wrap'}}>
       {cells.map(function(d){
         var inMonth=d.getMonth()===currentMonth.getMonth();
         var stats=cellStats(d);
         var isSel=isoDate(d)===selectedISO;
-        return <TouchableOpacity key={isoDate(d)} style={[z.calCell,{backgroundColor:inMonth?'#FFF':'#F2F2EE',borderColor:isSel?'#085041':'transparent'}]} onPress={function(){
+        var dot=stats.tx>0||stats.meal>0||stats.well>0||stats.recur>0;
+        var dotIsAccent=context==='finance'?stats.recur>0:(context==='wellness'?stats.well>0:false);
+        return <TouchableOpacity key={isoDate(d)} activeOpacity={0.7} style={{
+          width:'14.285%',aspectRatio:1,padding:2,
+        }} onPress={function(){
           setLocalSelected(d);
           onSelectDate&&onSelectDate(d);
           if(onOpenDayDetail){onClose&&onClose();onOpenDayDetail(d,context);}
         }}>
-          <Text style={[z.calCellTx,!inMonth&&{color:'#BBB'}]}>{d.getDate()}</Text>
-          <View style={[z.calDot,{backgroundColor:markerColor(stats)}]}/>
+          <View style={{
+            flex:1,borderRadius:10,alignItems:'center',justifyContent:'center',
+            backgroundColor:isSel?theme.primary:'transparent',
+          }}>
+            <Text style={{
+              fontFamily:FF.sansSemi,fontSize:13,fontWeight:'600',
+              color:isSel?'#fff':(inMonth?theme.text:theme.muted),
+            }}>{d.getDate()}</Text>
+            {dot&&!isSel&&<View style={{
+              position:'absolute',bottom:6,
+              width:4,height:4,borderRadius:9999,
+              backgroundColor:dotIsAccent?theme.accent:theme.primary,
+            }}/>}
+          </View>
         </TouchableOpacity>;
       })}
     </View>
-    <View style={[z.card,{marginTop:8}]}> 
-      <Text style={z.txM}>{displayDate(localSelected)}</Text>
-      <Text style={z.cap}>Transactions: {selectedStats.tx} · Meals: {selectedStats.meal} · Wellness logs: {selectedStats.well}</Text>
-      <Text style={z.cap}>Recurring due: {selectedStats.recur} · Completion: {selectedStats.completion.percent}%</Text>
+
+    {/* Selected day stats */}
+    <Caps style={{marginTop:18,marginBottom:8}}>{localSelected.toLocaleDateString('en-IN',{weekday:'long',month:'long',day:'numeric'})}</Caps>
+    <View style={{gap:8}}>
+      {context!=='wellness'&&<Block bg={theme.primaryLight} style={{padding:14}}>
+        <Caps color={theme.primary}>Transactions</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.primary,marginTop:4}}>{selectedStats.tx}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}>{selectedStats.recur>0?' · '+selectedStats.recur+' recurring due':''}</Text></Text>
+      </Block>}
+      <Block style={{padding:14}}>
+        <Caps>Meals · Wellness</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{selectedStats.meal}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> meals · {selectedStats.well} logs</Text></Text>
+      </Block>
+      <Block style={{padding:14}}>
+        <Caps>Day completion</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{selectedStats.completion.percent}%</Text>
+      </Block>
     </View>
-  </View></View></Modal>;
+  </ModalSheet>;
 }
 
 // B8: Swipe-down to dismiss wrapper for modals. Detects a downward pan of 100px and calls onDismiss.
@@ -776,6 +1466,11 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
   var[email,setEmail]=useState('');
   var[pass,setPass]=useState('');
   var[loading,setLoading]=useState(false);
+  // Email-auth STEP 4: when signUp returns no session (Supabase confirmation required),
+  // we show a "Check your email" interstitial instead of routing to questionnaire.
+  // pendingConfirmation = {email} when interstitial active; null when form active.
+  var[pendingConfirmation,setPendingConfirmation]=useState(null);
+  var[resending,setResending]=useState(false);
 
   useEffect(function(){
     if(initialInviteCode)onWantJoin&&onWantJoin(initialInviteCode);
@@ -813,48 +1508,98 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
     setLoading(true);
     try{
       console.log('[AUTH] Starting signup with:',safeEmail);
-
       var authRes=await supabase.auth.signUp({email:safeEmail,password:pass});
       if(authRes.error){
         console.log('[AUTH] Signup auth error:',authRes.error);
         Alert.alert('Signup Error',authRes.error.message||'Unable to create account');
         return;
       }
-
-      var authUser=(authRes.data&&authRes.data.user)||null;
-      if(!authUser){
-        console.log('[AUTH] Signup returned no immediate user. Trying sign in fallback.');
-        var signInFallback=await supabase.auth.signInWithPassword({email:safeEmail,password:pass});
-        if(signInFallback.error){
-          console.log('[AUTH] Signup fallback sign-in error:',signInFallback.error);
-          Alert.alert('Signup complete','Account was created. Please log in to continue.');
-          onAuthRefreshRequested&&onAuthRefreshRequested();
-          return;
-        }
-        authUser=(signInFallback.data&&signInFallback.data.user)||null;
+      // Email confirmation required: Supabase returns user but no session until the link is clicked.
+      // Show the interstitial; the deep-link handler in App.js picks up the confirmation link's PKCE
+      // code, exchanges it, and AppCore's onAuthStateChange routes the user into the app.
+      // Skip ensurePublicUser here — checkAuthState at AppCore.js L6660+ creates the public.users row
+      // after confirmation, so unconfirmed signups don't leave orphan rows.
+      var session=authRes.data&&authRes.data.session;
+      if(!session){
+        console.log('[AUTH] Signup pending email confirmation for',safeEmail);
+        setPendingConfirmation({email:safeEmail,kind:'signup'});
+        haptic('success');
+        return;
       }
-
+      // Session present: confirmation isn't required (Supabase setting off). Existing instant-signin flow.
+      var authUser=authRes.data&&authRes.data.user;
       if(!authUser||!authUser.id){
         Alert.alert('Error','Could not get user account after signup. Please try login.');
         return;
       }
-
-      console.log('[AUTH] Signup auth successful user id:',authUser.id);
-
+      console.log('[AUTH] Signup auth successful (instant session) user id:',authUser.id);
       var userData=await ensurePublicUser(authUser.id,safeEmail,'primary');
       console.log('[AUTH] Signup public.users ready id:',userData&&userData.id);
-
       onAuthSuccess&&onAuthSuccess({
         sessionUser:authUser,
         userData:userData,
         nextScreen:'questionnaire',
       });
-
       console.log('[AUTH] Navigating to questionnaire after signup');
     }catch(e){
       console.log('[AUTH] Signup fatal error:',e);
       haptic('error');
       Alert.alert('Error',e.message||'Unable to sign up');
+    }finally{
+      setLoading(false);
+    }
+  }
+
+  async function handleResend(){
+    if(!pendingConfirmation||!pendingConfirmation.email)return;
+    haptic('light');
+    setResending(true);
+    try{
+      var res;
+      if(pendingConfirmation.kind==='reset'){
+        res=await supabase.auth.resetPasswordForEmail(pendingConfirmation.email,{redirectTo:'wellthyfam://reset-password'});
+      }else{
+        res=await supabase.auth.resend({type:'signup',email:pendingConfirmation.email});
+      }
+      if(res&&res.error){
+        console.log('[AUTH] Resend error:',res.error);
+        Alert.alert('Could not resend',res.error.message||'Please try again in a moment.');
+      }else{
+        Alert.alert('Email sent','We resent the link to '+pendingConfirmation.email+'.');
+      }
+    }catch(e){
+      console.log('[AUTH] Resend fatal error:',e);
+      Alert.alert('Error',e.message||'Could not resend');
+    }finally{
+      setResending(false);
+    }
+  }
+
+  function handleDifferentEmail(){
+    setPendingConfirmation(null);
+    setEmail('');
+    setPass('');
+  }
+
+  // STEP 5: Forgot password flow. Validates email, sends reset link, shows interstitial in 'reset' mode.
+  async function handleForgotPassword(){
+    var safeEmail=String(email||'').trim().toLowerCase();
+    if(!safeEmail){Alert.alert('Enter your email','Please type your email above first, then tap "Forgot password?" again.');return;}
+    haptic('light');
+    setLoading(true);
+    try{
+      console.log('[AUTH] Forgot password requested for:',safeEmail);
+      var res=await supabase.auth.resetPasswordForEmail(safeEmail,{redirectTo:'wellthyfam://reset-password'});
+      if(res&&res.error){
+        console.log('[AUTH] Forgot password error:',res.error);
+        Alert.alert('Could not send reset',res.error.message||'Please try again.');
+        return;
+      }
+      setPendingConfirmation({email:safeEmail,kind:'reset'});
+      haptic('success');
+    }catch(e){
+      console.log('[AUTH] Forgot password fatal:',e);
+      Alert.alert('Error',e.message||'Could not send reset email');
     }finally{
       setLoading(false);
     }
@@ -920,63 +1665,158 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
   }
 
   return(
-    <View style={{flex:1,backgroundColor:theme.primary}}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.primary}/>
+    <View style={{flex:1,backgroundColor:theme.bg}}>
+      <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
       <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
-        <ScrollView contentContainerStyle={{flexGrow:1}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          {/* Top — green hero */}
-          <View style={{paddingTop:ins.top+24,paddingHorizontal:28,paddingBottom:48}}>
-            <Text style={{fontSize:12,fontWeight:'600',color:'rgba(255,255,255,0.65)',letterSpacing:1.4,textTransform:'uppercase',marginBottom:16}}>FamilyOS</Text>
-            <Text style={{fontSize:34,fontWeight:'700',color:'#FFFFFF',letterSpacing:-0.8,lineHeight:42}}>{isSignup?"Build your family\u2019s story.":'Welcome back.'}</Text>
-            <Text style={{fontSize:15,fontWeight:'400',color:'rgba(255,255,255,0.78)',marginTop:14,lineHeight:22}}>{isSignup?'One shared space for money, meals, and milestones.':'Pick up right where you left off.'}</Text>
-          </View>
+        <ScrollView contentContainerStyle={{flexGrow:1,paddingTop:ins.top+36,paddingHorizontal:24,paddingBottom:24}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {pendingConfirmation?(<View style={{flex:1}}>
+            <Caps color={theme.primary}>Wellthy Fam</Caps>
+            <Text style={{fontFamily:FF.serifItalic,fontSize:40,letterSpacing:-1.2,color:theme.text,marginTop:12,lineHeight:42}}>
+              Check your{'\n'}email.
+            </Text>
+            <Text style={{fontFamily:FF.sans,fontSize:15,color:theme.textSecondary,marginTop:18,lineHeight:23}}>
+              We sent a {pendingConfirmation.kind==='reset'?'password reset':'confirmation'} link to{' '}
+              <Text style={{fontFamily:FF.sansSemi,color:theme.text}}>{pendingConfirmation.email}</Text>.
+              Tap the link to {pendingConfirmation.kind==='reset'?'set a new password':'finish setting up your account'}.
+            </Text>
+            <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginTop:24,lineHeight:18}}>
+              The email comes from Wellthy Fam {'<'}onboarding@resend.dev{'>'}. Check your spam folder if you don't see it within a minute.
+            </Text>
+            <View style={{flex:1,minHeight:32}}/>
+            <SecondaryButton full disabled={resending} onPress={handleResend}>
+              {resending?'Sending…':'Resend email'}
+            </SecondaryButton>
+            <TouchableOpacity onPress={handleDifferentEmail} style={{marginTop:18,alignItems:'center',paddingVertical:8}}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>
+                Use a different email
+              </Text>
+            </TouchableOpacity>
+          </View>):(<View style={{flex:1}}>
+            <Caps color={theme.primary}>Wellthy Fam</Caps>
+            <Text style={{fontFamily:FF.serifItalic,fontSize:40,letterSpacing:-1.2,color:theme.text,marginTop:12,lineHeight:42}}>
+              {isSignup?'Build your\nfamily’s story.':'Welcome\nback.'}
+            </Text>
+            <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:12,lineHeight:21,maxWidth:280}}>
+              {isSignup?'Money, health, and small daily wins — kept together by the people who matter.':'Pick up right where you left off.'}
+            </Text>
 
-          {/* Bottom — white card */}
-          <View style={{flex:1,backgroundColor:theme.surface,borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:24,paddingTop:24,paddingBottom:32,minHeight:480}}>
-            {/* Toggle pill */}
-            <View style={{flexDirection:'row',backgroundColor:theme.surfaceElevated,borderRadius:14,padding:4,marginBottom:24}}>
-              <TouchableOpacity style={{flex:1,paddingVertical:11,alignItems:'center',borderRadius:10,backgroundColor:isSignup?theme.surface:'transparent'}} onPress={function(){setIsSignup(true);}}>
-                <Text style={{fontSize:14,fontWeight:'600',color:isSignup?theme.primary:theme.textSecondary}}>Sign Up</Text>
+            <View style={{flexDirection:'row',backgroundColor:theme.surfaceElevated,borderRadius:12,padding:4,marginTop:32,marginBottom:24}}>
+              <TouchableOpacity style={{flex:1,paddingVertical:11,alignItems:'center',borderRadius:8,backgroundColor:isSignup?theme.surface:'transparent'}} onPress={function(){setIsSignup(true);}}>
+                <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:isSignup?theme.primary:theme.textSecondary}}>Sign Up</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={{flex:1,paddingVertical:11,alignItems:'center',borderRadius:10,backgroundColor:!isSignup?theme.surface:'transparent'}} onPress={function(){setIsSignup(false);}}>
-                <Text style={{fontSize:14,fontWeight:'600',color:!isSignup?theme.primary:theme.textSecondary}}>Log In</Text>
+              <TouchableOpacity style={{flex:1,paddingVertical:11,alignItems:'center',borderRadius:8,backgroundColor:!isSignup?theme.surface:'transparent'}} onPress={function(){setIsSignup(false);}}>
+                <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:!isSignup?theme.primary:theme.textSecondary}}>Sign In</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={{fontSize:12,fontWeight:'600',color:theme.textSecondary,marginBottom:6,letterSpacing:0.2}}>Email</Text>
+            <Caps style={{marginBottom:8}}>Email</Caps>
             <TextInput
-              style={{height:52,borderWidth:1,borderColor:theme.border,borderRadius:14,paddingHorizontal:16,fontSize:16,color:theme.text,backgroundColor:theme.surface,marginBottom:16}}
-              placeholder="you@email.com"
-              placeholderTextColor={theme.muted}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
+              style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:16}}
+              placeholder="you@email.com" placeholderTextColor={theme.muted}
+              value={email} onChangeText={setEmail}
+              keyboardType="email-address" autoCapitalize="none" autoCorrect={false}
             />
 
-            <Text style={{fontSize:12,fontWeight:'600',color:theme.textSecondary,marginBottom:6,letterSpacing:0.2}}>Password</Text>
+            <Caps style={{marginBottom:8}}>Password</Caps>
             <TextInput
-              style={{height:52,borderWidth:1,borderColor:theme.border,borderRadius:14,paddingHorizontal:16,fontSize:16,color:theme.text,backgroundColor:theme.surface,marginBottom:24}}
-              placeholder="Min 6 characters"
-              placeholderTextColor={theme.muted}
-              value={pass}
-              onChangeText={setPass}
-              secureTextEntry
+              style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:32}}
+              placeholder="Min 6 characters" placeholderTextColor={theme.muted}
+              value={pass} onChangeText={setPass} secureTextEntry
             />
 
-            <TouchableOpacity
-              style={{backgroundColor:theme.primary,borderRadius:14,paddingVertical:16,alignItems:'center',opacity:loading?0.7:1}}
-              onPress={function(){if(isSignup)handleSignup();else handleLogin();}}
-              disabled={loading}
-            >
-              <Text style={{fontSize:15,fontWeight:'600',color:'#FFFFFF',letterSpacing:0.2}}>{loading?'Please wait\u2026':isSignup?'Create Account':'Log In'}</Text>
-            </TouchableOpacity>
+            {!isSignup?<TouchableOpacity onPress={handleForgotPassword} disabled={loading} style={{alignSelf:'flex-start',marginTop:-20,marginBottom:14,paddingVertical:6}}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:13,fontWeight:'600',color:theme.primary}}>Forgot password?</Text>
+            </TouchableOpacity>:null}
 
-            <TouchableOpacity onPress={function(){onWantJoin&&onWantJoin();}} style={{marginTop:20,alignItems:'center'}}>
-              <Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}>Have an invite code? <Text style={{color:theme.primary,fontWeight:'600'}}>Join family \u2192</Text></Text>
+            <View style={{flex:1,minHeight:24}}/>
+
+            <PrimaryButton full disabled={loading} onPress={function(){if(isSignup)handleSignup();else handleLogin();}}>
+              {loading?'Please wait…':isSignup?'Create account':'Sign in'}
+            </PrimaryButton>
+
+            <TouchableOpacity onPress={function(){onWantJoin&&onWantJoin();}} style={{marginTop:18,alignItems:'center',paddingVertical:8}}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>
+                Have an invite code? <Text style={{textDecorationLine:'underline'}}>Join your family</Text>
+              </Text>
             </TouchableOpacity>
-          </View>
+            {/* Diagnostics (build #5) — small footer affordance reachable when user can't sign in */}
+            <TouchableOpacity onPress={function(){haptic('light');shareDiagLogs();}} style={{marginTop:6,alignItems:'center',paddingVertical:6}}>
+              <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted}}>Send debug logs</Text>
+            </TouchableOpacity>
+          </View>)}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+// STEP 5: Reset password screen. Mounted when PASSWORD_RECOVERY fires from a deep-link exchange.
+// User enters new + confirm; on submit auth.updateUser({password}) succeeds → onComplete clears
+// recoveryPendingRef and re-runs checkAuthState which routes the user based on their state.
+function ResetPasswordScreen({onComplete,onCancel}){
+  var ins=useSafeAreaInsets();
+  var theme=useThemeColors();
+  var[newPass,setNewPass]=useState('');
+  var[confirmPass,setConfirmPass]=useState('');
+  var[loading,setLoading]=useState(false);
+  async function handleSubmit(){
+    if(!newPass||newPass.length<6){Alert.alert('Validation','Password must be at least 6 characters.');return;}
+    if(newPass!==confirmPass){Alert.alert('Validation',"Passwords don't match.");return;}
+    haptic('light');
+    setLoading(true);
+    try{
+      var res=await supabase.auth.updateUser({password:newPass});
+      if(res&&res.error){
+        console.log('[AUTH] updateUser (reset) error:',res.error);
+        Alert.alert('Could not update',res.error.message||'Please try again.');
+        return;
+      }
+      haptic('success');
+      onComplete&&onComplete();
+    }catch(e){
+      console.log('[AUTH] updateUser (reset) fatal:',e);
+      Alert.alert('Error',e.message||'Could not update password');
+    }finally{
+      setLoading(false);
+    }
+  }
+  return(
+    <View style={{flex:1,backgroundColor:theme.bg}}>
+      <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
+      <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
+        <ScrollView contentContainerStyle={{flexGrow:1,paddingTop:ins.top+36,paddingHorizontal:24,paddingBottom:24}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <Caps color={theme.primary}>Wellthy Fam</Caps>
+          <Text style={{fontFamily:FF.serifItalic,fontSize:40,letterSpacing:-1.2,color:theme.text,marginTop:12,lineHeight:42}}>
+            Set a new{'\n'}password.
+          </Text>
+          <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:12,lineHeight:21}}>
+            You're signed in via the reset link. Pick a new password to continue.
+          </Text>
+
+          <Caps style={{marginTop:32,marginBottom:8}}>New password</Caps>
+          <TextInput
+            style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:16}}
+            placeholder="Min 6 characters" placeholderTextColor={theme.muted}
+            value={newPass} onChangeText={setNewPass} secureTextEntry
+          />
+          <Caps style={{marginBottom:8}}>Confirm new password</Caps>
+          <TextInput
+            style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:32}}
+            placeholder="Re-enter password" placeholderTextColor={theme.muted}
+            value={confirmPass} onChangeText={setConfirmPass} secureTextEntry
+          />
+
+          <View style={{flex:1,minHeight:24}}/>
+
+          <PrimaryButton full disabled={loading} onPress={handleSubmit}>
+            {loading?'Updating…':'Set new password'}
+          </PrimaryButton>
+
+          <TouchableOpacity onPress={onCancel} style={{marginTop:18,alignItems:'center',paddingVertical:8}}>
+            <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.textSecondary}}>
+              Cancel and sign out
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -992,6 +1832,8 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
   var[preview,setPreview]=useState(null);
   var[email,setEmail]=useState('');
   var[pass,setPass]=useState('');
+  var[pendingConfirmation,setPendingConfirmation]=useState(null);
+  var[resending,setResending]=useState(false);
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
 
@@ -1029,20 +1871,107 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
     haptic('light');
     setLoading(true);
     try{
-      var authResult=await supabase.auth.signUp({email:email,password:pass});
+      // Defensive re-check: someone else might have used this invite during lookup→submit window
+      var freshInvite=await supabase.from('family_invites').select('id,status,used_by').eq('id',preview.invite.id).maybeSingle();
+      if(freshInvite.error)throw freshInvite.error;
+      if(!freshInvite.data||freshInvite.data.status!=='pending'||freshInvite.data.used_by){
+        Alert.alert('Invite no longer valid','This invite was used by another person. Ask family admin for a new code.');
+        setLoading(false);
+        return;
+      }
+
+      var safeEmail=String(email||'').trim().toLowerCase();
+      var authResult=await supabase.auth.signUp({email:safeEmail,password:pass});
+
+      // Diag (a) — post-signUp, pre-branch. Captures the exact shape of authResult
+      // before any decision logic runs, so we can prove which branch SHOULD have fired.
+      await diagLog('signUp returned. err='+(authResult&&authResult.error&&authResult.error.message)
+        +' hasUser='+!!(authResult&&authResult.data&&authResult.data.user)
+        +' hasSession='+!!(authResult&&authResult.data&&authResult.data.session)
+        +' sessionUid='+((authResult&&authResult.data&&authResult.data.session&&authResult.data.session.user&&authResult.data.session.user.id)||'none'));
+
       if(authResult.error&&String(authResult.error.message||'').toLowerCase().includes('already registered')){
-        authResult=await supabase.auth.signInWithPassword({email:email,password:pass});
+        authResult=await supabase.auth.signInWithPassword({email:safeEmail,password:pass});
+        await diagLog('signInWithPassword fallback fired. err='+(authResult&&authResult.error&&authResult.error.message)
+          +' hasSession='+!!(authResult&&authResult.data&&authResult.data.session));
       }
       if(authResult.error)throw authResult.error;
       var uid=authResult.data&&authResult.data.user&&authResult.data.user.id;
       if(!uid)throw new Error('Could not get user id after signup');
+      var session=authResult.data&&authResult.data.session;
 
+      // b1-fix-A — strict session-shape check. The previous loose `if(!session)` could in
+      // principle let through `{}` or any truthy non-session value (Hermes coercion edge,
+      // supabase-js behaviour change, etc.). Require a real string access_token AND that
+      // session.user.id matches the uid we're about to write — anything else means we
+      // CANNOT prove auth.uid()===uid server-side, so we must defer.
+      var hasRealSession=!!(session
+        && typeof session==='object'
+        && typeof session.access_token==='string'
+        && session.access_token.length>0
+        && session.user
+        && session.user.id===uid);
+
+      // b1-fix-B — belt-and-braces. Even when hasRealSession passes, ask the supabase
+      // client what session it CURRENTLY holds (via getSession). If the client's adopted
+      // session doesn't match uid, the next REST call won't carry the right JWT and the
+      // upsert will be rejected by RLS. Defer instead.
+      var liveOk=false;
+      if(hasRealSession){
+        try{
+          var live=await supabase.auth.getSession();
+          var liveUid=live&&live.data&&live.data.session&&live.data.session.user&&live.data.session.user.id;
+          liveOk=(liveUid===uid);
+          await diagLog('inline-path candidate. uid='+uid+' email='+safeEmail+' liveSessionUid='+(liveUid||'none')+' liveOk='+liveOk);
+        }catch(e){
+          await diagLog('getSession threw: '+(e&&e.message));
+          liveOk=false;
+        }
+      }else{
+        await diagLog('hasRealSession=false → defer. session='+(session?'truthy':'null')
+          +' accessTokenStr='+(!!(session&&typeof session.access_token==='string'&&session.access_token.length>0))
+          +' sessionUserId='+((session&&session.user&&session.user.id)||'none')+' uid='+uid);
+      }
+
+      if(!hasRealSession || !liveOk){
+        // Defer all writes until SIGNED_IN fires post-deep-link. AppCore's onAuthStateChange
+        // picks this up from AsyncStorage and completes the users / family_members /
+        // family_invites writes under a real authenticated session.
+        await diagLog('deferring. hasRealSession='+hasRealSession+' liveOk='+liveOk+' uid='+uid+' email='+safeEmail);
+        await AsyncStorage.setItem('pendingInviteJoin',JSON.stringify({
+          kind:'invite_join',
+          invite_id:preview.invite.id,
+          invite_code:code,
+          family_id:preview.invite.family_id,
+          invited_member_name:preview.invite.invited_member_name||null,
+          invited_member_role:preview.invite.invited_member_role||null,
+          invited_access_role:preview.invite.invited_access_role||'member',
+          invited_by:preview.invite.invited_by||null,
+          auth_user_id:uid,
+          email:safeEmail,
+          created_at:new Date().toISOString(),
+        }));
+        console.log('[INVITE JOIN] signup pending email confirmation for',safeEmail);
+        setPendingConfirmation({email:safeEmail,kind:'invite_join',familyName:(preview.family&&preview.family.family_name)||null});
+        haptic('success');
+        setLoading(false);
+        return;
+      }
+
+      // Diag (b) — inline-write path firing. Only reachable when BOTH gates pass.
+      // If a future RLS rejection happens, the diag log proves the inline path ran with
+      // a session that the client claimed was valid for this uid.
+      await diagLog('inline path firing. uid='+uid+' email='+safeEmail);
+
+      // Session present, real-shaped, and adopted by the supabase client for this uid.
+      // Safe to run inline writes — auth.uid() server-side will equal uid.
       var userUpsert=await supabase.from('users').upsert({
         [DB_COLUMNS.USERS.ID]:uid,
         [DB_COLUMNS.USERS.AUTH_USER_ID]:uid,
         [DB_COLUMNS.USERS.USER_TYPE]:'member',
-        [DB_COLUMNS.USERS.EMAIL]:email,
-        [DB_COLUMNS.USERS.NAME]:preview.invite.invited_member_name||((email||'').split('@')[0])||'Member',
+        [DB_COLUMNS.USERS.EMAIL]:safeEmail,
+        [DB_COLUMNS.USERS.NAME]:preview.invite.invited_member_name||((safeEmail||'').split('@')[0])||'Member',
+        family_id:preview.invite.family_id,
         [DB_COLUMNS.USERS.QUESTIONNAIRE_COMPLETED]:false,
         [DB_COLUMNS.USERS.QUESTIONNAIRE_DATA]:{invite_code:code,invited_member_name:preview.invite.invited_member_name||null,invited_member_role:preview.invite.invited_member_role||null},
       }).select().single();
@@ -1052,6 +1981,7 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
         family_id:preview.invite.family_id,
         user_id:uid,
         role:(preview.invite.invited_member_role||'parent').toLowerCase(),
+        access_role:preview.invite.invited_access_role||'member',
         invited_by:preview.invite.invited_by||null,
       });
 
@@ -1066,94 +1996,135 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
     setLoading(false);
   }
 
+  async function handleResend(){
+    if(!pendingConfirmation||!pendingConfirmation.email)return;
+    haptic('light');
+    setResending(true);
+    try{
+      var res=await supabase.auth.resend({type:'signup',email:pendingConfirmation.email});
+      if(res&&res.error){
+        console.log('[INVITE JOIN RESEND ERROR]',res.error);
+        Alert.alert('Could not resend',res.error.message||'Please try again.');
+      }else{
+        Alert.alert('Email sent','We resent the link to '+pendingConfirmation.email+'.');
+      }
+    }catch(e){
+      console.log('[INVITE JOIN RESEND FATAL]',e);
+      Alert.alert('Error',e.message||'Could not resend email');
+    }finally{
+      setResending(false);
+    }
+  }
+
+  async function handleDifferentEmail(){
+    haptic('light');
+    try{await AsyncStorage.removeItem('pendingInviteJoin');}catch(e){console.log('[INVITE JOIN] clear pending failed',e);}
+    try{await supabase.auth.signOut();}catch(e){console.log('[INVITE JOIN] signOut failed',e);}
+    setPendingConfirmation(null);
+    setEmail('');
+    setPass('');
+  }
+
   var codeChars=String(code||'').toUpperCase().padEnd(6,' ').slice(0,6).split('');
 
   return(
-    <View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.background,flex:1}]}>
+    <View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+      <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
+      <NavBar
+        title={pendingConfirmation?'Check your email':'Join your family'}
+        leading={<TouchableOpacity onPress={pendingConfirmation?handleDifferentEmail:(step===1?onBack:function(){setStep(1);setPreview(null);})} style={{width:32,height:32,borderRadius:9999,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center'}}>
+          <Text style={{fontFamily:FF.sansSemi,fontSize:18,fontWeight:'600',color:theme.text}}>←</Text>
+        </TouchableOpacity>}
+      />
       <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
-        <ScrollView style={z.fl} contentContainerStyle={[z.pad,{paddingTop:24}]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          {step===1&&<View>
-            <TouchableOpacity onPress={onBack} style={{marginBottom:24,alignSelf:'flex-start'}}>
-              <Text style={{fontSize:16,fontWeight:'500',color:theme.textSecondary}}>{'\u2190'} Back</Text>
+        <ScrollView contentContainerStyle={{padding:20,paddingBottom:40}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {pendingConfirmation&&<View>
+            <Caps color={theme.primary}>Wellthy Fam</Caps>
+            <Text style={{fontFamily:FF.serifItalic,fontSize:40,letterSpacing:-1.2,color:theme.text,marginTop:12,lineHeight:42}}>
+              Check your{'\n'}email.
+            </Text>
+            <Text style={{fontFamily:FF.sans,fontSize:15,color:theme.textSecondary,marginTop:18,lineHeight:23}}>
+              We sent a confirmation link to{' '}
+              <Text style={{fontFamily:FF.sansSemi,color:theme.text}}>{pendingConfirmation.email}</Text>.
+              Tap the link to finish joining{pendingConfirmation.familyName?' '+pendingConfirmation.familyName:' your family'}.
+            </Text>
+            <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginTop:24,lineHeight:18}}>
+              The email comes from Wellthy Fam {'<'}onboarding@resend.dev{'>'}. Check your spam folder if you don't see it within a minute.
+            </Text>
+            <View style={{height:32}}/>
+            <SecondaryButton full disabled={resending} onPress={handleResend}>
+              {resending?'Sending…':'Resend email'}
+            </SecondaryButton>
+            <TouchableOpacity onPress={handleDifferentEmail} style={{marginTop:18,alignItems:'center',paddingVertical:8}}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>
+                Use a different email
+              </Text>
             </TouchableOpacity>
+            {/* Diagnostics (build #5) — share the just-captured trace immediately */}
+            <TouchableOpacity onPress={function(){haptic('light');shareDiagLogs();}} style={{marginTop:6,alignItems:'center',paddingVertical:6}}>
+              <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted}}>Send debug logs</Text>
+            </TouchableOpacity>
+          </View>}
+          {!pendingConfirmation&&step===1&&<View>
+            <Caps>Step 1 of 2</Caps>
+            <Text style={{fontFamily:FF.serif,fontSize:28,letterSpacing:-0.8,color:theme.text,marginTop:8,lineHeight:32}}>Enter your invite code</Text>
 
-            <Text style={{fontSize:34,fontWeight:'700',color:theme.text,letterSpacing:-0.8,lineHeight:42,marginBottom:8}}>{'Join your\nfamily.'}</Text>
-            <Text style={{fontSize:15,fontWeight:'400',color:theme.textSecondary,marginBottom:32,lineHeight:22}}>Enter the 6-character invite code from your family admin.</Text>
-
-            {/* 6-character code boxes */}
-            <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:24}}>
+            <View style={{flexDirection:'row',gap:8,marginTop:20,marginBottom:24}}>
               {codeChars.map(function(ch,i){
                 var filled=ch&&ch!==' ';
                 return <View key={'cbox_'+i} style={{
-                  width:48,height:56,borderRadius:12,
-                  borderWidth:filled?2:1,
-                  borderColor:filled?theme.primary:theme.border,
-                  backgroundColor:filled?theme.primaryLight:theme.surface,
+                  flex:1,height:56,borderRadius:12,
+                  borderWidth:1.5,borderColor:filled?theme.primary:theme.border,
+                  backgroundColor:theme.surface,
                   alignItems:'center',justifyContent:'center',
                 }}>
-                  <Text style={{fontSize:22,fontWeight:'700',color:filled?theme.primary:theme.muted}}>{filled?ch:''}</Text>
+                  <Text style={{fontFamily:FF.sansBold,fontSize:22,fontWeight:'700',color:theme.text}}>{filled?ch:''}</Text>
                 </View>;
               })}
             </View>
 
             <TextInput
-              style={{height:52,borderWidth:1,borderColor:theme.border,borderRadius:14,paddingHorizontal:16,fontSize:18,color:theme.text,backgroundColor:theme.surface,letterSpacing:4,textAlign:'center',marginBottom:20,fontWeight:'600'}}
-              placeholder="ENTER CODE"
-              placeholderTextColor={theme.muted}
+              style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sansSemi,fontSize:18,fontWeight:'600',color:theme.text,backgroundColor:theme.surface,letterSpacing:4,textAlign:'center',marginBottom:20}}
+              placeholder="ENTER CODE" placeholderTextColor={theme.muted}
               value={code}
               onChangeText={function(v){setCode(String(v||'').toUpperCase().slice(0,6));}}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              maxLength={6}
+              autoCapitalize="characters" autoCorrect={false} maxLength={6}
             />
 
-            <TouchableOpacity style={[z.bPri,{backgroundColor:theme.primary,opacity:loading?0.7:1}]} onPress={function(){lookup();}} disabled={loading}>
-              <Text style={[z.bPriT,{color:theme.primaryOn}]}>{loading?'Looking up\u2026':'Look Up Code'}</Text>
-            </TouchableOpacity>
+            <PrimaryButton full disabled={loading} onPress={function(){lookup();}}>
+              {loading?'Looking up…':'Continue'}
+            </PrimaryButton>
           </View>}
 
-          {step===2&&preview&&<View>
-            <TouchableOpacity onPress={function(){setStep(1);setPreview(null);}} style={{marginBottom:24,alignSelf:'flex-start'}}>
-              <Text style={{fontSize:16,fontWeight:'500',color:theme.textSecondary}}>{'\u2190'} Wrong code</Text>
-            </TouchableOpacity>
+          {!pendingConfirmation&&step===2&&preview&&<View>
+            <Caps>Step 2 of 2</Caps>
+            <Text style={{fontFamily:FF.serif,fontSize:28,letterSpacing:-0.8,color:theme.text,marginTop:8,lineHeight:32}}>Almost there.</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:8,lineHeight:21}}>Confirm and create your account to finish joining.</Text>
 
-            <Text style={{fontSize:34,fontWeight:'700',color:theme.text,letterSpacing:-0.8,lineHeight:42,marginBottom:8}}>{'Almost\nthere.'}</Text>
-            <Text style={{fontSize:15,fontWeight:'400',color:theme.textSecondary,marginBottom:24,lineHeight:22}}>Confirm and create your account to finish joining.</Text>
+            <Block bg={theme.primaryLight} style={{marginTop:16}}>
+              <Caps color={theme.primary}>You’re joining</Caps>
+              <Text style={{fontFamily:FF.serif,fontSize:24,letterSpacing:-0.4,color:theme.text,marginTop:8}}>{preview.family&&preview.family.family_name?preview.family.family_name:'Family'}</Text>
+              <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:6}}>Invited as {preview.invite.invited_member_name||'Member'} · {preview.invite.invited_member_role||'parent'}</Text>
+            </Block>
 
-            {/* Green preview card */}
-            <View style={{backgroundColor:theme.primary,borderRadius:20,padding:20,marginBottom:24}}>
-              <Text style={{fontSize:11,fontWeight:'600',color:'rgba(255,255,255,0.7)',letterSpacing:1.2,textTransform:'uppercase',marginBottom:8}}>You\u2019re joining</Text>
-              <Text style={{fontSize:24,fontWeight:'700',color:'#FFFFFF',letterSpacing:-0.5,marginBottom:14}}>{preview.family&&preview.family.family_name?preview.family.family_name:'Family'}</Text>
-              <View style={{height:1,backgroundColor:'rgba(255,255,255,0.18)',marginBottom:14}}/>
-              <Text style={{fontSize:13,color:'rgba(255,255,255,0.8)',marginBottom:4}}>Invited as</Text>
-              <Text style={{fontSize:17,fontWeight:'600',color:'#FFFFFF'}}>{preview.invite.invited_member_name||'Member'} <Text style={{fontWeight:'400',color:'rgba(255,255,255,0.75)'}}>\u00b7 {preview.invite.invited_member_role||'parent'}</Text></Text>
-            </View>
-
-            <Text style={{fontSize:12,fontWeight:'600',color:theme.textSecondary,marginBottom:6}}>Email</Text>
+            <Caps style={{marginTop:20,marginBottom:8}}>Email</Caps>
             <TextInput
-              style={{height:52,borderWidth:1,borderColor:theme.border,borderRadius:14,paddingHorizontal:16,fontSize:16,color:theme.text,backgroundColor:theme.surface,marginBottom:16}}
-              placeholder="you@email.com"
-              placeholderTextColor={theme.muted}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
+              style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:16}}
+              placeholder="you@email.com" placeholderTextColor={theme.muted}
+              value={email} onChangeText={setEmail}
+              keyboardType="email-address" autoCapitalize="none" autoCorrect={false}
             />
 
-            <Text style={{fontSize:12,fontWeight:'600',color:theme.textSecondary,marginBottom:6}}>Password</Text>
+            <Caps style={{marginBottom:8}}>Password</Caps>
             <TextInput
-              style={{height:52,borderWidth:1,borderColor:theme.border,borderRadius:14,paddingHorizontal:16,fontSize:16,color:theme.text,backgroundColor:theme.surface,marginBottom:24}}
-              placeholder="Min 6 characters"
-              placeholderTextColor={theme.muted}
-              value={pass}
-              onChangeText={setPass}
-              secureTextEntry
+              style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:24}}
+              placeholder="Min 6 characters" placeholderTextColor={theme.muted}
+              value={pass} onChangeText={setPass} secureTextEntry
             />
 
-            <TouchableOpacity style={{backgroundColor:theme.primary,borderRadius:14,paddingVertical:16,alignItems:'center',opacity:loading?0.7:1}} onPress={joinAndLink} disabled={loading}>
-              <Text style={{fontSize:15,fontWeight:'600',color:'#FFFFFF',letterSpacing:0.2}}>{loading?'Joining\u2026':'Join '+(preview.family&&preview.family.family_name?preview.family.family_name:'Family')+' \u2192'}</Text>
-            </TouchableOpacity>
+            <PrimaryButton full disabled={loading} onPress={joinAndLink}>
+              {loading?'Joining…':'Join '+(preview.family&&preview.family.family_name?preview.family.family_name:'family')}
+            </PrimaryButton>
           </View>}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1195,6 +2166,8 @@ function createDefaultQuestionnaireAnswers(){
 
     q18_height:'',
     q18_height_unit:'cm',
+    q18_height_ft:'',
+    q18_height_in:'',
     q19_weight:'',
     q19_weight_unit:'kg',
     q20_sleep_hours:7,
@@ -1299,6 +2272,7 @@ function ChipSelector({options,value,onChange,multi}){
 }
 
 function SliderInput({label,value,onChange,min,max,leftLabel,rightLabel}){
+  var theme=useThemeColors();
   var numbers=[];
   for(var i=min;i<=max;i++)numbers.push(i);
   return <View style={{marginBottom:14}}>
@@ -1310,8 +2284,8 @@ function SliderInput({label,value,onChange,min,max,leftLabel,rightLabel}){
       </View>
     </ScrollView>
     <View style={[z.row,{justifyContent:'space-between',marginTop:4}]}>
-      <Text style={z.cap}>{leftLabel||min}</Text>
-      <Text style={z.cap}>{rightLabel||max}</Text>
+      <Text style={[z.cap,{color:theme.muted}]}>{leftLabel||min}</Text>
+      <Text style={[z.cap,{color:theme.muted}]}>{rightLabel||max}</Text>
     </View>
   </View>;
 }
@@ -1321,8 +2295,8 @@ function ConditionalInput({show,children}){return show?<View style={{marginTop:1
 function NavigationButtons({canGoBack,canContinue,onBack,onContinue,isLast,saving}){
   var theme=useThemeColors();
   return <View style={[z.row,{marginTop:14,gap:10}]}> 
-    <TouchableOpacity style={[z.bSec,{flex:1,opacity:canGoBack?1:0.4,borderColor:theme.primary}]} disabled={!canGoBack||saving} onPress={onBack}><Text style={[z.bSecT,{color:theme.primary}]}>Back</Text></TouchableOpacity>
-    <TouchableOpacity style={[z.bPri,{flex:1,backgroundColor:canContinue?theme.primary:theme.border,opacity:canContinue?1:0.7}]} disabled={!canContinue||saving} onPress={onContinue}><Text style={[z.bPriT,{color:canContinue?theme.primaryOn:theme.muted}]}>{saving?'Saving\u2026':(isLast?'Finish':'Continue')}</Text></TouchableOpacity>
+    <View style={{flex:1}}><SecondaryButton full disabled={!canGoBack||saving} onPress={onBack}>Back</SecondaryButton></View>
+    <View style={{flex:1}}><PrimaryButton full disabled={!canContinue||saving} onPress={onContinue}>{saving?'Saving…':(isLast?'Finish':'Continue')}</PrimaryButton></View>
   </View>;
 }
 
@@ -1336,6 +2310,10 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
   var[saving,setSaving]=useState(false);
   var[hasSavedProgress,setHasSavedProgress]=useState(false);
   var[showResumePrompt,setShowResumePrompt]=useState(false);
+  // Track whether this user is joining via invite (user_type==='member') so we can skip
+  // family-level questions that the family creator already answered (q6_family, q6_children_count, etc.).
+  var[userType,setUserType]=useState('primary');
+  var isInvitee=userType==='member';
 
   function setAnswer(key,val){
     setQAnswers(function(prev){var next=Object.assign({},prev);next[key]=val;return next;});
@@ -1359,10 +2337,12 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
         DB_COLUMNS.USERS.OCCUPATION,
         DB_COLUMNS.USERS.LANGUAGE,
         DB_COLUMNS.USERS.QUESTIONNAIRE_DATA,
+        DB_COLUMNS.USERS.USER_TYPE,
       ].join(',');
       var{data:userDoc}=await supabase.from('users').select(questionnairePrefillColumns).eq('id',userId).maybeSingle();
       var merged=Object.assign({},defaults,userDoc&&userDoc[DB_COLUMNS.USERS.QUESTIONNAIRE_DATA]?userDoc[DB_COLUMNS.USERS.QUESTIONNAIRE_DATA]:{},progress&&progress.answers?progress.answers:{});
       if(userDoc){
+        if(userDoc[DB_COLUMNS.USERS.USER_TYPE])setUserType(userDoc[DB_COLUMNS.USERS.USER_TYPE]);
         if(!merged.q1_name&&userDoc[DB_COLUMNS.USERS.NAME])merged.q1_name=userDoc[DB_COLUMNS.USERS.NAME];
         if(!merged.q2_dob&&userDoc[DB_COLUMNS.USERS.DOB])merged.q2_dob=userDoc[DB_COLUMNS.USERS.DOB];
         if(!merged.q3_location&&userDoc[DB_COLUMNS.USERS.LOCATION])merged.q3_location=userDoc[DB_COLUMNS.USERS.LOCATION];
@@ -1402,8 +2382,11 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
       reqPick('q3_location');
       reqPick('q4_language');
       reqText('q5_occupation');
-      reqMulti('q6_family');
-      if((answers.q6_family||[]).includes('Kids'))reqNumber('q6_children_count',1,10,'Please enter number of children (1-10).');
+      // Family composition (q6) is family-level — only the creator answers it. Invitees inherit from the family.
+      if(!isInvitee){
+        reqMulti('q6_family');
+        if((answers.q6_family||[]).includes('Kids'))reqNumber('q6_children_count',1,10,'Please enter number of children (1-10).');
+      }
       reqMulti('q7_passions');
     }
     if(page===2){
@@ -1422,8 +2405,22 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
       // q17 optional
     }
     if(page===4){
-      reqNumber('q18_height',50,260,'Please enter valid height.');
-      reqNumber('q19_weight',20,300,'Please enter valid weight.');
+      // Height: validate based on unit
+      if(answers.q18_height_unit==='ft'){
+        var ft=parseNumericAnswer(answers.q18_height_ft);
+        var inch=parseNumericAnswer(answers.q18_height_in);
+        if(ft===null)errs.q18_height='Please enter feet.';
+        else if(ft<2 || ft>8)errs.q18_height='Feet must be 2-8.';
+        else if(inch!==null && (inch<0 || inch>11))errs.q18_height='Inches must be 0-11.';
+      }else{
+        reqNumber('q18_height',50,260,'Please enter valid height in cm (50-260).');
+      }
+      // Weight: validate based on unit
+      if(answers.q19_weight_unit==='lbs'){
+        reqNumber('q19_weight',44,660,'Please enter valid weight in lbs (44-660).');
+      }else{
+        reqNumber('q19_weight',20,300,'Please enter valid weight in kg (20-300).');
+      }
       if(typeof answers.q20_sleep_hours!=='number')errs.q20_sleep_hours='Please set sleep hours.';
       reqPick('q21_exercise');
       if(answers.q21_exercise==='Yes')reqMulti('q21_exercise_types');
@@ -1478,8 +2475,22 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
       phone:normalizeText(qAnswers.q1_phone||'')||null,
       dateOfBirth:qAnswers.q2_dob?isoDate(qAnswers.q2_dob):null,
       gender:normalizeText(qAnswers.q3_gender||'')||null,
-      height:qAnswers.q18_height?Number(qAnswers.q18_height):null,
-      weight:qAnswers.q19_weight?Number(qAnswers.q19_weight):null,
+      height:(function(){
+        if(qAnswers.q18_height_unit==='ft'){
+          var ft=parseNumericAnswer(qAnswers.q18_height_ft);
+          var inch=parseNumericAnswer(qAnswers.q18_height_in)||0;
+          if(ft===null)return null;
+          return Math.round((ft*30.48 + inch*2.54)*10)/10;
+        }
+        return qAnswers.q18_height?Number(qAnswers.q18_height):null;
+      })(),
+      weight:(function(){
+        if(qAnswers.q19_weight_unit==='lbs'){
+          var lbs=parseNumericAnswer(qAnswers.q19_weight);
+          return lbs===null?null:Math.round(lbs*0.45359237*10)/10;
+        }
+        return qAnswers.q19_weight?Number(qAnswers.q19_weight):null;
+      })(),
       location:normalizeText(qAnswers.q3_location)||null,
       occupation:normalizeText(qAnswers.q5_occupation)||null,
       language:normalizeText(qAnswers.q4_language)||null,
@@ -1564,7 +2575,7 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
       {qErrors.q1_name?<Text style={z.errTx}>{qErrors.q1_name}</Text>:null}
 
       <QuestionText>2. Date of birth</QuestionText>
-      <DateField value={qAnswers.q2_dob||new Date()} onChange={function(d){setAnswer('q2_dob',d);}} maximumDate={new Date()}/>
+      <DateField value={qAnswers.q2_dob} onChange={function(d){setAnswer('q2_dob',d);}} minimumDate={new Date(1900,0,1)} maximumDate={new Date()} placeholder="Tap to select your date of birth" defaultPickerDate={new Date(1990,0,1)}/>
       {qErrors.q2_dob?<Text style={z.errTx}>{qErrors.q2_dob}</Text>:null}
 
       <QuestionText>3. Where do you live?</QuestionText>
@@ -1579,13 +2590,15 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
       <Inp value={qAnswers.q5_occupation} onChangeText={function(v){setAnswer('q5_occupation',v);}} placeholder="Your occupation"/>
       {qErrors.q5_occupation?<Text style={z.errTx}>{qErrors.q5_occupation}</Text>:null}
 
-      <QuestionText>6. Who do you have in your family?</QuestionText>
-      <ChipSelector options={Q_FAMILY_OPTIONS} value={qAnswers.q6_family} onChange={function(v){setAnswer('q6_family',v);}} multi={true}/>
-      {qErrors.q6_family?<Text style={z.errTx}>{qErrors.q6_family}</Text>:null}
-      <ConditionalInput show={(qAnswers.q6_family||[]).includes('Kids')}>
-        <Inp label="How many children?" value={String(qAnswers.q6_children_count||'')} onChangeText={function(v){setAnswer('q6_children_count',v.replace(/[^0-9]/g,''));}} keyboardType="numeric" placeholder="1-10"/>
-        {qErrors.q6_children_count?<Text style={z.errTx}>{qErrors.q6_children_count}</Text>:null}
-      </ConditionalInput>
+      {!isInvitee?<View>
+        <QuestionText>6. Who do you have in your family?</QuestionText>
+        <ChipSelector options={Q_FAMILY_OPTIONS} value={qAnswers.q6_family} onChange={function(v){setAnswer('q6_family',v);}} multi={true}/>
+        {qErrors.q6_family?<Text style={z.errTx}>{qErrors.q6_family}</Text>:null}
+        <ConditionalInput show={(qAnswers.q6_family||[]).includes('Kids')}>
+          <Inp label="How many children?" value={String(qAnswers.q6_children_count||'')} onChangeText={function(v){setAnswer('q6_children_count',v.replace(/[^0-9]/g,''));}} keyboardType="numeric" placeholder="1-10"/>
+          {qErrors.q6_children_count?<Text style={z.errTx}>{qErrors.q6_children_count}</Text>:null}
+        </ConditionalInput>
+      </View>:null}
 
       <QuestionText>7. What are your passions?</QuestionText>
       <ChipSelector options={Q_PASSION_OPTIONS} value={qAnswers.q7_passions} onChange={function(v){setAnswer('q7_passions',v);}} multi={true}/>
@@ -1644,7 +2657,16 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
         <TouchableOpacity style={[z.chip,qAnswers.q18_height_unit==='cm'&&z.chipSel]} onPress={function(){setAnswer('q18_height_unit','cm');}}><Text style={[z.chipTx,qAnswers.q18_height_unit==='cm'&&z.chipSelTx]}>cm</Text></TouchableOpacity>
         <TouchableOpacity style={[z.chip,qAnswers.q18_height_unit==='ft'&&z.chipSel]} onPress={function(){setAnswer('q18_height_unit','ft');}}><Text style={[z.chipTx,qAnswers.q18_height_unit==='ft'&&z.chipSelTx]}>ft</Text></TouchableOpacity>
       </View>
-      <Inp value={String(qAnswers.q18_height||'')} onChangeText={function(v){setAnswer('q18_height',v.replace(/[^0-9.]/g,''));}} keyboardType="numeric" placeholder={qAnswers.q18_height_unit==='cm'?'e.g. 170':'e.g. 5.7'}/>
+      {qAnswers.q18_height_unit==='cm'
+        ? <Inp value={String(qAnswers.q18_height||'')} onChangeText={function(v){setAnswer('q18_height',v.replace(/[^0-9.]/g,''));}} keyboardType="numeric" placeholder="e.g. 170"/>
+        : <View style={[z.row,{gap:10}]}>
+            <View style={{flex:1}}>
+              <Inp label="Feet" value={String(qAnswers.q18_height_ft||'')} onChangeText={function(v){setAnswer('q18_height_ft',v.replace(/[^0-9]/g,''));}} keyboardType="numeric" placeholder="e.g. 5"/>
+            </View>
+            <View style={{flex:1}}>
+              <Inp label="Inches" value={String(qAnswers.q18_height_in||'')} onChangeText={function(v){setAnswer('q18_height_in',v.replace(/[^0-9]/g,''));}} keyboardType="numeric" placeholder="0-11"/>
+            </View>
+          </View>}
       {qErrors.q18_height?<Text style={z.errTx}>{qErrors.q18_height}</Text>:null}
 
       <QuestionText>19. Weight</QuestionText>
@@ -1748,16 +2770,16 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
     return null;
   }
 
-  if(loading){return <View style={[z.qScr,z.cen,{backgroundColor:theme.background}]}><ActivityIndicator size="large" color={theme.primary}/></View>;}
+  if(loading){return <View style={[z.qScr,z.cen,{backgroundColor:theme.bg}]}><ActivityIndicator size="large" color={theme.primary}/></View>;}
 
   if(showResumePrompt&&hasSavedProgress){
-    return <View style={[z.qScr,{paddingTop:ins.top,backgroundColor:theme.background}]}> 
-      <View style={z.qPad}>
-        <Text style={[z.h1,{color:theme.text,fontSize:30,letterSpacing:-0.6}]}>Resume questionnaire</Text>
-        <Text style={[z.body,{marginBottom:20,color:theme.textSecondary,lineHeight:22}]}>We found your saved progress at page {qPage}. Do you want to continue where you left off?</Text>
-        <TouchableOpacity style={[z.bPri,{marginBottom:10,backgroundColor:theme.primary}]} onPress={function(){setShowResumePrompt(false);}}><Text style={z.bPriT}>Continue where I left off</Text></TouchableOpacity>
-        <TouchableOpacity style={[z.bSec,{borderColor:theme.primary}]} onPress={restartQuestionnaire}><Text style={[z.bSecT,{color:theme.primary}]}>Start from beginning</Text></TouchableOpacity>
-      </View>
+    return <View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg,padding:20}}>
+      <Caps color={theme.primary}>Welcome back</Caps>
+      <Text style={{fontFamily:FF.serif,fontSize:30,letterSpacing:-0.8,color:theme.text,marginTop:8,lineHeight:34}}>Resume questionnaire</Text>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:10,lineHeight:21,marginBottom:20}}>We found your saved progress at page {qPage}. Continue where you left off, or start over.</Text>
+      <PrimaryButton full onPress={function(){setShowResumePrompt(false);}}>Continue where I left off</PrimaryButton>
+      <View style={{height:10}}/>
+      <SecondaryButton full onPress={restartQuestionnaire}>Start from beginning</SecondaryButton>
     </View>;
   }
 
@@ -1766,41 +2788,54 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
   function onHeaderBack(){
     if(saving)return;
     if(qPage>1){handleBack();return;}
-    // page 1 — exit only if modal-skip is allowed; otherwise no-op
     if(isModal&&typeof onSkipped==='function'){onSkipped();}
   }
-  return(<View style={[z.qScr,{paddingTop:ins.top,backgroundColor:theme.background}]}> 
+  var pageTitles=['About you','Money reality','Money outlook','Body basics','Health habits','Mind & screens','Purpose'];
+  var pageTitle=pageTitles[qPage-1]||'';
+  var pageProgressPct=Math.round((qPage/Q_TOTAL_PAGES)*100);
+
+  return(<View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+    <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
     <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.fl}>
-      <View style={[z.qStickyProgWrap,{backgroundColor:theme.background,borderBottomColor:theme.border,paddingTop:ins.top+14}]}>
-        <View style={[z.row,{justifyContent:'space-between',alignItems:'center',marginBottom:10}]}>
+      <View style={{paddingHorizontal:16,paddingTop:14,paddingBottom:14,backgroundColor:theme.bg,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
           <TouchableOpacity
             onPress={onHeaderBack}
             disabled={!canExit||saving}
             accessibilityRole="button"
             accessibilityLabel={qPage>1?'Go back':'Close questionnaire'}
             style={{
-              width:40,height:40,borderRadius:20,
-              borderWidth:1,
-              borderColor:canExit?theme.border:'transparent',
-              backgroundColor:canExit?theme.surface:'transparent',
+              width:32,height:32,borderRadius:9999,
+              backgroundColor:canExit?theme.surfaceElevated:'transparent',
               alignItems:'center',justifyContent:'center',
               opacity:canExit?1:0,
             }}
           >
-            <Text style={{fontSize:18,color:theme.text,fontWeight:'600',marginTop:-1}}>{qPage>1?'\u2190':'\u2715'}</Text>
+            <Text style={{fontFamily:FF.sansSemi,fontSize:18,color:theme.text,fontWeight:'600'}}>{qPage>1?'←':'✕'}</Text>
           </TouchableOpacity>
           {isModal&&typeof onSkipped==='function'&&qPage>1?(
             <TouchableOpacity onPress={function(){if(!saving)onSkipped();}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
-              <Text style={{fontSize:13,fontWeight:'600',color:theme.textSecondary,letterSpacing:0.3}}>Skip for now</Text>
+              <Caps color={theme.textSecondary}>Skip for now</Caps>
             </TouchableOpacity>
-          ):<View style={{width:40,height:40}}/>}
+          ):<View style={{width:32,height:32}}/>}
         </View>
-        <ProgressIndicator page={qPage} total={Q_TOTAL_PAGES}/>
+        <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:8}}>
+          <Caps>Page {qPage} of {Q_TOTAL_PAGES}</Caps>
+          <Caps>{pageTitle}</Caps>
+        </View>
+        <Progress value={pageProgressPct}/>
       </View>
-      <ScrollView style={z.fl} contentContainerStyle={[z.qPad,{paddingTop:160}]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView style={z.fl} contentContainerStyle={{padding:20,paddingBottom:40}} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {renderTransition()}
         {renderPageQuestions()}
-        <NavigationButtons canGoBack={qPage>1} canContinue={canContinue} onBack={handleBack} onContinue={handleContinue} isLast={qPage===Q_TOTAL_PAGES} saving={saving}/>
+        <View style={{flexDirection:'row',gap:10,marginTop:24}}>
+          {qPage>1&&<View style={{flex:1}}><SecondaryButton full disabled={saving} onPress={handleBack}>Back</SecondaryButton></View>}
+          <View style={{flex:qPage>1?1.4:1}}>
+            <PrimaryButton full disabled={!canContinue||saving} onPress={handleContinue}>
+              {saving?'Saving…':qPage===Q_TOTAL_PAGES?'Finish':'Continue'}
+            </PrimaryButton>
+          </View>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   </View>);
@@ -1886,49 +2921,41 @@ function FamilySetupScreen({userId,currentUserName,onDone}){
   }
 
   return(
-    <View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.background,flex:1}]}>
+    <View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+      <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
       <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
-        <ScrollView style={z.fl} contentContainerStyle={[z.pad,{paddingTop:24}]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={{padding:20,paddingBottom:40}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {!createdFamilyId&&<View>
-            <Text style={{fontSize:34,fontWeight:'700',color:theme.text,letterSpacing:-0.8,lineHeight:42,marginBottom:8}}>{'Set up your\n'}<Text style={{color:theme.primary}}>family.</Text></Text>
-            <Text style={{fontSize:15,fontWeight:'400',color:theme.textSecondary,marginBottom:28,lineHeight:22}}>Pick a family name. You can invite members now or later from Settings.</Text>
+            <Caps color={theme.primary}>Final step</Caps>
+            <Text style={{fontFamily:FF.serif,fontSize:36,letterSpacing:-1,color:theme.text,marginTop:10,lineHeight:38}}>Set up your family.</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:10,lineHeight:21}}>You can add members later, or invite them now.</Text>
 
-            <Text style={{fontSize:12,fontWeight:'600',color:theme.textSecondary,marginBottom:6,letterSpacing:0.2}}>FAMILY NAME</Text>
-            <View style={{flexDirection:'row',alignItems:'center',borderWidth:1,borderColor:theme.border,borderRadius:14,backgroundColor:theme.surface,paddingHorizontal:16,marginBottom:24}}>
-              <TextInput
-                style={{flex:1,height:52,fontSize:18,fontWeight:'600',color:theme.text}}
-                placeholder="The Sharma Family"
-                placeholderTextColor={theme.muted}
-                value={familyName}
-                onChangeText={setFamilyName}
-              />
-              <Text style={{fontSize:18,color:theme.muted}}>{'\u270E'}</Text>
-            </View>
+            <Caps style={{marginTop:24,marginBottom:8}}>Family name</Caps>
+            <TextInput
+              style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:24}}
+              placeholder="The Sharma family" placeholderTextColor={theme.muted}
+              value={familyName} onChangeText={setFamilyName}
+            />
 
-            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-              <Text style={{fontSize:13,fontWeight:'700',color:theme.textSecondary,letterSpacing:0.4,textTransform:'uppercase'}}>Members</Text>
-              <Text style={{fontSize:12,color:theme.muted}}>Optional</Text>
+            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <Caps>Members</Caps>
+              <Caps color={theme.muted}>Optional</Caps>
             </View>
 
             {(members||[]).map(function(m,i){
-              var initial=(m.name||'').trim().charAt(0).toUpperCase()||'?';
               var slot=SLOTS[i%5];
-              return <View key={m.localId||('member_'+i)} style={{backgroundColor:theme.surface,borderWidth:1,borderColor:theme.border,borderRadius:16,padding:14,marginBottom:10}}>
+              return <Block key={m.localId||('member_'+i)} style={{marginBottom:10,padding:14}}>
                 <View style={{flexDirection:'row',alignItems:'center',marginBottom:10}}>
-                  <View style={{width:42,height:42,borderRadius:21,backgroundColor:slot.bg,alignItems:'center',justifyContent:'center',marginRight:12}}>
-                    <Text style={{fontSize:16,fontWeight:'700',color:slot.text}}>{initial}</Text>
-                  </View>
-                  <Text style={{flex:1,fontSize:13,fontWeight:'600',color:theme.textSecondary}}>Member {i+1}</Text>
-                  <TouchableOpacity onPress={function(){rm(i);}}>
-                    <Text style={{fontSize:13,fontWeight:'600',color:theme.danger}}>Remove</Text>
+                  <Avatar name={m.name||'?'} color={slot.bg} size={36}/>
+                  <Caps style={{marginLeft:12,flex:1}}>Member {i+1}</Caps>
+                  <TouchableOpacity onPress={function(){rm(i);}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
+                    <Caps color={theme.danger}>Remove</Caps>
                   </TouchableOpacity>
                 </View>
                 <TextInput
-                  style={{height:44,borderWidth:1,borderColor:theme.border,borderRadius:10,paddingHorizontal:12,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:10}}
-                  placeholder="Name"
-                  placeholderTextColor={theme.muted}
-                  value={m.name}
-                  onChangeText={function(v){upd(i,'name',v);}}
+                  style={{height:44,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:10,paddingHorizontal:12,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:10}}
+                  placeholder="Name" placeholderTextColor={theme.muted}
+                  value={m.name} onChangeText={function(v){upd(i,'name',v);}}
                 />
                 <View style={{flexDirection:'row',gap:8,flexWrap:'wrap'}}>
                   {[{label:'Parent',value:'parent'},{label:'Child',value:'child'},{label:'Other',value:'other'}].map(function(opt){
@@ -1938,54 +2965,50 @@ function FamilySetupScreen({userId,currentUserName,onDone}){
                     </TouchableOpacity>;
                   })}
                 </View>
-              </View>;
+              </Block>;
             })}
 
-            <TouchableOpacity style={{flexDirection:'row',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:theme.border,borderStyle:'dashed',borderRadius:14,paddingVertical:14,marginBottom:24,backgroundColor:'transparent'}} onPress={addM}>
-              <Text style={{fontSize:14,fontWeight:'600',color:theme.primary}}>+ Add Member</Text>
+            <TouchableOpacity onPress={addM} style={{
+              backgroundColor:theme.surfaceElevated,
+              borderWidth:1,borderStyle:'dashed',borderColor:theme.muted,
+              borderRadius:16,paddingVertical:14,paddingHorizontal:16,
+              alignItems:'flex-start',marginBottom:24,
+            }}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.textSecondary}}>+ Add member</Text>
             </TouchableOpacity>
 
-            {(members||[]).filter(function(m){return (m.name||'').trim();}).length>0&&<View style={{marginBottom:24}}>
-              <Text style={{fontSize:12,fontWeight:'600',color:theme.textSecondary,marginBottom:10,letterSpacing:0.2}}>PREVIEW</Text>
-              <View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>
-                {(members||[]).filter(function(m){return (m.name||'').trim();}).map(function(m,i){
-                  var slot=SLOTS[i%5];
-                  return <View key={'prev_'+i} style={{width:48,height:48,borderRadius:12,backgroundColor:slot.bg,alignItems:'center',justifyContent:'center'}}>
-                    <Text style={{fontSize:18,fontWeight:'700',color:slot.text}}>{(m.name||'').trim().charAt(0).toUpperCase()}</Text>
-                  </View>;
-                })}
-              </View>
-            </View>}
-
-            <TouchableOpacity style={{backgroundColor:theme.primary,borderRadius:14,paddingVertical:16,alignItems:'center',opacity:loading?0.7:1}} onPress={create} disabled={loading}>
-              <Text style={{fontSize:15,fontWeight:'600',color:'#FFFFFF',letterSpacing:0.2}}>{loading?'Creating\u2026':'Create Family \u2192'}</Text>
-            </TouchableOpacity>
+            <PrimaryButton full disabled={loading} onPress={create}>
+              {loading?'Creating…':'Create family'}
+            </PrimaryButton>
           </View>}
 
           {createdFamilyId&&<View>
-            <Text style={{fontSize:34,fontWeight:'700',color:theme.text,letterSpacing:-0.8,lineHeight:42,marginBottom:8}}>{'Family\n'}<Text style={{color:theme.primary}}>created.</Text></Text>
-            <Text style={{fontSize:15,fontWeight:'400',color:theme.textSecondary,marginBottom:24,lineHeight:22}}>Share these invite codes with your family members.</Text>
+            <Caps color={theme.primary}>You’re in</Caps>
+            <Text style={{fontFamily:FF.serif,fontSize:36,letterSpacing:-1,color:theme.text,marginTop:10,lineHeight:38}}>Family created.</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:10,marginBottom:24,lineHeight:21}}>Share these invite codes with your family members.</Text>
 
-            {createdInvites.length===0&&<View style={{backgroundColor:theme.accentLight,borderLeftWidth:3,borderLeftColor:theme.accent,borderRadius:12,padding:14,marginBottom:20}}>
-              <Text style={{fontSize:14,color:theme.text,lineHeight:20}}>No invite codes yet. You can add and invite members later from Settings.</Text>
-            </View>}
+            {createdInvites.length===0&&<Block bg={theme.accentLight} style={{marginBottom:20,borderLeftWidth:3,borderLeftColor:theme.accent,borderRadius:16}}>
+              <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,lineHeight:20}}>No invite codes yet. You can add and invite members later from Settings.</Text>
+            </Block>}
+
             {createdInvites.map(function(inv){
-              return <View key={inv.id} style={{backgroundColor:theme.surface,borderWidth:1,borderColor:theme.border,borderRadius:16,padding:16,marginBottom:10}}>
-                <Text style={{fontSize:14,fontWeight:'600',color:theme.text,marginBottom:2}}>{inv.invited_member_name||'Member'}</Text>
-                <Text style={{fontSize:12,color:theme.textSecondary,marginBottom:12}}>{inv.invited_member_role||'parent'}</Text>
+              return <Block key={inv.id} style={{marginBottom:10,padding:16}}>
+                <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{inv.invited_member_name||'Member'}</Text>
+                <Caps color={theme.textSecondary} style={{marginTop:2,marginBottom:12}}>{inv.invited_member_role||'parent'}</Caps>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-                  <Text style={{fontSize:22,fontWeight:'700',color:theme.primary,letterSpacing:3}}>{inv.invite_code}</Text>
-                  <TouchableOpacity onPress={function(){copyInviteText(inv);}} style={{backgroundColor:theme.primaryLight,borderRadius:10,paddingVertical:8,paddingHorizontal:14}}>
-                    <Text style={{fontSize:13,fontWeight:'600',color:theme.primary}}>Share \u2192</Text>
+                  <Text style={{fontFamily:FF.sansBold,fontSize:22,fontWeight:'700',color:theme.primary,letterSpacing:3}}>{inv.invite_code}</Text>
+                  <TouchableOpacity onPress={function(){copyInviteText(inv);}}>
+                    <Pill bg={theme.primaryLight} fg={theme.primary}>Share</Pill>
                   </TouchableOpacity>
                 </View>
-              </View>;
+              </Block>;
             })}
-            <TouchableOpacity style={{backgroundColor:theme.primary,borderRadius:14,paddingVertical:16,alignItems:'center',marginTop:16}} onPress={function(){onDone&&onDone(createdFamilyId,normalizeText(familyName)||'My Family',createdInvites);}}>
-              <Text style={{fontSize:15,fontWeight:'600',color:'#FFFFFF',letterSpacing:0.2}}>Continue to Home \u2192</Text>
-            </TouchableOpacity>
+
+            <View style={{height:8}}/>
+            <PrimaryButton full onPress={function(){onDone&&onDone(createdFamilyId,normalizeText(familyName)||'My Family',createdInvites);}}>
+              Continue to home
+            </PrimaryButton>
           </View>}
-          <View style={{height:40}}/>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -1996,6 +3019,7 @@ function FamilySetupScreen({userId,currentUserName,onDone}){
 // MODALS
 // ═══════════════════════════════════════════════════════════════
 function AddTxModal({visible,onClose,editTx,initialDate}){
+  var theme=useThemeColors();
   var{familyId,members,userId,isAdmin,refreshTransactions,upsertTransactionLocal,refreshRecurringTransactions,logActivity,currentUserName}=useApp();
   var[merchant,setMerchant]=useState('');var[amount,setAmount]=useState('');var[cat,setCat]=useState('');var[mid,setMid]=useState('');var[isIncome,setIsIncome]=useState(false);var[loading,setLoading]=useState(false);var[selectedDate,setSelectedDate]=useState(new Date());
   var[isRecurring,setIsRecurring]=useState(false);var[recurringFreq,setRecurringFreq]=useState('monthly');var[dueDay,setDueDay]=useState('1');var[isFamilySpending,setIsFamilySpending]=useState(false);var[photoUri,setPhotoUri]=useState('');
@@ -2134,36 +3158,76 @@ function AddTxModal({visible,onClose,editTx,initialDate}){
     }catch(e){console.log('[TX SAVE ERROR]',e);showFriendlyError(editTx?'Could not update transaction':'Could not save transaction',e);} 
     setLoading(false);
   }
-  return(<Modal visible={visible} animationType="slide" transparent><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.modalWrap}><SwipeDownDismiss onDismiss={onClose}><View style={z.modal}><ScrollView showsVerticalScrollIndicator={false}>
-    <Text style={z.h1}>{editTx?'Edit entry':'Capture an entry'}</Text>
-    <View style={[z.row,{gap:8,marginBottom:16}]}><TouchableOpacity style={[z.chip,!isIncome&&z.chipSel]} onPress={function(){setIsIncome(false);}}><Text style={[z.chipTx,!isIncome&&z.chipSelTx]}>Expense</Text></TouchableOpacity><TouchableOpacity style={[z.chip,isIncome&&z.chipSel]} onPress={function(){setIsIncome(true);}}><Text style={[z.chipTx,isIncome&&z.chipSelTx]}>Income</Text></TouchableOpacity></View>
-    <Inp label={isIncome?'Income Source':'Description'} value={merchant} onChangeText={setMerchant} placeholder={isIncome?'Salary, freelance, rent...':'Swiggy, DMart...'} maxLength={LIMITS.finance.descMax}/>
-    <Inp label="Amount" value={amount} onChangeText={setAmount} placeholder="340" keyboardType="numeric"/>
+  return(<ModalSheet visible={visible} title={editTx?'Edit entry':'Add transaction'} onClose={onClose}>
+    <View style={{flexDirection:'row',gap:8,marginBottom:16}}>
+      <TouchableOpacity style={{flex:1,height:40,borderRadius:12,alignItems:'center',justifyContent:'center',backgroundColor:!isIncome?theme.primary:'transparent',borderWidth:!isIncome?0:1.5,borderColor:theme.border}} onPress={function(){setIsIncome(false);}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:13,color:!isIncome?'#fff':theme.textSecondary}}>Expense</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={{flex:1,height:40,borderRadius:12,alignItems:'center',justifyContent:'center',backgroundColor:isIncome?theme.primary:'transparent',borderWidth:isIncome?0:1.5,borderColor:theme.border}} onPress={function(){setIsIncome(true);}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:13,color:isIncome?'#fff':theme.textSecondary}}>Income</Text>
+      </TouchableOpacity>
+    </View>
+
+    <Caps style={{marginBottom:8}}>Amount</Caps>
+    <View style={{backgroundColor:theme.primary,borderRadius:16,padding:18,marginBottom:16,flexDirection:'row',alignItems:'baseline'}}>
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,color:'#fff',opacity:0.85,marginRight:6}}>₹</Text>
+      <TextInput
+        value={amount} onChangeText={setAmount}
+        placeholder="0" placeholderTextColor="rgba(255,255,255,0.5)"
+        keyboardType="numeric"
+        style={{flex:1,fontFamily:FF.sansBold,fontWeight:'700',fontSize:36,letterSpacing:-1,color:'#fff',padding:0}}
+      />
+    </View>
+
+    <Inp label={isIncome?'Income source':'Merchant'} value={merchant} onChangeText={setMerchant} placeholder={isIncome?'Salary, freelance, rent...':'Swiggy, DMart...'} maxLength={LIMITS.finance.descMax}/>
     {!isIncome&&<SelectField label="Category" value={cat} onChange={setCat} options={categoryPickerOptions} placeholder="Select category"/>}
-    <Text style={z.inpLabel}>Who?</Text><View style={[z.row,{flexWrap:'wrap',gap:8,marginBottom:16}]}><TouchableOpacity style={[z.chip,!mid&&z.chipSel]} onPress={function(){setMid('');}}><Text style={[z.chipTx,!mid&&z.chipSelTx]}>Joint</Text></TouchableOpacity>{members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}</View>
+
+    <Caps style={{marginBottom:8}}>Who paid?</Caps>
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
+      <TouchableOpacity style={[z.chip,!mid&&z.chipSel]} onPress={function(){setMid('');}}><Text style={[z.chipTx,!mid&&z.chipSelTx]}>Joint</Text></TouchableOpacity>
+      {members.map(function(m){return <TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
+    </View>
+
     <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
-    {!isIncome&&<View style={[z.row,{justifyContent:'space-between',marginBottom:10}]}> 
-      <Text style={z.body}>Family Spending?</Text>
-      <Switch value={isFamilySpending} onValueChange={setIsFamilySpending}/>
+
+    {!isIncome&&<View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text}}>Family spending?</Text>
+      <Switch value={isFamilySpending} onValueChange={setIsFamilySpending} trackColor={{true:theme.primary,false:theme.border}} thumbColor="#fff"/>
     </View>}
-    <TouchableOpacity style={[z.bSec,{marginBottom:10,alignSelf:'flex-start'}]} onPress={pickImage}><Text style={z.bSecT}>📷 Add Photo</Text></TouchableOpacity>
-    {photoUri?<Image source={{uri:photoUri}} style={z.photoPreview}/>:null}
-    <TouchableOpacity style={[z.row,{alignItems:'center',marginBottom:8}]} onPress={function(){setIsRecurring(!isRecurring);}}>
-      <View style={[z.checkbox,{marginRight:10,backgroundColor:isRecurring?'#085041':'#FFF'}]}/><Text style={z.body}>Mark as recurring transaction</Text>
+
+    <TouchableOpacity onPress={pickImage} style={{alignSelf:'flex-start',marginBottom:10}}>
+      <Pill bg={theme.surfaceElevated} fg={theme.textSecondary}>📷 Add photo</Pill>
     </TouchableOpacity>
-    {isRecurring&&<View style={[z.card,{marginBottom:12}]}> 
-      <Text style={[z.inpLabel,{marginBottom:8}]}>Frequency</Text>
-      <View style={[z.row,{flexWrap:'wrap',gap:8,marginBottom:10}]}> 
+    {photoUri?<Image source={{uri:photoUri}} style={[z.photoPreview,{borderRadius:12,marginBottom:10}]}/>:null}
+
+    <TouchableOpacity style={{flexDirection:'row',alignItems:'center',marginBottom:12}} onPress={function(){setIsRecurring(!isRecurring);}}>
+      <View style={{
+        width:18,height:18,borderRadius:6,marginRight:10,
+        backgroundColor:isRecurring?theme.primary:'transparent',
+        borderWidth:1.5,borderColor:isRecurring?theme.primary:theme.muted,
+        alignItems:'center',justifyContent:'center',
+      }}>{isRecurring&&<Text style={{color:'#fff',fontSize:11,fontWeight:'700'}}>✓</Text>}</View>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text}}>Mark as recurring transaction</Text>
+    </TouchableOpacity>
+
+    {isRecurring&&<Block style={{padding:14,marginBottom:12}}>
+      <Caps style={{marginBottom:8}}>Frequency</Caps>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:10}}>
         {['monthly','weekly','biweekly'].map(function(f){var sel=recurringFreq===f;return <TouchableOpacity key={f} style={[z.chip,sel&&z.chipSel]} onPress={function(){setRecurringFreq(f);}}><Text style={[z.chipTx,sel&&z.chipSelTx]}>{f}</Text></TouchableOpacity>;})}
       </View>
       {recurringFreq==='monthly'&&<Inp label="Due day (1-31)" value={dueDay} onChangeText={setDueDay} keyboardType="numeric" placeholder="1"/>}
-    </View>}
-    <View style={z.row}><TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={onClose}><Text style={z.bSecT}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{flex:1}]} onPress={save} disabled={loading}><Text style={z.bPriT}>{loading?'Saving...':editTx?'Update':'Save'}</Text></TouchableOpacity></View>
-  </ScrollView></View></SwipeDownDismiss></KeyboardAvoidingView></Modal>);
+    </Block>}
+
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':editTx?'Update':'Save transaction'}</PrimaryButton></View>
+    </View>
+  </ModalSheet>);
 }
 
 // ── UPGRADED: AI-powered meal logging — user types naturally, Claude calculates nutrition ──
 function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
+  var theme=useThemeColors();
   var{familyId,members,userId,isAdmin,refreshMeals,upsertMealLocal,logActivity,currentUserName}=useApp();
   var[mt,setMt]=useState('lunch');
   var[items,setItems]=useState('');
@@ -2172,7 +3236,29 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
   var[result,setResult]=useState(null);
   var[selectedDate,setSelectedDate]=useState(new Date());
   var[photoUri,setPhotoUri]=useState('');
+  // PHASE 6: protein guide modal state
+  var[showProteinGuide,setShowProteinGuide]=useState(false);
+  var[guideSearch,setGuideSearch]=useState('');
+  var[foodsList,setFoodsList]=useState(null); // null while loading; array when loaded
   var mealTypes=LIMITS.meal.allowedTypes;
+
+  // PHASE 6: lazy-load foods list from DB when guide opens, fall back to inline list
+  useEffect(function(){
+    if(showProteinGuide&&foodsList==null){
+      (async function(){
+        try{
+          var r=await supabase.from('foods').select('name,protein_g,category').gt('protein_g',0).order('protein_g',{ascending:false}).limit(200);
+          if(r&&r.data&&r.data.length>0){
+            setFoodsList(r.data.map(function(f){return{name:f.name,protein:Number(f.protein_g||0),category:f.category||'Other'};}));
+          } else {
+            setFoodsList(PROTEIN_GUIDE_FALLBACK);
+          }
+        } catch(e){
+          setFoodsList(PROTEIN_GUIDE_FALLBACK);
+        }
+      })();
+    }
+  },[showProteinGuide]);
 
   // B2: Pre-populate fields when editing an existing meal
   useEffect(function(){
@@ -2233,17 +3319,122 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
     }catch(e){console.log('[MEAL NUTRIENT CACHE READ ERROR]',e);}
 
     var mN=members.find(function(m){return m.id===memberId;})||members[0];
-    var resp=await fetch(EDGE_MEAL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY},body:JSON.stringify({user_id:userId,member_id:memberId||(mN&&mN.id)||null,member_name:mN?mN.name:'',meal_type:mt,raw_input:rawInput})});
-    var parsed=await resp.json();
-    console.log('[MEAL EDGE FN]',parsed);
-    if(!resp.ok||!parsed.success)throw new Error((parsed&&parsed.error)||'Could not calculate nutrition. Try again.');
-    var totals={
-      protein:Number(parsed.totals&&parsed.totals.protein||0),
-      carbs:Number(parsed.totals&&parsed.totals.carbs||0),
-      calories:Number(parsed.totals&&parsed.totals.calories||0),
-      fat:Number(parsed.totals&&parsed.totals.fat||parsed.totals&&parsed.totals.fats||0),
-      cacheKey:cacheKey,
-    };
+
+    // PHASE 6: try the edge function first; if it's not deployed (404),
+    // fall back to a foods-table lookup so meals still save.
+    var totals=null;
+    try{
+      var resp=await fetch(EDGE_MEAL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY},body:JSON.stringify({user_id:userId,member_id:memberId||(mN&&mN.id)||null,member_name:mN?mN.name:'',meal_type:mt,raw_input:rawInput})});
+      var parsed=await resp.json();
+      console.log('[MEAL EDGE FN]',parsed);
+      if(resp.ok&&parsed&&parsed.success){
+        totals={
+          protein:Number(parsed.totals&&parsed.totals.protein||0),
+          carbs:Number(parsed.totals&&parsed.totals.carbs||0),
+          calories:Number(parsed.totals&&parsed.totals.calories||0),
+          fat:Number(parsed.totals&&parsed.totals.fat||parsed.totals&&parsed.totals.fats||0),
+          cacheKey:cacheKey,
+        };
+      } else {
+        console.log('[MEAL EDGE FN UNAVAILABLE — falling back to foods table]',parsed&&parsed.message);
+      }
+    }catch(edgeErr){
+      console.log('[MEAL EDGE FN ERROR — falling back to foods table]',edgeErr);
+    }
+
+    if(!totals){
+      // Fallback: parse input intelligently against the foods table.
+      // Strategy:
+      //   1. Split input on commas/and into "items" (e.g. ["200g Chicken curry", "50g curd", "300g rice"])
+      //   2. For each item, extract quantity (default 100g) and a clean name.
+      //   3. Try to match the full clean name as a phrase first; if no hit, fall back to its
+      //      longest sub-phrase / single significant word.
+      //   4. Scale that food's per-100g nutrients by quantity/100.
+      var items=normalized.replace(/\band\b/g,',').split(/,/).map(function(s){return s.trim();}).filter(Boolean);
+      var sumP=0, sumC=0, sumCa=0, sumF=0, matched=0;
+      var matchedItems=[];
+      try{
+        for(var i=0;i<items.length;i++){
+          var raw=items[i];
+          // extract grams hint, then strip numbers + common units
+          var qtyMatch=raw.match(/(\d+(?:\.\d+)?)\s*(g|gm|gms|gram|grams|ml)/);
+          var qtyG=qtyMatch?parseFloat(qtyMatch[1]):100;
+          // also handle stuck-together "300grice" → 300 grams of rice
+          var stuckMatch=raw.match(/^(\d+)g(\w+)/);
+          var name;
+          if(stuckMatch){
+            qtyG=parseFloat(stuckMatch[1]);
+            name=stuckMatch[2];
+          } else {
+            // strip leading numbers + units, common stop words
+            name=raw
+              .replace(/\d+(?:\.\d+)?\s*(g|gm|gms|gram|grams|ml|l|cup|cups|tbsp|tsp|piece|pieces|pcs|slice|slices|bowl|bowls|plate|plates)\b/g,'')
+              .replace(/\d+/g,'')
+              .replace(/\b(of|the|a|an)\b/g,'')
+              .trim();
+          }
+          if(!name)continue;
+
+          // Try (a) full name as phrase, (b) longest 2-word sub-phrase, (c) single longest word
+          var attempts=[];
+          attempts.push(name);
+          var words=name.split(/\s+/).filter(function(w){return w.length>=3;});
+          if(words.length>=2){
+            for(var w=0;w<words.length-1;w++){
+              attempts.push(words[w]+' '+words[w+1]);
+            }
+          }
+          // single words, longest first
+          words.slice().sort(function(a,b){return b.length-a.length;}).forEach(function(w){attempts.push(w);});
+
+          var hit=null;
+          for(var a=0;a<attempts.length&&!hit;a++){
+            var q=attempts[a];
+            // Prefer foods with non-zero protein; if none match, accept zero-row
+            var foodResRich=await supabase.from('foods')
+              .select('protein_g,carbs_g,calories,fat_g,serving_size_g,name')
+              .ilike('name','%'+q+'%')
+              .gt('protein_g',0)
+              .order('protein_g',{ascending:false})
+              .limit(1);
+            if(foodResRich&&foodResRich.data&&foodResRich.data.length){
+              hit={row:foodResRich.data[0],matchedOn:q};
+              break;
+            }
+            var foodRes=await supabase.from('foods')
+              .select('protein_g,carbs_g,calories,fat_g,serving_size_g,name')
+              .ilike('name','%'+q+'%')
+              .limit(1);
+            if(foodRes&&foodRes.data&&foodRes.data.length){
+              hit={row:foodRes.data[0],matchedOn:q};
+            }
+          }
+
+          if(hit){
+            var row=hit.row;
+            // foods table values are per 100g — scale by qtyG/100
+            var scale=qtyG/100;
+            sumP += Number(row.protein_g||0)*scale;
+            sumC += Number(row.carbs_g||0)*scale;
+            sumCa+= Number(row.calories||0)*scale;
+            sumF += Number(row.fat_g||0)*scale;
+            matched++;
+            matchedItems.push({input:raw,name:row.name,qtyG:qtyG,matchedOn:hit.matchedOn});
+          }
+        }
+      }catch(fallbackErr){
+        console.log('[MEAL FALLBACK ERROR]',fallbackErr);
+      }
+      // If we matched nothing, give the user a tiny default so the save still completes
+      // (rather than blocking the whole flow). They can edit values later.
+      if(matched===0){
+        totals={protein:0,carbs:0,calories:0,fat:0,cacheKey:cacheKey,fallbackEmpty:true};
+      } else {
+        totals={protein:Math.round(sumP),carbs:Math.round(sumC),calories:Math.round(sumCa),fat:Math.round(sumF),cacheKey:cacheKey,fallback:true,matchedItems:matchedItems};
+      }
+      console.log('[MEAL NUTRIENT FALLBACK]',{items:items,matched:matched,matchedItems:matchedItems,totals:totals});
+    }
+
     try{await AsyncStorage.setItem(cacheKey,JSON.stringify(totals));}catch(e){console.log('[MEAL NUTRIENT CACHE WRITE ERROR]',e);}
     return totals;
   }
@@ -2321,55 +3512,96 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
 
   function resetAndClose(){setMt(initialMealType||'lunch');setItems('');setMid('');setSelectedDate(initialDate?toDate(initialDate):new Date());setResult(null);setPhotoUri('');onClose();}
 
-  return(<Modal visible={visible} animationType="slide" transparent>
-    <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.modalWrap}>
-    <SwipeDownDismiss onDismiss={resetAndClose}><View style={z.modal}><ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      <Text style={z.h1}>{editMeal?'Edit meal':'Note a meal'}</Text>
+  return(<React.Fragment>
+    <ModalSheet visible={visible} title={editMeal?'Edit meal':'Log a meal'} onClose={resetAndClose}>
       <SelectField label="Meal type" value={mt} onChange={setMt} options={mealTypes.map(function(t){return{label:t.charAt(0).toUpperCase()+t.slice(1),value:t};})} placeholder="Select meal type"/>
-      <Text style={z.inpLabel}>Who?</Text>
-      <View style={[z.row,{flexWrap:'wrap',gap:8,marginBottom:16}]}> 
-        {members.map(function(m){return(
-          <TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}>
-            <Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text>
-          </TouchableOpacity>
-        );})}
+      <Caps style={{marginBottom:8}}>Who?</Caps>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
+        {members.map(function(m){return <TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
       </View>
       <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
-      <TouchableOpacity style={[z.bSec,{marginBottom:10,alignSelf:'flex-start'}]} onPress={pickImage}><Text style={z.bSecT}>📷 Add Photo</Text></TouchableOpacity>
-      {photoUri?<Image source={{uri:photoUri}} style={z.photoPreview}/>:null}
-      <Text style={z.inpLabel}>What did you eat?</Text>
+      <TouchableOpacity onPress={pickImage} style={{alignSelf:'flex-start',marginBottom:10}}>
+        <Pill bg={theme.surfaceElevated} fg={theme.textSecondary}>📷 Add photo</Pill>
+      </TouchableOpacity>
+      {photoUri?<Image source={{uri:photoUri}} style={[z.photoPreview,{borderRadius:12,marginBottom:10}]}/>:null}
+      <Caps style={{marginBottom:8}}>What did you eat?</Caps>
       <TextInput
-        style={[z.inp,{height:88,textAlignVertical:'top',paddingTop:10,marginBottom:6}]}
+        style={[z.inp,{height:88,textAlignVertical:'top',paddingTop:10,marginBottom:6,backgroundColor:theme.surface,color:theme.text,borderColor:theme.primary,borderWidth:1.5}]}
         value={items} onChangeText={setItems} maxLength={LIMITS.meal.descMax}
         placeholder={'e.g. 2 rotis, dal fry, curd and a banana\nor: idli sambar and chai'}
-        placeholderTextColor="#888888" multiline
+        placeholderTextColor={theme.muted} multiline
       />
-      <Text style={[z.cap,{marginBottom:16,lineHeight:18}]}>Write naturally — AI calculates protein and calories automatically</Text>
-      {result&&<View style={{backgroundColor:'#E1F5EE',borderRadius:8,padding:14,marginBottom:16}}>
-        <Text style={[z.caps,{color:'#085041',marginBottom:10}]}>Meal captured \u2713</Text>
-        <View style={[z.row,{justifyContent:'space-around'}]}>
-          <View style={{alignItems:'center'}}><Text style={[z.heroN,{fontSize:22,color:'#085041'}]}>{result.protein}g</Text><Text style={z.cap}>Protein</Text></View>
-          <View style={{alignItems:'center'}}><Text style={[z.heroN,{fontSize:22}]}>{result.calories}</Text><Text style={z.cap}>Calories</Text></View>
-          <View style={{alignItems:'center'}}><Text style={[z.heroN,{fontSize:22}]}>{result.carbs}g</Text><Text style={z.cap}>Carbs</Text></View>
-          <View style={{alignItems:'center'}}><Text style={[z.heroN,{fontSize:22}]}>{result.fat}g</Text><Text style={z.cap}>Fat</Text></View>
+      <Caps color={theme.muted} style={{marginBottom:10}}>Write naturally — AI calculates protein and calories automatically</Caps>
+      <TouchableOpacity onPress={function(){haptic('light');setShowProteinGuide(true);}} style={{alignSelf:'flex-start',marginBottom:14}}>
+        <Pill bg={theme.accentLight} fg={theme.accent}>📖 Protein guide · Indian foods</Pill>
+      </TouchableOpacity>
+      {result&&<View style={{marginBottom:16}}>
+        <Caps color={theme.primary} style={{marginBottom:8}}>Meal captured ✓ Parsed nutrition</Caps>
+        <View style={{flexDirection:'row',gap:8,marginBottom:8}}>
+          <View style={{flex:1}}><Block bg={theme.surfaceElevated} style={{padding:14}}><Caps>Calories</Caps><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{result.calories}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> kcal</Text></Text></Block></View>
+          <View style={{flex:1}}><Block bg={theme.surfaceElevated} style={{padding:14}}><Caps>Protein</Caps><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.primary,marginTop:4}}>{result.protein}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> g</Text></Text></Block></View>
+        </View>
+        <View style={{flexDirection:'row',gap:8}}>
+          <View style={{flex:1}}><Block bg={theme.surfaceElevated} style={{padding:14}}><Caps>Carbs</Caps><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{result.carbs}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> g</Text></Text></Block></View>
+          <View style={{flex:1}}><Block bg={theme.surfaceElevated} style={{padding:14}}><Caps>Fat</Caps><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{result.fat}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> g</Text></Text></Block></View>
         </View>
       </View>}
-      <View style={z.row}>
-        <TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={resetAndClose}><Text style={z.bSecT}>{result?'Done':'Cancel'}</Text></TouchableOpacity>
-        <TouchableOpacity style={[z.bPri,{flex:1}]} onPress={save} disabled={loading||!items.trim()}>
-          {loading?<ActivityIndicator color="#FFF"/>:<Text style={[z.bPriT,!items.trim()&&{opacity:0.4}]}>{editMeal?'Update Meal':(result?'Log Another':'Log Meal')}</Text>}
-        </TouchableOpacity>
+      <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+        <View style={{flex:1}}><SecondaryButton full onPress={resetAndClose}>{result?'Done':'Cancel'}</SecondaryButton></View>
+        <View style={{flex:1.4}}><PrimaryButton full disabled={loading||!items.trim()} onPress={save}>{loading?'Saving…':editMeal?'Update meal':(result?'Log another':'Log meal')}</PrimaryButton></View>
       </View>
-    </ScrollView></View></SwipeDownDismiss>
-    </KeyboardAvoidingView>
-  </Modal>);
+    </ModalSheet>
+
+    {/* PHASE 6: Indian protein reference modal — searchable list of common Indian foods with protein per 100g */}
+    <ModalSheet visible={showProteinGuide} title="Protein guide" onClose={function(){setShowProteinGuide(false);}} scroll={false}>
+      <Caps color={theme.muted} style={{marginBottom:10}}>Common Indian foods · grams of protein per 100g</Caps>
+      <TextInput
+        style={[z.inp,{marginBottom:8,backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]}
+        value={guideSearch} onChangeText={setGuideSearch}
+        placeholder="Search e.g. paneer, chicken, dal..." placeholderTextColor={theme.muted}
+      />
+      <View style={{flexDirection:'row',flexWrap:'wrap',marginBottom:8}}>
+        <View style={{flexDirection:'row',alignItems:'center',marginRight:10,marginBottom:4}}><View style={{width:10,height:10,borderRadius:5,backgroundColor:theme.primary,marginRight:4}}/><Caps color={theme.muted}>≥20g high</Caps></View>
+        <View style={{flexDirection:'row',alignItems:'center',marginRight:10,marginBottom:4}}><View style={{width:10,height:10,borderRadius:5,backgroundColor:theme.accent,marginRight:4}}/><Caps color={theme.muted}>10–19g moderate</Caps></View>
+        <View style={{flexDirection:'row',alignItems:'center',marginBottom:4}}><View style={{width:10,height:10,borderRadius:5,backgroundColor:theme.muted,marginRight:4}}/><Caps color={theme.muted}>{'<'}10g low</Caps></View>
+      </View>
+      <ScrollView style={{maxHeight:380}} showsVerticalScrollIndicator={true}>
+        {(function(){
+          if(foodsList==null)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,textAlign:'center',padding:24}}>Loading…</Text>;
+          var q=(guideSearch||'').toLowerCase().trim();
+          var filtered=foodsList.filter(function(f){return !q || f.name.toLowerCase().indexOf(q)>=0 || (f.category||'').toLowerCase().indexOf(q)>=0;});
+          if(filtered.length===0)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,textAlign:'center',padding:24}}>No matches. Try paneer, chicken, dal…</Text>;
+          var groups={};
+          filtered.forEach(function(f){var c=f.category||'Other';if(!groups[c])groups[c]=[];groups[c].push(f);});
+          var groupNames=Object.keys(groups);
+          return groupNames.map(function(g){
+            return <View key={'grp_'+g} style={{marginBottom:12}}>
+              <Caps style={{marginBottom:6}}>{g}</Caps>
+              {groups[g].map(function(food,fi){
+                var color=food.protein>=20?theme.primary:(food.protein>=10?theme.accent:theme.muted);
+                return <View key={'food_'+g+'_'+fi+'_'+food.name} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:8,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
+                  <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,flex:1}} numberOfLines={1}>{food.name}</Text>
+                  <View style={{paddingHorizontal:10,paddingVertical:4,borderRadius:8,backgroundColor:color+'22'}}>
+                    <Text style={{fontFamily:FF.sansBold,color:color,fontWeight:'700',fontSize:13}}>{food.protein}g</Text>
+                  </View>
+                </View>;
+              })}
+            </View>;
+          });
+        })()}
+        <View style={{height:24}}/>
+      </ScrollView>
+    </ModalSheet>
+  </React.Fragment>);
 }
 
 function AddGoalModal({visible,onClose,defaultGoalType,defaultCategory,prefillName,contextLabel}){
+  var theme=useThemeColors();
   var{familyId,userId,refreshGoals,refreshSharedGoals,refreshSharedGoalContributions,upsertGoalLocal,logActivity,currentUserName}=useApp();
   var[name,setName]=useState('');var[target,setTarget]=useState('');var[current,setCurrent]=useState('0');
   var[goalType,setGoalType]=useState(defaultGoalType||'personal');
   var[category,setCategory]=useState(defaultCategory||'Savings');
+  var[categoryOther,setCategoryOther]=useState(''); // PHASE 6: free-text when category === 'Other'
   var[useTargetDate,setUseTargetDate]=useState(false);
   var[targetDate,setTargetDate]=useState(new Date());
   var[loading,setLoading]=useState(false);
@@ -2382,6 +3614,7 @@ function AddGoalModal({visible,onClose,defaultGoalType,defaultCategory,prefillNa
       setName(prefillName||'');setTarget('');setCurrent('0');
       setGoalType(isWellnessContext?'personal':(defaultGoalType||'personal'));
       setCategory(defaultCategory||'Savings');
+      setCategoryOther('');
       setUseTargetDate(false);
       setTargetDate(new Date());
     }
@@ -2412,25 +3645,28 @@ function AddGoalModal({visible,onClose,defaultGoalType,defaultCategory,prefillNa
 
     setLoading(true);
     try{
+      // PHASE 6: when category === 'Other', persist the user-typed text
+      var catOtherClean=category==='Other'?normalizeText(categoryOther):'';
+      if(category==='Other'&&!catOtherClean){Alert.alert('Validation error','Please specify what “Other” means.');setLoading(false);return;}
       if(!isWellnessContext&&goalType==='shared'){
-        var sharedPayload={family_id:familyId,goal_name:cleanName,target_amount:targetNum,current_amount:currentNum,created_by:userId,category:category,description:''};
+        var sharedPayload={family_id:familyId,goal_name:cleanName,target_amount:targetNum,current_amount:currentNum,created_by:userId,category:category,category_other:catOtherClean||null,description:''};
         if(useTargetDate)sharedPayload.target_date=isoDate(targetDate);
         var sharedRes=await supabase.from('shared_goals').insert(sharedPayload).select().single();
         if(sharedRes.error)throw sharedRes.error;
         await refreshSharedGoals();
         await refreshSharedGoalContributions();
         if(logActivity){
-          await logActivity('shared_goal',{user_name:currentUserName||'Someone',action:'created',goal_name:cleanName,target_amount:targetNum,current_amount:currentNum,category:category,goal_scope:'family'},sharedRes.data&&sharedRes.data.id,familyId);
+          await logActivity('shared_goal',{user_name:currentUserName||'Someone',action:'created',goal_name:cleanName,target_amount:targetNum,current_amount:currentNum,category:category,category_other:catOtherClean,goal_scope:'family'},sharedRes.data&&sharedRes.data.id,familyId);
         }
       } else {
         var basePayload={family_id:familyId,name:cleanName,target:targetNum,current:currentNum,goal_type:'personal',is_shared:false};
-        var personalPayload=Object.assign({},basePayload,{category:category,target_date:useTargetDate?isoDate(targetDate):null,goal_scope:'personal'});
+        var personalPayload=Object.assign({},basePayload,{category:category,category_other:catOtherClean||null,target_date:useTargetDate?isoDate(targetDate):null,goal_scope:'personal'});
         var goalRes=await insertPersonalGoal(personalPayload,basePayload);
         if(goalRes.error)throw goalRes.error;
         upsertGoalLocal(goalRes.data);
         await refreshGoals();
         if(logActivity){
-          await logActivity('goal',{user_name:currentUserName||'Someone',action:'created',goal_name:cleanName,target_amount:targetNum,current_amount:currentNum,category:category,goal_scope:'personal'},goalRes.data&&goalRes.data.id,familyId);
+          await logActivity('goal',{user_name:currentUserName||'Someone',action:'created',goal_name:cleanName,target_amount:targetNum,current_amount:currentNum,category:category,category_other:catOtherClean,goal_scope:'personal'},goalRes.data&&goalRes.data.id,familyId);
         }
       }
       onClose();
@@ -2441,28 +3677,49 @@ function AddGoalModal({visible,onClose,defaultGoalType,defaultCategory,prefillNa
     setLoading(false);
   }
 
-  return(<Modal visible={visible} animationType="slide" transparent><View style={z.modalWrap}><View style={z.modal}><ScrollView showsVerticalScrollIndicator={false}>
-    <Text style={z.h1}>{contextLabel?('Create '+contextLabel+' Goal'):'Create Goal'}</Text>
-    {!isWellnessContext&&<><Text style={z.inpLabel}>Goal type</Text>
-    <View style={[z.row,{gap:8,marginBottom:6}]}> 
-      <TouchableOpacity style={[z.chip,goalType==='personal'&&z.chipSel]} onPress={function(){setGoalType('personal');}}><Text style={[z.chipTx,goalType==='personal'&&z.chipSelTx]}>Personal Goal</Text></TouchableOpacity>
-      <TouchableOpacity style={[z.chip,goalType==='shared'&&z.chipSel]} onPress={function(){setGoalType('shared');}}><Text style={[z.chipTx,goalType==='shared'&&z.chipSelTx]}>Shared Family Goal</Text></TouchableOpacity>
-    </View>
-    <Text style={[z.cap,{marginBottom:12}]}>{goalType==='personal'?'Only you can update this goal.':'All family members can view and contribute to this goal.'}</Text></>}
-    <Inp label="Goal Name" value={name} onChangeText={setName} placeholder="Run 5km weekly, Save for bike..." maxLength={LIMITS.goals.nameMax}/>
-    <Inp label="Target Amount" value={target} onChangeText={setTarget} placeholder="100" keyboardType="numeric"/>
-    <Inp label="Current Amount (optional)" value={current} onChangeText={setCurrent} placeholder="0" keyboardType="numeric"/>
-    <SelectField label="Category" value={category} onChange={setCategory} options={contextLabel==='Wellness'?WELLNESS_GOAL_CATEGORY_OPTIONS:SHARED_GOAL_CATEGORY_OPTIONS} placeholder="Select category"/>
-    <TouchableOpacity style={[z.row,{alignItems:'center',marginBottom:8}]} onPress={function(){setUseTargetDate(!useTargetDate);}}>
-      <View style={[z.checkbox,{marginRight:10,backgroundColor:useTargetDate?'#085041':'#FFF'}]}/><Text style={z.body}>Set target date (optional)</Text>
+  return(<ModalSheet visible={visible} title={contextLabel?('New '+contextLabel.toLowerCase()+' goal'):'New goal'} onClose={onClose}>
+    {!isWellnessContext&&<>
+      <Caps style={{marginBottom:8}}>Goal type</Caps>
+      <View style={{flexDirection:'row',gap:8,marginBottom:6}}>
+        <TouchableOpacity style={[z.chip,goalType==='personal'&&z.chipSel]} onPress={function(){setGoalType('personal');}}><Text style={[z.chipTx,goalType==='personal'&&z.chipSelTx]}>Personal goal</Text></TouchableOpacity>
+        <TouchableOpacity style={[z.chip,goalType==='shared'&&z.chipSel]} onPress={function(){setGoalType('shared');}}><Text style={[z.chipTx,goalType==='shared'&&z.chipSelTx]}>Shared family goal</Text></TouchableOpacity>
+      </View>
+      <Caps color={theme.muted} style={{marginBottom:12}}>{goalType==='personal'?'Only you can update this goal.':'All family members can view and contribute.'}</Caps>
+    </>}
+    <Inp label="Goal name" value={name} onChangeText={setName} placeholder={isWellnessContext?"Run 5km weekly, Hit 70g protein daily...":"Save for bike, Emergency fund..."} maxLength={LIMITS.goals.nameMax}/>
+    {isWellnessContext?(
+      <>
+        <Inp label="Target" value={target} onChangeText={setTarget} placeholder="e.g. 5 (km), 70 (grams), 8 (hours)" keyboardType="numeric"/>
+        <Caps color={theme.textSecondary} style={{marginTop:-2,marginBottom:12}}>Tip: kms, grams, hours, days, books — any units.</Caps>
+        <Inp label="Current progress (optional)" value={current} onChangeText={setCurrent} placeholder="0" keyboardType="numeric"/>
+      </>
+    ):(
+      <>
+        <Inp label="Target amount" value={target} onChangeText={setTarget} placeholder="100" keyboardType="numeric"/>
+        <Inp label="Current amount (optional)" value={current} onChangeText={setCurrent} placeholder="0" keyboardType="numeric"/>
+      </>
+    )}
+    <SelectField label="Category" value={category} onChange={function(v){setCategory(v);if(v!=='Other')setCategoryOther('');}} options={contextLabel==='Wellness'?WELLNESS_GOAL_CATEGORY_OPTIONS:SHARED_GOAL_CATEGORY_OPTIONS} placeholder="Select category"/>
+    {category==='Other'&&<Inp label="Specify other" value={categoryOther} onChangeText={setCategoryOther} placeholder="Tell us what 'Other' means" maxLength={40}/>}
+    <TouchableOpacity style={{flexDirection:'row',alignItems:'center',marginBottom:12}} onPress={function(){setUseTargetDate(!useTargetDate);}}>
+      <View style={{
+        width:18,height:18,borderRadius:6,marginRight:10,
+        backgroundColor:useTargetDate?theme.primary:'transparent',
+        borderWidth:1.5,borderColor:useTargetDate?theme.primary:theme.muted,
+        alignItems:'center',justifyContent:'center',
+      }}>{useTargetDate&&<Text style={{color:'#fff',fontSize:11,fontWeight:'700'}}>✓</Text>}</View>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text}}>Set target date (optional)</Text>
     </TouchableOpacity>
     {useTargetDate&&<DateField label="Target date" value={targetDate} onChange={setTargetDate} minimumDate={todayStart} maximumDate={maxTargetDate}/>}
-    <Text style={[z.cap,{marginBottom:12}]}>Tip: Use any units you want (rupees, kms, days, books, etc.)</Text>
-    <View style={z.row}><TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={onClose}><Text style={z.bSecT}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{flex:1}]} onPress={save} disabled={loading}><Text style={z.bPriT}>{loading?'Saving...':'Create Goal'}</Text></TouchableOpacity></View>
-  </ScrollView></View></View></Modal>);
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Create goal'}</PrimaryButton></View>
+    </View>
+  </ModalSheet>);
 }
 
 function EditGoalModal({visible,onClose,goal,familyId}){
+  var theme=useThemeColors();
   var{refreshGoals,upsertGoalLocal,removeGoalLocal,logActivity,currentUserName}=useApp();
   var[name,setName]=useState('');var[target,setTarget]=useState('');var[current,setCurrent]=useState('');var[loading,setLoading]=useState(false);
   useEffect(function(){
@@ -2522,21 +3779,24 @@ function EditGoalModal({visible,onClose,goal,familyId}){
       }},
     ]);
   }
-  return(<Modal visible={visible} animationType="slide" transparent><View style={z.modalWrap}><View style={z.modal}><Text style={z.h1}>Edit Goal</Text>
-    <Inp label="Goal Name" value={name} onChangeText={setName} maxLength={LIMITS.goals.nameMax}/>
+  return(<ModalSheet visible={visible} title="Edit goal" onClose={onClose}>
+    <Inp label="Goal name" value={name} onChangeText={setName} maxLength={LIMITS.goals.nameMax}/>
     <Inp label="Target" value={target} onChangeText={setTarget} keyboardType="numeric"/>
-    <Inp label="Current Progress" value={current} onChangeText={setCurrent} keyboardType="numeric"/>
-    <View style={[z.row,{marginTop:4}]}> 
-      <TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={onClose}><Text style={z.bSecT}>Cancel</Text></TouchableOpacity>
-      <TouchableOpacity style={[z.bPri,{flex:1}]} onPress={save} disabled={loading}><Text style={z.bPriT}>{loading?'Saving...':'Save Changes'}</Text></TouchableOpacity>
+    <Inp label="Current progress" value={current} onChangeText={setCurrent} keyboardType="numeric"/>
+    <View style={{flexDirection:'row',gap:10,marginTop:4}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save changes'}</PrimaryButton></View>
     </View>
-    <TouchableOpacity style={[z.bSec,{marginTop:10,borderColor:'#E24B4A'}]} onPress={deleteGoal}><Text style={[z.bSecT,{color:'#E24B4A'}]}>Delete Goal</Text></TouchableOpacity>
-  </View></View></Modal>);
+    <TouchableOpacity onPress={deleteGoal} style={{marginTop:14,height:48,borderRadius:12,paddingHorizontal:22,alignItems:'center',justifyContent:'center',borderWidth:1.5,borderColor:theme.danger,backgroundColor:'transparent'}}>
+      <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.danger}}>Delete goal</Text>
+    </TouchableOpacity>
+  </ModalSheet>);
 }
 
 // B3: Split the old combined LogWellnessModal into two dedicated modals —
 // one for water, one for screen time — each opens directly with no intermediate step.
 function TransactionCommentsModal({visible,onClose,transaction}){
+  var theme=useThemeColors();
   var{userId,currentUserName,members,transactionComments,refreshTransactionComments,logActivity,familyId}=useApp();
   var[text,setText]=useState('');
   var[sending,setSending]=useState(false);
@@ -2569,32 +3829,43 @@ function TransactionCommentsModal({visible,onClose,transaction}){
     }catch(e){showFriendlyError('Could not send comment',e);}finally{setSending(false);}
   }
 
-  return <Modal visible={visible} transparent animationType="slide"><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.modalWrap}><View style={z.modal}>
-    <View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}> 
-      <View style={{flex:1}}><Text style={z.h1}>Transaction comments</Text><Text style={z.cap}>{transaction?transaction.merchant:''}</Text></View>
-      <TouchableOpacity onPress={onClose}><Text style={z.bSecT}>Close</Text></TouchableOpacity>
-    </View>
-    <ScrollView style={{maxHeight:320,marginBottom:10}}>
+  return <ModalSheet visible={visible} title="Comments" onClose={onClose} scroll={false}>
+    {transaction?<Block style={{padding:14,marginBottom:12}}>
+      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline'}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:15,color:theme.text}}>{transaction.merchant||'Transaction'}</Text>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:15,color:theme.text}}>{transaction.category==='Income'?'+':'−'}₹{fmt(Math.abs(Number(transaction.amount)||0))}</Text>
+      </View>
+      <Caps color={theme.muted} style={{marginTop:4}}>{transaction.category||'Uncategorized'}{transaction.date?' · '+displayDate(toDate(transaction.date)):''}</Caps>
+    </Block>:null}
+    <ScrollView style={{maxHeight:320,marginBottom:10}} showsVerticalScrollIndicator={false}>
       {comments.map(function(c){
         var mine=c.user_id===userId;
-        return <View key={c.id} style={[z.commentBubble,mine?z.commentMine:z.commentOther]}>
-          <View style={[z.row,{marginBottom:3}]}> 
-            <Text style={[z.cap,{fontWeight:'500'}]}>{mine?'You':(c.user_name||'Member')}</Text>
-            <Text style={[z.cap,{marginLeft:8}]}>{relativeTime(c.created_at)}</Text>
+        return <View key={c.id} style={{
+          alignSelf:mine?'flex-end':'flex-start',
+          backgroundColor:mine?theme.primary:theme.surface,
+          borderWidth:mine?0:StyleSheet.hairlineWidth,borderColor:theme.border,
+          borderRadius:16,padding:10,marginBottom:8,maxWidth:'85%',
+        }}>
+          <View style={{flexDirection:'row',alignItems:'baseline',marginBottom:3}}>
+            <Caps color={mine?'rgba(255,255,255,0.75)':theme.textSecondary}>{mine?'You':(c.user_name||'Member')}</Caps>
+            <Caps color={mine?'rgba(255,255,255,0.6)':theme.muted} style={{marginLeft:8}}>{relativeTime(c.created_at)}</Caps>
           </View>
-          <Text style={z.body}>{c.comment_text}</Text>
+          <Text style={{fontFamily:FF.sans,fontSize:14,color:mine?'#fff':theme.text}}>{c.comment_text}</Text>
         </View>;
       })}
-      {comments.length===0&&<Text style={z.cap}>No comments yet. Start the conversation.</Text>}
+      {comments.length===0&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No comments yet. Start the conversation.</Text>}
     </ScrollView>
-    <View style={[z.row,{alignItems:'flex-end'}]}>
-      <TextInput style={[z.inp,{flex:1,height:44}]} value={text} onChangeText={setText} placeholder="Write a comment..." placeholderTextColor="#888888"/>
-      <TouchableOpacity style={[z.bPri,{marginLeft:8,opacity:sending?0.7:1}]} onPress={send} disabled={sending}><Text style={z.bPriT}>{sending?'...':'Send'}</Text></TouchableOpacity>
+    <View style={{flexDirection:'row',alignItems:'flex-end',gap:8}}>
+      <TextInput style={[z.inp,{flex:1,height:44,backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={text} onChangeText={setText} placeholder="Write a comment…" placeholderTextColor={theme.muted}/>
+      <TouchableOpacity onPress={send} disabled={sending||!text.trim()} style={{height:44,paddingHorizontal:18,borderRadius:9999,backgroundColor:theme.primary,alignItems:'center',justifyContent:'center',opacity:sending||!text.trim()?0.5:1}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:12,color:'#fff'}}>{sending?'…':'Send'}</Text>
+      </TouchableOpacity>
     </View>
-  </View></KeyboardAvoidingView></Modal>;
+  </ModalSheet>;
 }
 
 function SharedGoalModal({visible,onClose,goal}){
+  var theme=useThemeColors();
   var{familyId,userId,currentUserName,refreshSharedGoals,refreshSharedGoalContributions,sharedGoalContributions,logActivity}=useApp();
   var[name,setName]=useState('');var[target,setTarget]=useState('');var[targetDate,setTargetDate]=useState(new Date());var[category,setCategory]=useState('General');var[description,setDescription]=useState('');var[saving,setSaving]=useState(false);
   useEffect(function(){
@@ -2627,18 +3898,21 @@ function SharedGoalModal({visible,onClose,goal}){
     }catch(e){showFriendlyError('Could not save shared goal',e);}finally{setSaving(false);}
   }
 
-  return <Modal visible={visible} transparent animationType="slide"><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.modalWrap}><View style={z.modal}><ScrollView>
-    <Text style={z.h1}>{goal?'Edit Shared Goal':'Create Shared Goal'}</Text>
-    <Inp label="Goal name" value={name} onChangeText={setName} placeholder="Family Vacation Fund"/>
+  return <ModalSheet visible={visible} title={goal?'Edit shared goal':'New shared goal'} onClose={onClose}>
+    <Inp label="Goal name" value={name} onChangeText={setName} placeholder="Family vacation fund"/>
     <Inp label="Target amount" value={target} onChangeText={setTarget} keyboardType="numeric" placeholder="50000"/>
     <DateField label="Target date" value={targetDate} onChange={setTargetDate} minimumDate={todayStart} maximumDate={maxTargetDate}/>
     <SelectField label="Category" value={category} onChange={setCategory} options={SHARED_GOAL_CATEGORY_OPTIONS} placeholder="Select category"/>
     <Inp label="Description" value={description} onChangeText={setDescription} multiline placeholder="Optional details"/>
-    <View style={z.row}><TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={onClose}><Text style={z.bSecT}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{flex:1}]} onPress={save} disabled={saving}><Text style={z.bPriT}>{saving?'Saving...':'Save'}</Text></TouchableOpacity></View>
-  </ScrollView></View></KeyboardAvoidingView></Modal>;
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving…':'Save'}</PrimaryButton></View>
+    </View>
+  </ModalSheet>;
 }
 
 function SharedGoalContributionModal({visible,onClose,goal}){
+  var theme=useThemeColors();
   var{familyId,userId,currentUserName,refreshSharedGoals,refreshSharedGoalContributions,logActivity}=useApp();
   var[amount,setAmount]=useState('');var[note,setNote]=useState('');var[saving,setSaving]=useState(false);
   useEffect(function(){if(visible){setAmount('');setNote('');}},[visible]);
@@ -2659,13 +3933,15 @@ function SharedGoalContributionModal({visible,onClose,goal}){
       onClose();
     }catch(e){showFriendlyError('Could not add contribution',e);}finally{setSaving(false);}
   }
-  return <Modal visible={visible} transparent animationType="slide"><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.modalWrap}><View style={z.modal}>
-    <Text style={z.h1}>Add to this goal</Text>
-    <Text style={[z.cap,{marginBottom:10}]}>{goal?goal.goal_name:''}</Text>
+  return <ModalSheet visible={visible} title="Add to this goal" onClose={onClose}>
+    <Caps color={theme.muted} style={{marginBottom:14}}>{goal?goal.goal_name:''}</Caps>
     <Inp label="Amount" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="1000"/>
     <Inp label="Note (optional)" value={note} onChangeText={setNote} placeholder="For this month's savings"/>
-    <View style={z.row}><TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={onClose}><Text style={z.bSecT}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{flex:1}]} onPress={add} disabled={saving}><Text style={z.bPriT}>{saving?'Saving...':'Add'}</Text></TouchableOpacity></View>
-  </View></KeyboardAvoidingView></Modal>;
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={saving} onPress={add}>{saving?'Saving…':'Add contribution'}</PrimaryButton></View>
+    </View>
+  </ModalSheet>;
 }
 
 function ProfileModal({visible,onClose}){
@@ -2706,27 +3982,33 @@ function ProfileModal({visible,onClose}){
     if(visible)loadProfile();
   },[visible,userId]);
 
-  return <Modal visible={visible} transparent animationType="slide"><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={[z.modalWrap,{backgroundColor:theme.overlay}]}><View style={[z.modal,{backgroundColor:theme.card}] }><ScrollView>
-    <Text style={[z.h1,{color:theme.text}]}>Profile Management</Text>
-    {loadingProfile&&<Text style={[z.cap,{marginBottom:8,color:theme.muted}]}>Loading profile data...</Text>}
-    {!loadingProfile&&profileData&&<View>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Name: {profileData.name||'Not set yet'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Email: {profileData.email||'-'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Phone: {profileData.phone||'-'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>DOB: {profileData.dob||'-'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Gender: {profileData.gender||'-'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Height: {profileData.height!==null&&profileData.height!==undefined?profileData.height+' cm':'-'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Weight: {profileData.weight!==null&&profileData.weight!==undefined?profileData.weight+' kg':'-'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Location: {profileData.location||'-'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Occupation: {profileData.occupation||'-'}</Text>
-      <Text style={[z.body,{color:theme.text,marginBottom:8}]}>Language: {profileData.language||'-'}</Text>
-    </View>}
-    {!loadingProfile&&!profileData&&<Text style={[z.body,{color:theme.muted}]}>No profile data found.</Text>}
-    <View style={z.row}><TouchableOpacity style={[z.bPri,{flex:1,backgroundColor:theme.primary}]} onPress={onClose}><Text style={z.bPriT}>Close</Text></TouchableOpacity></View>
-  </ScrollView></View></KeyboardAvoidingView></Modal>;
+  function row(label,value){
+    return <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:10,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
+      <Caps>{label}</Caps>
+      <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text,maxWidth:'60%'}} numberOfLines={1}>{value||'—'}</Text>
+    </View>;
+  }
+  return <ModalSheet visible={visible} title="Profile" onClose={onClose}>
+    {loadingProfile&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>Loading profile data…</Text>}
+    {!loadingProfile&&profileData&&<Block style={{padding:14,marginBottom:14}}>
+      {row('Name',profileData.name||'Not set yet')}
+      {row('Email',profileData.email)}
+      {row('Phone',profileData.phone)}
+      {row('DOB',profileData.dob)}
+      {row('Gender',profileData.gender)}
+      {row('Height',profileData.height!==null&&profileData.height!==undefined?profileData.height+' cm':null)}
+      {row('Weight',profileData.weight!==null&&profileData.weight!==undefined?profileData.weight+' kg':null)}
+      {row('Location',profileData.location)}
+      {row('Occupation',profileData.occupation)}
+      {row('Language',profileData.language)}
+    </Block>}
+    {!loadingProfile&&!profileData&&<Text style={{fontFamily:FF.sans,fontSize:14,color:theme.muted}}>No profile data found.</Text>}
+    <PrimaryButton full onPress={onClose}>Close</PrimaryButton>
+  </ModalSheet>;
 }
 
 function LogWaterModal({visible,onClose,initialDate}){
+  var theme=useThemeColors();
   var{familyId,members,userId,isAdmin,wellness,refreshWellness,upsertWellnessLocal,logActivity,currentUserName}=useApp();var[mid,setMid]=useState('');var[water,setWater]=useState('');var[loading,setLoading]=useState(false);var[selectedDate,setSelectedDate]=useState(new Date());
   useEffect(function(){if(visible){setMid('');setWater('');setSelectedDate(initialDate?toDate(initialDate):new Date());}},[visible,initialDate]);
   function bump(delta){var n=parseInt(water||'0',10);if(isNaN(n))n=0;n=Math.max(0,n+delta);setWater(String(n));}
@@ -2760,24 +4042,29 @@ function LogWaterModal({visible,onClose,initialDate}){
     }catch(e){console.log('[WATER SAVE ERROR]',e);showFriendlyError('Could not save water log',e);}
     setLoading(false);
   }
-  return(<Modal visible={visible} animationType="slide" transparent><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.modalWrap}><SwipeDownDismiss onDismiss={onClose}><View style={z.modal}>
-    <Text style={z.h1}>Note water</Text>
-    <Text style={z.inpLabel}>Who?</Text>
-    <View style={[z.row,{flexWrap:'wrap',gap:8,marginBottom:16}]}>{members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}</View>
-    <Text style={z.inpLabel}>How many glasses?</Text>
-    <View style={[z.row,{gap:8,marginBottom:16,alignItems:'center'}]}>
-      <TouchableOpacity style={z.stepBtn} onPress={function(){bump(-1);}}><Text style={z.stepTx}>−</Text></TouchableOpacity>
-      <TextInput style={[z.inp,{flex:1,textAlign:'center',fontSize:20}]} value={water} onChangeText={setWater} placeholder="0" placeholderTextColor="#888888" keyboardType="numeric"/>
-      <TouchableOpacity style={z.stepBtn} onPress={function(){bump(1);}}><Text style={z.stepTx}>+</Text></TouchableOpacity>
+  return(<ModalSheet visible={visible} title="Log water" onClose={onClose}>
+    <Caps style={{marginBottom:8}}>Who?</Caps>
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
+      {members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
+    </View>
+    <Caps style={{marginBottom:8}}>How many glasses?</Caps>
+    <View style={{flexDirection:'row',gap:8,marginBottom:16,alignItems:'center'}}>
+      <TouchableOpacity style={[z.stepBtn,{borderColor:theme.border}]} onPress={function(){bump(-1);}}><Text style={[z.stepTx,{color:theme.text}]}>−</Text></TouchableOpacity>
+      <TextInput style={[z.inp,{flex:1,textAlign:'center',fontSize:20,backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={water} onChangeText={setWater} placeholder="0" placeholderTextColor={theme.muted} keyboardType="numeric"/>
+      <TouchableOpacity style={[z.stepBtn,{borderColor:theme.border}]} onPress={function(){bump(1);}}><Text style={[z.stepTx,{color:theme.text}]}>+</Text></TouchableOpacity>
     </View>
     <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
-    {mid&&<Text style={[z.cap,{marginBottom:10}]}>So far on {isoDate(selectedDate)}: {formatWaterFromLitres((wellness||[]).filter(function(w){return w.memberId===mid&&w.date===isoDate(selectedDate);}).reduce(function(sum,w){return sum+Number(w.water||0);},0))}</Text>}
-    <View style={z.row}><TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={onClose}><Text style={z.bSecT}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{flex:1}]} onPress={save} disabled={loading}><Text style={z.bPriT}>{loading?'Saving...':'Save'}</Text></TouchableOpacity></View>
-  </View></SwipeDownDismiss></KeyboardAvoidingView></Modal>);
+    {mid&&<Caps color={theme.muted} style={{marginBottom:10}}>So far on {isoDate(selectedDate)}: {formatWaterFromLitres((wellness||[]).filter(function(w){return w.memberId===mid&&w.date===isoDate(selectedDate);}).reduce(function(sum,w){return sum+Number(w.water||0);},0))}</Caps>}
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save water'}</PrimaryButton></View>
+    </View>
+  </ModalSheet>);
 }
 
 function LogScreenTimeModal({visible,onClose,initialDate}){
-  var{familyId,members,userId,isAdmin,wellness,refreshWellness,upsertWellnessLocal,logActivity,currentUserName}=useApp();var[mid,setMid]=useState('');var[hrs,setHrs]=useState('');var[mins,setMins]=useState('');var[loading,setLoading]=useState(false);var[selectedDate,setSelectedDate]=useState(new Date());
+  var theme=useThemeColors();
+  var{familyId,members,userId,isAdmin,wellness,refreshWellness,upsertWellnessLocal,logActivity,currentUserName,screenTargetHrs}=useApp();var[mid,setMid]=useState('');var[hrs,setHrs]=useState('');var[mins,setMins]=useState('');var[loading,setLoading]=useState(false);var[selectedDate,setSelectedDate]=useState(new Date());
   useEffect(function(){if(visible){setMid('');setHrs('');setMins('');setSelectedDate(initialDate?toDate(initialDate):new Date());}},[visible,initialDate]);
   async function save(){
     if(!mid){Alert.alert('Validation error','Please select a member.');return;}
@@ -2804,7 +4091,7 @@ function LogScreenTimeModal({visible,onClose,initialDate}){
       if(error)throw error;
       upsertWellnessLocal(normWellness([data])[0]);
       await refreshWellness();
-      if(total<=4){await recordScore(familyId,mid,'screen_under_limit',15);}
+      var sLimit=Number(screenTargetHrs)||2;if(total<=sLimit){await recordScore(familyId,mid,'screen_under_limit',15);}
       await bumpStreak(familyId,mid,'screen');
       if(logActivity){await logActivity('wellness',{user_name:currentUserName||'Someone',log_type:'screen_time',member_name:mN?mN.name:'',screen_added:rounded,screen_total:Number((data&&data.screen_hrs)||0)},data&&data.id,familyId);}
       haptic('medium');
@@ -2812,18 +4099,143 @@ function LogScreenTimeModal({visible,onClose,initialDate}){
     }catch(e){console.log('[SCREEN SAVE ERROR]',e);showFriendlyError('Could not save screen time',e);}
     setLoading(false);
   }
-  return(<Modal visible={visible} animationType="slide" transparent><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={z.modalWrap}><SwipeDownDismiss onDismiss={onClose}><View style={z.modal}>
-    <Text style={z.h1}>Note screen time</Text>
-    <Text style={z.inpLabel}>Who?</Text>
-    <View style={[z.row,{flexWrap:'wrap',gap:8,marginBottom:16}]}>{members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}</View>
-    <View style={[z.row,{gap:8,marginBottom:16}]}> 
-      <View style={{flex:1}}><Text style={z.inpLabel}>Hours</Text><TextInput style={z.inp} value={hrs} onChangeText={setHrs} placeholder="3" placeholderTextColor="#888888" keyboardType="numeric"/></View>
-      <View style={{flex:1}}><Text style={z.inpLabel}>Minutes</Text><TextInput style={z.inp} value={mins} onChangeText={setMins} placeholder="15" placeholderTextColor="#888888" keyboardType="numeric"/></View>
+  return(<ModalSheet visible={visible} title="Log screen time" onClose={onClose}>
+    <Caps style={{marginBottom:8}}>Who?</Caps>
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
+      {members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
+    </View>
+    <View style={{flexDirection:'row',gap:8,marginBottom:16}}>
+      <View style={{flex:1}}><Caps style={{marginBottom:6}}>Hours</Caps><TextInput style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={hrs} onChangeText={setHrs} placeholder="3" placeholderTextColor={theme.muted} keyboardType="numeric"/></View>
+      <View style={{flex:1}}><Caps style={{marginBottom:6}}>Minutes</Caps><TextInput style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={mins} onChangeText={setMins} placeholder="15" placeholderTextColor={theme.muted} keyboardType="numeric"/></View>
     </View>
     <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
-    {mid&&<Text style={[z.cap,{marginBottom:10}]}>So far on {isoDate(selectedDate)}: {(wellness||[]).filter(function(w){return w.memberId===mid&&w.date===isoDate(selectedDate);}).reduce(function(sum,w){return sum+Number(w.screenHrs||w.screen_hrs||0);},0).toFixed(1)} hrs</Text>}
-    <View style={z.row}><TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={onClose}><Text style={z.bSecT}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{flex:1}]} onPress={save} disabled={loading}><Text style={z.bPriT}>{loading?'Saving...':'Save'}</Text></TouchableOpacity></View>
-  </View></SwipeDownDismiss></KeyboardAvoidingView></Modal>);
+    {mid&&<Caps color={theme.muted} style={{marginBottom:10}}>So far on {isoDate(selectedDate)}: {(wellness||[]).filter(function(w){return w.memberId===mid&&w.date===isoDate(selectedDate);}).reduce(function(sum,w){return sum+Number(w.screenHrs||w.screen_hrs||0);},0).toFixed(1)} hrs</Caps>}
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save screen time'}</PrimaryButton></View>
+    </View>
+  </ModalSheet>);
+}
+
+// Phase B2: LogActivityModal — clones LogScreenTimeModal pattern. Spec: ACTIVITY_LOGGING_SPEC.md.
+// Hybrid: activity_type chips + duration stepper + optional note. NO bumpStreak (decided in spec L153).
+var ACTIVITY_TYPES=['walk','workout','run','cycle','yoga','sport','swim','other'];
+function LogActivityModal({visible,onClose,initialDate,editActivity}){
+  var theme=useThemeColors();
+  var{familyId,members,userId,isAdmin,addActivity,updateActivity,logActivity,currentUserName}=useApp();
+  var perms=useFamilyPermissions();
+  var[mid,setMid]=useState('');
+  var[activityType,setActivityType]=useState('');
+  var[duration,setDuration]=useState(30);
+  var[note,setNote]=useState('');
+  var[loading,setLoading]=useState(false);
+  var[selectedDate,setSelectedDate]=useState(new Date());
+  useEffect(function(){
+    if(visible){
+      if(editActivity){
+        setMid(editActivity.member_id||editActivity.memberId||'');
+        setActivityType(editActivity.activity_type||'');
+        setDuration(Number(editActivity.duration_minutes)||30);
+        setNote(editActivity.note||'');
+        setSelectedDate(editActivity.date?toDate(editActivity.date):new Date());
+      }else{
+        // Members can only log for themselves; auto-set to self.
+        var defaultMid=perms.tier==='member'?perms.currentMemberId:'';
+        setMid(defaultMid||'');
+        setActivityType('');
+        setDuration(30);
+        setNote('');
+        setSelectedDate(initialDate?toDate(initialDate):new Date());
+      }
+    }
+  },[visible,editActivity,initialDate,perms.tier,perms.currentMemberId]);
+  function bumpDuration(delta){
+    setDuration(function(prev){
+      var next=Math.max(5,Math.min(240,(Number(prev)||0)+delta));
+      return next;
+    });
+  }
+  async function save(){
+    if(!mid){Alert.alert('Validation error','Please select a member.');return;}
+    if(!perms.canModifyMemberData(mid)){Alert.alert('Not allowed','You can only log your own activity.');return;}
+    if(!activityType){Alert.alert('Validation error','Please pick an activity type.');return;}
+    var dur=Number(duration)||0;
+    if(dur<5||dur>240){Alert.alert('Validation error','Duration must be 5–240 minutes.');return;}
+    if(isFutureDate(selectedDate)){Alert.alert('Validation error','Date cannot be in the future.');return;}
+    setLoading(true);
+    try{
+      var mN=members.find(function(m){return m.id===mid;});
+      var payload={
+        family_id:familyId,
+        user_id:userId,
+        member_id:mid,
+        member_name:mN?mN.name:'',
+        activity_type:activityType,
+        duration_minutes:dur,
+        note:note&&note.trim()?note.trim().slice(0,200):null,
+        date:isoDate(selectedDate),
+        source:'manual',
+      };
+      var saved;
+      if(editActivity&&editActivity.id){
+        saved=await updateActivity(editActivity.id,payload);
+      }else{
+        saved=await addActivity(payload);
+      }
+      if(logActivity){
+        await logActivity('activity_logged',{user_name:currentUserName||'Someone',member_name:mN?mN.name:'',activity_type:activityType,duration_minutes:dur,note:payload.note},saved&&saved.id,familyId);
+      }
+      haptic('success');
+      onClose();
+    }catch(e){console.log('[LOG ACTIVITY ERROR]',e);haptic('error');showFriendlyError('Could not save activity',e);}
+    setLoading(false);
+  }
+  return(<ModalSheet visible={visible} title={editActivity?'Edit activity':'Log activity'} onClose={onClose}>
+    {perms.tier!=='member'?<View>
+      <Caps style={{marginBottom:8}}>Who?</Caps>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
+        {members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
+      </View>
+    </View>:null}
+    <Caps style={{marginBottom:8}}>Activity type</Caps>
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
+      {ACTIVITY_TYPES.map(function(t){
+        var sel=activityType===t;
+        return <TouchableOpacity key={t} onPress={function(){setActivityType(t);}} style={{
+          height:34,paddingHorizontal:14,borderRadius:9999,
+          justifyContent:'center',alignItems:'center',
+          backgroundColor:sel?theme.primaryLight:theme.surface,
+          borderWidth:StyleSheet.hairlineWidth,borderColor:sel?theme.primary:theme.border,
+        }}>
+          <Text style={{fontFamily:sel?FF.sansSemi:FF.sans,fontSize:13,color:sel?theme.primary:theme.textSecondary,textTransform:'capitalize'}}>{t}</Text>
+        </TouchableOpacity>;
+      })}
+    </View>
+    <Caps style={{marginBottom:8}}>Duration</Caps>
+    <View style={{flexDirection:'row',gap:12,alignItems:'center',marginBottom:16}}>
+      <TouchableOpacity onPress={function(){haptic('light');bumpDuration(-5);}} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>−</Text></TouchableOpacity>
+      <View style={{flex:1,alignItems:'center'}}>
+        <Text style={{fontFamily:FF.sansBold,fontSize:32,letterSpacing:-0.8,color:theme.text}}>{duration}<Text style={{fontFamily:FF.sans,fontSize:16,color:theme.textSecondary}}> min</Text></Text>
+      </View>
+      <TouchableOpacity onPress={function(){haptic('light');bumpDuration(5);}} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>+</Text></TouchableOpacity>
+    </View>
+    <Caps color={theme.muted} style={{marginBottom:14,textAlign:'center'}}>Range: 5 to 240 min · Adjust by 5 min</Caps>
+    <Caps style={{marginBottom:8}}>Note (optional)</Caps>
+    <TextInput
+      style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border,minHeight:60,textAlignVertical:'top',marginBottom:12}]}
+      value={note}
+      onChangeText={function(v){setNote(v.slice(0,200));}}
+      placeholder="Optional — what did you do?"
+      placeholderTextColor={theme.muted}
+      multiline={true}
+      maxLength={200}
+    />
+    <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':(editActivity?'Save changes':'Save activity')}</PrimaryButton></View>
+    </View>
+  </ModalSheet>);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2833,7 +4245,7 @@ function HomeScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,members,transactions,meals,goals,wellness,todayNudge,openSettings,setQuickAction,userCreatedAt,userId,refreshTransactions,upsertTransactionLocal,dismissNudge,dismissedNudgeIds,waterTrackingEnabled,refreshMeals,refreshWellness,refreshActivityFeed,refreshNudges}=useApp();
+  var{familyId,familyName,members,transactions,meals,goals,wellness,todayNudge,openSettings,setQuickAction,userCreatedAt,userId,refreshTransactions,upsertTransactionLocal,dismissNudge,dismissedNudgeIds,waterTrackingEnabled,waterTargetLitres,refreshMeals,refreshWellness,refreshActivityFeed,refreshNudges,familyProteinToday,screenTargetHrs}=useApp();
   var[showTx,setShowTx]=useState(false);
   var[editTx,setEditTx]=useState(null); // B2: holds the transaction being edited
   var[catchupDismissed,setCatchupDismissed]=useState(false); // B4: checklist only surfaces once per morning
@@ -2871,13 +4283,13 @@ function HomeScreen(){
     setQuickAction&&setQuickAction({action:'filter_category',category:cat,nonce:Date.now()});
     navigation.navigate('Finance');
   }
-  function jumpToInsightsThisWeek(){
+  function jumpToReflectThisWeek(){
     setQuickAction&&setQuickAction({action:'focus_week',nonce:Date.now()});
-    navigation.navigate('Insights');
+    navigation.navigate('Reflect');
   }
-  function jumpToInsightsMonth(){
+  function jumpToReflectMonth(){
     setQuickAction&&setQuickAction({action:'focus_month',nonce:Date.now()});
-    navigation.navigate('Insights');
+    navigation.navigate('Reflect');
   }
   function openDayDetail(date){
     setDayDetailDate(toDate(date));
@@ -2945,9 +4357,6 @@ function HomeScreen(){
   var income=monthTxs.filter(function(t){return t.category==='Income';}).reduce(function(s,t){return s+t.amount;},0);
   var expenses=monthTxs.filter(function(t){return t.category!=='Income';}).reduce(function(s,t){return s+t.amount;},0);var net=income-expenses;
   var today=isoDate(now);var todayMeals=meals.filter(function(m){return isoDate(m.date)===today;});
-  var proteinMap={};todayMeals.forEach(function(m){proteinMap[m.memberName]=(proteinMap[m.memberName]||0)+(m.protein||0);});
-  var proteinHits=members.filter(function(m){return(proteinMap[m.name]||0)>=50;}).length;
-  var missing=members.filter(function(m){return!(proteinMap[m.name]>=50);}).map(function(m){return m.name;});
   var catTotals={};monthTxs.filter(function(t){return t.category!=='Income';}).forEach(function(t){catTotals[t.category]=(catTotals[t.category]||0)+t.amount;});
   var topCat=Object.keys(catTotals).sort(function(a,b){return catTotals[b]-catTotals[a];})[0]||'-';
   var avgDaily=now.getDate()>0?Math.round(expenses/Math.max(now.getDate(),1)):0;
@@ -3019,14 +4428,77 @@ function HomeScreen(){
   var streak=0;
   for(var k=0;k<90;k++){
     var d3=addDays(now,-k);
-    var c=calcDayCompletion(familyId,d3,transactions,meals,wellness);
-    if(c.percent===100)streak++;
+    if(calcStreakCompletion(familyId,d3,meals,wellness))streak++;
     else break;
   }
   var bestDay=weeklyScores.slice().sort(function(a,b){return b.percent-a.percent;})[0]||weeklyScores[0];
   var worstDay=weeklyScores.slice().sort(function(a,b){return a.percent-b.percent;})[0]||weeklyScores[0];
 
-  return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.background}]}>
+  // Personal wins for the day — only positives of the individual user
+  var meId=((members||[]).find(function(m){return m.userId===userId;})||{}).id;
+  var myMealTypesToday={};
+  (meals||[]).forEach(function(ml){
+    if(isoDate(ml.date)!==today)return;
+    if(meId&&(ml.memberId||ml.member_id)!==meId)return;
+    myMealTypesToday[String(ml.mealTime||ml.meal_time||'').toLowerCase()]=true;
+  });
+  var allMealsLogged=!!(myMealTypesToday.breakfast&&myMealTypesToday.lunch&&myMealTypesToday.dinner);
+  var myWellnessToday=(wellness||[]).find(function(w){return w.date===today&&(meId?(w.memberId||w.member_id)===meId:true);});
+  var waterTargetMet=!!(myWellnessToday&&myWellnessToday.water_target_met===true);
+  var screenLogged=!!(myWellnessToday&&Number(myWellnessToday.screenHrs||myWellnessToday.screen_hrs||0)>0);
+  var todayDone=todaysCompletion.percent===100;
+  var personalWins=[];
+  if(todayDone){
+    personalWins.push({key:'all',title:'Today is fully captured',sub:'Every entry in. Excellent rhythm.',bg:theme.primary,fg:'#fff',full:true});
+  }else{
+    if(allMealsLogged)personalWins.push({key:'meals',title:'All meals logged',sub:'Breakfast · Lunch · Dinner',bg:theme.primaryLight,fg:theme.primary});
+    if(waterTargetMet)personalWins.push({key:'water',title:'Water target hit',sub:'Hydration ✓',bg:theme.primaryLight,fg:theme.primary});
+    if(screenLogged)personalWins.push({key:'screen',title:'Screen time captured',sub:'Awareness ✓',bg:theme.accentLight,fg:theme.accent});
+  }
+  var streakSinceLabel=streak>0?addDays(now,-streak).toLocaleDateString('en-IN',{day:'numeric',month:'short'}):null;
+
+  // 2x2 grid data (Phase 2.1.B: Protein / Spent / Screen / Logged — Water replaced by Protein)
+  var myProteinEntry=(familyProteinToday||[]).find(function(x){return x.member.id===meId;});
+  var myProteinCurrent=myProteinEntry?Number(myProteinEntry.current)||0:0;
+  var myProteinRegularTarget=(myProteinEntry&&myProteinEntry.targets&&Number(myProteinEntry.targets.regular))||0;
+  var todayExpense=(transactions||[]).filter(function(t){return isoDate(t.date)===today&&t.category!=='Income';}).reduce(function(s,t){return s+Number(t.amount||0);},0);
+  var todayTxCount=(transactions||[]).filter(function(t){return isoDate(t.date)===today;}).length;
+  var todayScreen=myWellnessToday?Number(myWellnessToday.screenHrs||myWellnessToday.screen_hrs||0):0;
+  function formatHrs(h){var hh=Math.floor(h);var mm=Math.round((h-hh)*60);return hh+'h '+(mm<10?'0':'')+mm+'m';}
+  var todayItemsLogged=(transactions||[]).filter(function(t){return isoDate(t.date)===today;}).length+(meals||[]).filter(function(m){return isoDate(m.date)===today;}).length+(wellness||[]).filter(function(w){return w.date===today;}).length;
+  var todayPending=(todayStatus&&todayStatus.missing)?todayStatus.missing.length:0;
+
+  // Phase 2.1.E: end-of-day water prompt now lives in the Water row of "Did I hit my targets?"
+  // Active after 6pm when myWellnessToday.water_target_met is still null/undefined.
+  var hourNow=new Date().getHours();
+  var needsWaterPrompt=hourNow>=18 && (!myWellnessToday || myWellnessToday.water_target_met==null);
+  async function confirmWaterYes(){
+    haptic('medium');
+    try{
+      var payload={family_id:familyId,user_id:userId,member_id:userId,date:today,water_target_met:true,water_target_litres:Number(waterTargetLitres||2.5),updated_at:new Date().toISOString()};
+      await supabase.from('wellness').upsert(payload,{onConflict:'family_id,member_id,date'});
+      await refreshWellness();
+      await recordScore(familyId,userId,'water_target_hit',15);
+      await bumpStreak(familyId,userId,'water_target');
+    }catch(e){console.log('[WATER CONFIRM ERROR]',e);}
+  }
+  async function confirmWaterNo(){
+    haptic('light');
+    try{
+      var payload={family_id:familyId,user_id:userId,member_id:userId,date:today,water_target_met:false,water_target_litres:Number(waterTargetLitres||2.5),updated_at:new Date().toISOString()};
+      await supabase.from('wellness').upsert(payload,{onConflict:'family_id,member_id,date'});
+      await refreshWellness();
+    }catch(e){console.log('[WATER NO CONFIRM ERROR]',e);}
+  }
+
+  // "Did I hit my targets?" computed states
+  var targetRows=[
+    {key:'water',q:'Hit your water target ('+Number(waterTargetLitres||2.5).toFixed(1)+'L)?',state:myWellnessToday&&myWellnessToday.water_target_met===true?'yes':myWellnessToday&&myWellnessToday.water_target_met===false?'no':'unknown',info:{title:'Water target',body:'Marked Yes when you confirm at end of day that you hit your '+Number(waterTargetLitres||2.5).toFixed(1)+'L water target. The confirm prompt appears here after 6pm.'}},
+    {key:'screen',q:'Stayed under '+(Number(screenTargetHrs)||2)+'h on screens?',state:myWellnessToday&&todayScreen>0?(todayScreen<=(Number(screenTargetHrs)||2)?'yes':'no'):'unknown',info:{title:'Screen time target',body:"Marked Yes when today's screen time is logged and stays at or under "+(Number(screenTargetHrs)||2)+" hours."}},
+    {key:'meals',q:'Logged all 3 meals?',state:allMealsLogged?'yes':(Object.keys(myMealTypesToday).length>0?'no':'unknown'),info:{title:'Meals target',body:'Marked Yes when all 3 meals — breakfast, lunch, and dinner — are logged for today.'}},
+  ];
+
+  return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.bg}]}>
     <AddTxModal visible={showTx||!!editTx} onClose={function(){setShowTx(false);setEditTx(null);}} editTx={editTx}/>
     <DayDetailModal visible={showDayDetail} date={dayDetailDate} onClose={function(){setShowDayDetail(false);}} onChangeDate={setDayDetailDate} onEditTransaction={function(t){setShowDayDetail(false);setEditTx(t);}} onAddTransaction={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_tx',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Finance');}} onEditMeal={function(m){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_meal',mealType:(m.mealTime||'lunch'),initialDate:isoDate(m.date),editMealId:m.id,nonce:Date.now()});navigation.navigate('Wellness');}} onAddMeal={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_meal',mealType:'lunch',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}} onAddWater={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_water',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}} onAddScreen={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_screen',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}}/>
     <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
@@ -3035,8 +4507,8 @@ function HomeScreen(){
     {/* Header */}
     <View style={[z.hdr,{paddingTop:12}]}>
       <View style={{flex:1}}>
-        <TouchableOpacity onPress={function(){haptic('light');jumpToInsightsMonth();}} accessibilityRole="button">
-          <Text style={[z.caps,{color:theme.muted,marginBottom:4}]}>{now.toLocaleString('en-IN',{month:'long',year:'numeric'})} {'\u203A'}</Text>
+        <TouchableOpacity onPress={function(){haptic('light');jumpToReflectMonth();}} accessibilityRole="button">
+          <Text style={[z.caps,{color:theme.muted,marginBottom:4}]}>{now.toLocaleString('en-IN',{month:'long',year:'numeric'})} {'›'}</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={function(){haptic('light');navigation.navigate('Family');}} accessibilityRole="button">
           <Text style={[z.famNm,{color:theme.text,fontSize:24}]} numberOfLines={1}>{familyName||'Your Family'}</Text>
@@ -3046,12 +4518,121 @@ function HomeScreen(){
         {members.slice(0,4).map(function(m,i){return<TouchableOpacity key={m.id} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_member',memberName:m.name,nonce:Date.now()});navigation.navigate('Family');}} style={[z.avS,{backgroundColor:SLOTS[i%5].bg,marginLeft:i?-8:0,zIndex:4-i,borderColor:theme.background}]} accessibilityLabel={m.name}><Text style={[z.avSTx,{color:SLOTS[i%5].text}]}>{(m.name||'?')[0]}</Text></TouchableOpacity>;})}
       </View>
       <TouchableOpacity onPress={function(){haptic('light');openSettings();}} style={{padding:6}}>
-        <Text style={{fontSize:22,color:theme.textSecondary}}>{'\u2699'}</Text>
+        <Text style={{fontSize:22,color:theme.textSecondary}}>{'⚙'}</Text>
       </TouchableOpacity>
     </View>
 
+    {/* Streak hero — primary olive, white-on-primary */}
+    <View style={{borderRadius:24,backgroundColor:theme.primary,padding:22,marginTop:12}}>
+      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+        <Caps color="rgba(255,255,255,0.7)">Your streak</Caps>
+        <InfoIcon
+          title="How streak is calculated"
+          body="Your streak counts a day when all 3 meals (breakfast, lunch, dinner) and screen time are logged. Money entries don't count — they're optional, since not everyone in the family earns. Water is target-based, so it's tracked separately."
+          color="rgba(255,255,255,0.7)"
+        />
+      </View>
+      <View style={{flexDirection:'row',alignItems:'baseline',marginTop:8}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:56,letterSpacing:-2.2,color:'#fff',lineHeight:58}}>{streak||0}</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:18,fontWeight:'500',color:'rgba(255,255,255,0.75)',marginLeft:6}}>{(streak||0)===1?'day':'days'}</Text>
+      </View>
+      <Text style={{fontFamily:FF.sans,fontSize:13,color:'rgba(255,255,255,0.78)',marginTop:12,lineHeight:18}}>
+        {streak>0
+          ?'Streak running since '+streakSinceLabel+'. Keep it going.'
+          :'A fresh start. Capture today and the streak begins.'}
+      </Text>
+    </View>
+
+    {/* 2x2 grid: Protein / Spent / Screen / Logged — Phase 2.1.B replaced Water tile with Protein. */}
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:10,marginTop:12}}>
+      <View style={{width:'48%',backgroundColor:theme.surfaceElevated,borderRadius:20,padding:16,position:'relative'}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+          <Caps>Protein</Caps>
+          <InfoIcon
+            title="Protein target on Home"
+            body="Shown here is your Regular protein target. If you're working out, the Active target is higher — see the Wellness tab for both."
+          />
+        </View>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:26,letterSpacing:-0.8,color:theme.text,marginTop:6}}>{myProteinCurrent}{myProteinRegularTarget>0?<Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}> / {myProteinRegularTarget}g</Text>:<Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}>g</Text>}</Text>
+        {myProteinRegularTarget>0?<View style={{marginTop:8}}>
+          <Progress value={Math.min((myProteinCurrent/myProteinRegularTarget)*100,100)}/>
+        </View>:null}
+      </View>
+      <View style={{width:'48%',backgroundColor:theme.primaryLight,borderRadius:20,padding:16}}>
+        <Caps color={theme.primary}>Spent</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:26,letterSpacing:-0.8,color:theme.primaryDeep,marginTop:6}}>₹{fmt(todayExpense)}</Text>
+        <Caps color={theme.textSecondary} style={{marginTop:6}}>{todayTxCount} transaction{todayTxCount===1?'':'s'}</Caps>
+      </View>
+      <View style={{width:'48%',backgroundColor:theme.accentLight,borderRadius:20,padding:16}}>
+        <Caps color={theme.accent}>Screen time</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:26,letterSpacing:-0.8,color:theme.accent,marginTop:6}}>{todayScreen>0?formatHrs(todayScreen):'—'}</Text>
+        <Caps color={theme.textSecondary} style={{marginTop:6}}>today</Caps>
+      </View>
+      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setDayDetailDate(new Date());setShowDayDetail(true);}} style={{width:'48%',backgroundColor:theme.surfaceElevated,borderRadius:20,padding:16}}>
+        <Caps>Logged</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:26,letterSpacing:-0.8,color:theme.text,marginTop:6}}>{todayItemsLogged} <Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}>item{todayItemsLogged===1?'':'s'}</Text></Text>
+        <Caps color={theme.textSecondary} style={{marginTop:6}}>{todayPending>0?todayPending+' still pending':'all caught up'}</Caps>
+      </TouchableOpacity>
+    </View>
+
+    {/* Did I hit my targets? */}
+    <Block style={{padding:14,marginTop:12}}>
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginBottom:6}}>Did I hit my targets?</Text>
+      {targetRows.map(function(row,i,arr){
+        var unknown=row.state==='unknown';
+        return <View key={row.key} style={{
+          flexDirection:'row',justifyContent:'space-between',alignItems:'center',
+          paddingVertical:10,
+          borderBottomWidth:i<arr.length-1?StyleSheet.hairlineWidth:0,
+          borderBottomColor:theme.border,
+        }}>
+          <View style={{flex:1,marginRight:8,flexDirection:'row',alignItems:'center'}}>
+            <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text}}>{row.q}</Text>
+            {row.info?<InfoIcon title={row.info.title} body={row.info.body} style={{marginLeft:8}}/>:null}
+          </View>
+          {row.key==='water'&&needsWaterPrompt?<View style={{flexDirection:'row',gap:6}}>
+            <TouchableOpacity activeOpacity={0.7} onPress={confirmWaterYes} style={{
+              height:30,paddingHorizontal:14,borderRadius:9999,
+              justifyContent:'center',alignItems:'center',
+              backgroundColor:theme.primary,borderWidth:1.5,borderColor:theme.primary,
+            }}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:'#fff'}}>Yes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.7} onPress={confirmWaterNo} style={{
+              height:30,paddingHorizontal:14,borderRadius:9999,
+              justifyContent:'center',alignItems:'center',
+              backgroundColor:theme.surfaceElevated,borderWidth:1.5,borderColor:theme.border,
+            }}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:theme.textSecondary}}>No</Text>
+            </TouchableOpacity>
+          </View>:<View style={{flexDirection:'row',gap:6}}>
+            {['Yes','No'].map(function(opt){
+              var sel=row.state===opt.toLowerCase();
+              return <View key={opt} style={{
+                height:30,paddingHorizontal:14,borderRadius:9999,
+                justifyContent:'center',alignItems:'center',
+                backgroundColor:sel?(opt==='Yes'?theme.primary:theme.surfaceElevated):'transparent',
+                borderWidth:1.5,
+                borderColor:sel?(opt==='Yes'?theme.primary:theme.border):theme.border,
+                opacity:unknown?0.55:1,
+              }}>
+                <Text style={{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:sel&&opt==='Yes'?'#fff':theme.textSecondary}}>{opt}</Text>
+              </View>;
+            })}
+          </View>}
+        </View>;
+      })}
+    </Block>
+
+    {/* More details divider */}
+    <View style={{flexDirection:'row',alignItems:'center',marginTop:24,marginBottom:14}}>
+      <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
+      <Caps color={theme.muted} style={{marginHorizontal:12}}>More details</Caps>
+      <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
+    </View>
+
     {/* Daily insight — the sentence is the first thing the eye lands on */}
-    {visibleTodayNudge&&<TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');navigation.navigate('Insights');}} style={[z.nudge,{marginTop:8,marginBottom:6,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}>
+    {visibleTodayNudge&&<TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');navigation.navigate('Reflect');}} style={[z.nudge,{marginTop:8,marginBottom:6,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}>
       <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}]}>
         <Text style={[z.cap,{color:theme.accent,textTransform:'uppercase',letterSpacing:0.6,fontWeight:'700'}]}>{nudgeLabel}</Text>
         <TouchableOpacity onPress={function(){dismissNudge&&dismissNudge(visibleTodayNudge.id);}}><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Dismiss</Text></TouchableOpacity>
@@ -3068,78 +4649,28 @@ function HomeScreen(){
       </Text>
     </View>}
 
-    {showCatchup&&<View style={[z.nudge,{backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}>
-      <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}]}>
-        <Text style={[z.txM,{color:theme.text,flex:1}]}>Yesterday wasn\u2019t fully captured</Text>
-        <TouchableOpacity onPress={function(){setCatchupDismissed(true);}}><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Dismiss</Text></TouchableOpacity>
-      </View>
-      {catchup.map(function(c){return<TouchableOpacity key={c.key} style={[z.row,{paddingVertical:6}]} onPress={function(){runChecklistAction(c);}}><View style={[z.checkbox,{borderColor:theme.accent}]}/><Text style={[z.body,{color:theme.text,flex:1}]}>{c.label}</Text><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Open</Text></TouchableOpacity>;})}
-    </View>}
-
-    {/* Hero card — supporting context for the sentence above. Tapping the ₹ jumps to Finance. Protein number jumps to Wellness. Member-name in 'still short' jumps to that member's wellness focus. */}
-    <View style={{borderRadius:20,backgroundColor:theme.primary,padding:20,marginTop:8,marginBottom:10}}>
-      <Text style={{fontSize:11,fontWeight:'600',color:'rgba(255,255,255,0.7)',letterSpacing:1.2,textTransform:'uppercase',marginBottom:6}}>Your family this month</Text>
-      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');navigation.navigate('Finance');}}>
-        <Text style={{fontSize:40,fontWeight:'700',color:'#FFFFFF',letterSpacing:-1,marginBottom:6}}>{'\u20B9'}{fmt(net)}</Text>
-        <Text style={{fontSize:13,color:'rgba(255,255,255,0.78)'}}>{'\u20B9'}{fmt(income)} came in \u00b7 {'\u20B9'}{fmt(expenses)} went out</Text>
-      </TouchableOpacity>
-      <View style={{height:1,backgroundColor:'rgba(255,255,255,0.18)',marginVertical:14}}/>
-      <View style={[z.row,{justifyContent:'space-between'}]}>
-        <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');navigation.navigate('Wellness');}}>
-          <Text style={{fontSize:11,fontWeight:'600',color:'rgba(255,255,255,0.7)',letterSpacing:0.6,textTransform:'uppercase',marginBottom:4}}>Protein today</Text>
-          <Text style={{fontSize:18,fontWeight:'700',color:'#FFFFFF'}}>{proteinHits} of {members.length}</Text>
-        </TouchableOpacity>
-        <View style={{alignItems:'flex-end',flex:1,marginLeft:12,flexDirection:'row',flexWrap:'wrap',justifyContent:'flex-end'}}>
-          {missing.length===0?
-            <Text style={{fontSize:11,fontWeight:'500',color:'rgba(255,255,255,0.7)',textAlign:'right'}}>Everyone close \u2713</Text>
-            :missing.map(function(name,i){return<TouchableOpacity key={name+i} onPress={function(){haptic('light');jumpProteinToMember(name);}} style={{marginLeft:6,marginBottom:4}}>
-              <Text style={{fontSize:11,fontWeight:'600',color:'rgba(255,255,255,0.95)',textDecorationLine:'underline'}}>{name}{i<missing.length-1?',':''}</Text>
-            </TouchableOpacity>;})}
-          {missing.length>0&&<Text style={{fontSize:11,fontWeight:'500',color:'rgba(255,255,255,0.7)',marginLeft:6}}>still short</Text>}
-        </View>
-      </View>
-    </View>
+    {!todayStatus.loading&&isAllCaughtUp&&<View style={[z.ok,{marginTop:10,backgroundColor:theme.primaryLight}]}><Text style={[z.okTx,{color:theme.primary}]}>Today is fully captured ✓</Text></View>}
 
     {/* Stats strip — every tile is now tappable */}
     <View style={[z.strip,{marginTop:10,marginBottom:16}]}>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToInsightsThisWeek();}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>Daily average</Text><Text style={[z.tileVal,{color:theme.text}]}>{'\u20B9'}{fmt(avgDaily)}</Text></TouchableOpacity>
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>Daily average</Text><Text style={[z.tileVal,{color:theme.text}]}>{'₹'}{fmt(avgDaily)}</Text></TouchableOpacity>
       <TouchableOpacity activeOpacity={0.7} onPress={function(){if(topCat&&topCat!=='-'){haptic('light');jumpToFinanceCategory(topCat);}}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>Most went to</Text><Text style={[z.tileVal,{color:theme.text}]} numberOfLines={1}>{topCat}</Text></TouchableOpacity>
       <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');navigation.navigate('Family');}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>In your family</Text><Text style={[z.tileVal,{color:theme.text}]}>{members.length}</Text></TouchableOpacity>
       <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_goals',nonce:Date.now()});navigation.navigate('Finance');}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>Goal progress</Text><Text style={[z.tileVal,{color:theme.text}]}>{goalsPct}%</Text></TouchableOpacity>
     </View>
 
-    {/* Today's snapshot — every card is now an entry-point */}
-    <Sec>Today at a glance</Sec>
-    <View style={{flexDirection:'row',gap:8,marginBottom:12}}>
-      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowTx(true);}} style={{flex:1,backgroundColor:theme.primaryLight,borderRadius:12,padding:14}}>
-        <Text style={{fontSize:11,fontWeight:'600',color:theme.primary,letterSpacing:0.4,textTransform:'uppercase',marginBottom:6}}>Money</Text>
-        <Text style={{fontSize:18,fontWeight:'700',color:theme.primary}}>{(transactions||[]).some(function(t){return isoDate(t.date)===isoDate(now);})?'\u2713':'\u2014'}</Text>
-        <Text style={{fontSize:11,color:theme.textSecondary,marginTop:2}}>{(transactions||[]).filter(function(t){return isoDate(t.date)===isoDate(now);}).length} captured</Text>
-      </TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'open_meal',mealType:'lunch',nonce:Date.now()});navigation.navigate('Wellness');}} style={{flex:1,backgroundColor:theme.primaryLight,borderRadius:12,padding:14}}>
-        <Text style={{fontSize:11,fontWeight:'600',color:theme.primary,letterSpacing:0.4,textTransform:'uppercase',marginBottom:6}}>Meals</Text>
-        <Text style={{fontSize:18,fontWeight:'700',color:theme.primary}}>{todayMeals.length}/3</Text>
-        <Text style={{fontSize:11,color:theme.textSecondary,marginTop:2}}>captured</Text>
-      </TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'open_screen',nonce:Date.now()});navigation.navigate('Wellness');}} style={{flex:1,backgroundColor:theme.primaryLight,borderRadius:12,padding:14}}>
-        <Text style={{fontSize:11,fontWeight:'600',color:theme.primary,letterSpacing:0.4,textTransform:'uppercase',marginBottom:6}}>Screens</Text>
-        <Text style={{fontSize:18,fontWeight:'700',color:theme.primary}}>{(wellness||[]).some(function(w){return w.date===isoDate(now)&&((w.screenHrs||0)>0||(w.screen_hrs||0)>0);})?'\u2713':'\u2014'}</Text>
-        <Text style={{fontSize:11,color:theme.textSecondary,marginTop:2}}>today</Text>
-      </TouchableOpacity>
-    </View>
-
     <Sec>How this week is going</Sec>
     <View style={[z.card,{backgroundColor:theme.card,borderColor:theme.border}]}>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToInsightsThisWeek();}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}> 
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}> 
         <Text style={[z.sub,{color:theme.textSecondary}]}>Today</Text>
         <Text style={[z.fv,{color:getCompletionColor(todaysCompletion.percent)}]}>{todaysCompletion.completed}/5 ({todaysCompletion.percent}%)</Text>
       </TouchableOpacity>
       <Bar pct={todaysCompletion.percent} color={getCompletionColor(todaysCompletion.percent)} h={8}/>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToInsightsThisWeek();}} style={[z.row,{justifyContent:'space-between',marginTop:10,marginBottom:6}]}> 
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginTop:10,marginBottom:6}]}> 
         <Text style={[z.sub,{color:theme.textSecondary}]}>Weekly average</Text>
-        <Text style={[z.fv,{color:theme.text}]}>{weeklyAvg}% {weeklyTrend===0?'':weeklyTrend>0?'\u2191':'\u2193'}{weeklyTrend===0?'':Math.abs(weeklyTrend)+'%'}</Text>
+        <Text style={[z.fv,{color:theme.text}]}>{weeklyAvg}% {weeklyTrend===0?'':weeklyTrend>0?'↑':'↓'}{weeklyTrend===0?'':Math.abs(weeklyTrend)+'%'}</Text>
       </TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToInsightsThisWeek();}} style={[z.row,{justifyContent:'space-between',marginBottom:6}]}> 
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginBottom:6}]}> 
         <Text style={[z.sub,{color:theme.textSecondary}]}>Days fully captured in a row</Text>
         <Text style={[z.fv,{color:theme.text}]}>{streak} day{streak===1?'':'s'}</Text>
       </TouchableOpacity>
@@ -3153,20 +4684,24 @@ function HomeScreen(){
       </View>
     </View>
 
-    {unconf.length>0&&<View><Sec>Waiting for you to confirm</Sec>{unconf.slice(0,5).map(function(t){return<SwipeableTxCard key={t.id} tx={t} onConfirm={function(){confirmTx(t.id);}} onEdit={function(){setEditTx(t);}}><View style={[z.card,{backgroundColor:theme.card,borderColor:theme.border}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><View style={{flex:1}}><Text style={[z.txM,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.memberName||'Joint'}</Text></View><Text style={[z.txM,{color:theme.text}]}>{'\u20B9'}{fmt(t.amount)}</Text></View><View style={[z.row,{justifyContent:'space-between'}]}><Pill label={t.category||'Uncat'}/><View style={z.row}><TouchableOpacity onPress={function(){setEditTx(t);}} style={z.editBtn}><Text style={z.editTx}>{'\u270E'}</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{backgroundColor:theme.primary}]} onPress={function(){confirmTx(t.id);}}><Text style={z.bPriT}>Confirm</Text></TouchableOpacity></View></View></View></SwipeableTxCard>;})}<Text style={[z.cap,{textAlign:'center',marginTop:4,color:theme.muted}]}>Swipe right to confirm \u00b7 Swipe left to edit</Text></View>}
-    {todayStatus.loading&&<View style={[z.card,{marginTop:16,backgroundColor:theme.card,borderColor:theme.border}]}><Text style={[z.cap,{color:theme.muted}]}>Looking at today\u2026</Text></View>}
-    {checklistVisible&&isAllCaughtUp&&<View style={[z.ok,{marginTop:16,backgroundColor:theme.primaryLight}]}><Text style={[z.okTx,{color:theme.primary}]}>Today is fully captured \u2713</Text></View>}
-    {checklistVisible&&!todayStatus.loading&&!isAllCaughtUp&&<View style={[z.nudge,{marginTop:16,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}>
-      <Text style={[z.txM,{color:theme.text,marginBottom:6}]}>Still pending today</Text>
-      {todaysMissing.map(function(item){return<TouchableOpacity key={item.key} style={[z.row,{paddingVertical:6}]} onPress={function(){runChecklistAction(item);}}><View style={[z.checkbox,{borderColor:theme.accent}]}/><Text style={[z.body,{color:theme.text,flex:1}]}>{item.label}</Text><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Open</Text></TouchableOpacity>;})}
+    {/* Phase 2.1.G: Yesterday's pending moved here from above the stats strip — sits after weekly status, before unconfirmed entries. */}
+    {showCatchup&&<View style={[z.nudge,{marginTop:14,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}>
+      <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}]}>
+        <Text style={[z.txM,{color:theme.text,flex:1}]}>Yesterday's pending</Text>
+        <TouchableOpacity onPress={function(){setCatchupDismissed(true);}}><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Dismiss</Text></TouchableOpacity>
+      </View>
+      {catchup.map(function(c){return<TouchableOpacity key={c.key} style={[z.row,{paddingVertical:6}]} onPress={function(){runChecklistAction(c);}}><View style={[z.checkbox,{borderColor:theme.accent}]}/><Text style={[z.body,{color:theme.text,flex:1}]}>{c.label}</Text><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Open</Text></TouchableOpacity>;})}
     </View>}
-    <TouchableOpacity style={[z.bPri,{alignSelf:'flex-start',marginTop:16,backgroundColor:theme.primary}]} onPress={function(){setShowTx(true);}}><Text style={z.bPriT}>+ Capture an entry</Text></TouchableOpacity>
+
+    {unconf.length>0&&<View><Sec>Waiting for you to confirm</Sec>{unconf.slice(0,5).map(function(t){return<SwipeableTxCard key={t.id} tx={t} onConfirm={function(){confirmTx(t.id);}} onEdit={function(){setEditTx(t);}}><View style={[z.card,{backgroundColor:theme.card,borderColor:theme.border}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><View style={{flex:1}}><Text style={[z.txM,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.memberName||'Joint'}</Text></View><Text style={[z.txM,{color:theme.text}]}>{'₹'}{fmt(t.amount)}</Text></View><View style={[z.row,{justifyContent:'space-between'}]}><CategoryPill label={t.category||'Uncat'}/><View style={z.row}><TouchableOpacity onPress={function(){setEditTx(t);}} style={z.editBtn}><Text style={z.editTx}>{'✎'}</Text></TouchableOpacity><PrimaryButton onPress={function(){confirmTx(t.id);}}>Confirm</PrimaryButton></View></View></View></SwipeableTxCard>;})}<Text style={[z.cap,{textAlign:'center',marginTop:4,color:theme.muted}]}>Swipe right to confirm · Swipe left to edit</Text></View>}
+    {/* PHASE 6 #6: 'Still pending today' moved to top of Home (above), this duplicate removed. */}
+    <View style={{alignSelf:'flex-start',marginTop:16}}><PrimaryButton onPress={function(){setShowTx(true);}}>+ Capture an entry</PrimaryButton></View>
     <Sec>The last seven days</Sec><View style={[z.card,{backgroundColor:theme.card,borderColor:theme.border}]}><View style={z.barRow}>{weekSpend.map(function(amt,i){
       var dayOffset=6-i;
       var barDate=addDays(now,-dayOffset);
       return<TouchableOpacity key={i} activeOpacity={0.7} onPress={function(){haptic('light');openDayDetail(barDate);}} style={z.barC}><View style={[z.bar,{height:Math.max((amt/maxSp)*80,4),backgroundColor:theme.primary}]}/><Text style={[z.barL,{color:theme.muted}]}>{dayLabels[(now.getDay()-6+i+7)%7]}</Text></TouchableOpacity>;
-    })}</View><Text style={[z.note,{color:theme.textSecondary}]}>Total: {'\u20B9'}{fmt(weekSpend.reduce(function(a,b){return a+b;},0))}</Text></View>
-    {transactions.length>0&&<View><Sec>Latest</Sec>{transactions.slice(0,5).map(function(t){return<TouchableOpacity key={t.id} style={[z.actR,{borderBottomColor:theme.border}]} onPress={function(){setEditTx(t);}}><View style={{flex:1}}><Text style={[z.actTx,{color:theme.text}]}>{t.memberName||'Joint'} {'\u20B9'}{fmt(t.amount)} {t.category}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.merchant}</Text></View><Text style={[z.cap,{color:theme.muted}]}>{'\u270E'}</Text></TouchableOpacity>;})}</View>}
+    })}</View><Text style={[z.note,{color:theme.textSecondary}]}>Total: {'₹'}{fmt(weekSpend.reduce(function(a,b){return a+b;},0))}</Text></View>
+    {transactions.length>0&&<View><Sec>Latest</Sec>{transactions.slice(0,5).map(function(t){return<TouchableOpacity key={t.id} style={[z.actR,{borderBottomColor:theme.border}]} onPress={function(){setEditTx(t);}}><View style={{flex:1}}><Text style={[z.actTx,{color:theme.text}]}>{t.memberName||'Joint'} {'₹'}{fmt(t.amount)} {t.category}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.merchant}</Text></View><Text style={[z.cap,{color:theme.muted}]}>{'✎'}</Text></TouchableOpacity>;})}</View>}
     {transactions.length===0&&<View style={[z.nudge,{marginTop:20,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}><Text style={[z.nudgeTx,{color:theme.text}]}>Nothing captured yet. The first entry is the hardest.</Text></View>}
     <View style={{height:32}}/></ScrollView></View>);
 }
@@ -3314,7 +4849,8 @@ function FinanceScreen(){
   if(filters.max)activeFilters.push('Max ₹'+filters.max);
   if(debouncedSearch.trim())activeFilters.push('Search: '+debouncedSearch.trim());
 
-  return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.background}]}> 
+  return(<View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+    <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
     <AddTxModal visible={showTx||!!editTx} onClose={function(){setShowTx(false);setEditTx(null);}} editTx={editTx} initialDate={addTxDate}/>
     <TransactionCommentsModal visible={!!selectedTxForComments} onClose={function(){setSelectedTxForComments(null);}} transaction={selectedTxForComments}/>
     <UnifiedCalendarModal visible={showCalendar} onClose={function(){setShowCalendar(false);}} context="finance" selectedDate={calendarDate} onSelectDate={setCalendarDate} onOpenDayDetail={function(d){setCalendarDate(d);setDayDetailDate(d);setShowDayDetail(true);}}/>
@@ -3323,77 +4859,221 @@ function FinanceScreen(){
     <SharedGoalModal visible={showSharedGoalModal} onClose={function(){setShowSharedGoalModal(false);setActiveSharedGoal(null);}} goal={activeSharedGoal}/> 
     <CategoryQuickPickModal visible={!!catPickTx} onClose={function(){setCatPickTx(null);}} transaction={catPickTx}/>
     <SharedGoalContributionModal visible={!!goalQuickAdd&&goalQuickAdd.kind==='shared'} onClose={function(){setGoalQuickAdd(null);}} goal={goalQuickAdd&&goalQuickAdd.kind==='shared'?goalQuickAdd.raw:null}/>
-    {showMonthPicker&&<Modal visible={true} transparent animationType="fade" onRequestClose={function(){setShowMonthPicker(false);}}><View style={[z.modalWrap,{justifyContent:'center'}]}><View style={[z.modal,{margin:20,maxHeight:380}]}>
-      <Text style={z.h1}>Choose month</Text>
-      <ScrollView style={{maxHeight:280}}>
-        {(function(){var arr=[];for(var i=0;i<24;i++){arr.push(addDays(new Date(now.getFullYear(),now.getMonth(),1),-1*i*30));}return arr.map(function(_,i){var d=new Date(now.getFullYear(),now.getMonth()-i,1);var sel=d.getMonth()===viewMonth.getMonth()&&d.getFullYear()===viewMonth.getFullYear();return<TouchableOpacity key={'m'+i} onPress={function(){haptic('light');setViewMonth(d);setShowMonthPicker(false);}} style={[z.card,{marginBottom:6,backgroundColor:sel?theme.primaryLight:theme.surface}]}><Text style={[z.txM,{color:sel?theme.primary:theme.text}]}>{d.toLocaleString('en-IN',{month:'long',year:'numeric'})}</Text></TouchableOpacity>;});})()}
-      </ScrollView>
-      <TouchableOpacity style={[z.bSec,{borderColor:theme.primary,marginTop:8}]} onPress={function(){setShowMonthPicker(false);}}><Text style={[z.bSecT,{color:theme.primary}]}>Close</Text></TouchableOpacity>
-    </View></View></Modal>}
+    <ModalSheet visible={showMonthPicker} title="Choose month" onClose={function(){setShowMonthPicker(false);}}>
+      {(function(){
+        var arr=[];for(var i=0;i<24;i++)arr.push(i);
+        return arr.map(function(i){
+          var d=new Date(now.getFullYear(),now.getMonth()-i,1);
+          var sel=d.getMonth()===viewMonth.getMonth()&&d.getFullYear()===viewMonth.getFullYear();
+          return <TouchableOpacity key={'m'+i} onPress={function(){haptic('light');setViewMonth(d);setShowMonthPicker(false);}} style={{
+            paddingVertical:12,paddingHorizontal:14,marginBottom:6,
+            backgroundColor:sel?theme.primaryLight:theme.surface,
+            borderRadius:14,
+            borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,
+          }}>
+            <Text style={{fontFamily:sel?FF.sansSemi:FF.sans,fontSize:14,color:sel?theme.primary:theme.text}}>{d.toLocaleString('en-IN',{month:'long',year:'numeric'})}</Text>
+          </TouchableOpacity>;
+        });
+      })()}
+    </ModalSheet>}
 
-    {showFilters&&<Modal visible={true} transparent animationType="slide"><View style={z.modalWrap}><View style={z.modal}><ScrollView>
-      <Text style={z.h1}>Filters</Text>
+    <ModalSheet visible={showFilters} title="Filters" onClose={function(){setShowFilters(false);}}>
       <Inp label="From date (YYYY-MM-DD)" value={filters.from} onChangeText={function(v){setFilters(Object.assign({},filters,{from:v}));}} placeholder="2026-04-01"/>
       <Inp label="To date (YYYY-MM-DD)" value={filters.to} onChangeText={function(v){setFilters(Object.assign({},filters,{to:v}));}} placeholder="2026-04-30"/>
-      <Text style={z.inpLabel}>Type</Text>
-      <View style={[z.row,{gap:8,marginBottom:12}]}>{['all','income','expense'].map(function(tp){var sel=filters.type===tp;return<TouchableOpacity key={tp} style={[z.chip,sel&&z.chipSel]} onPress={function(){setFilters(Object.assign({},filters,{type:tp}));}}><Text style={[z.chipTx,sel&&z.chipSelTx]}>{tp}</Text></TouchableOpacity>;})}</View>
-      <Text style={z.inpLabel}>Category</Text>
-      <View style={[z.row,{flexWrap:'wrap',gap:8,marginBottom:12}]}> 
-        <TouchableOpacity style={[z.chip,!filters.category&&z.chipSel]} onPress={function(){setFilters(Object.assign({},filters,{category:''}));}}><Text style={[z.chipTx,!filters.category&&z.chipSelTx]}>All</Text></TouchableOpacity>
-        {categoryFilterOptions.map(function(c){var sel=filters.category===c;return<TouchableOpacity key={c} style={[z.chip,sel&&z.chipSel]} onPress={function(){setFilters(Object.assign({},filters,{category:c}));}}><Text style={[z.chipTx,sel&&z.chipSelTx]}>{c}</Text></TouchableOpacity>;})}
+      <Text style={[z.inpLabel,{color:theme.textSecondary}]}>Type</Text>
+      <View style={{flexDirection:'row',gap:8,marginBottom:12}}>{['all','income','expense'].map(function(tp){
+        var sel=filters.type===tp;
+        return <TouchableOpacity key={tp} onPress={function(){setFilters(Object.assign({},filters,{type:tp}));}} style={{
+          height:34,paddingHorizontal:12,borderRadius:9999,
+          justifyContent:'center',alignItems:'center',
+          backgroundColor:sel?theme.primaryLight:theme.surface,
+          borderWidth:StyleSheet.hairlineWidth,borderColor:sel?theme.primary:theme.border,
+        }}>
+          <Text style={{fontFamily:sel?FF.sansSemi:FF.sans,fontSize:12,color:sel?theme.primary:theme.textSecondary,textTransform:'capitalize'}}>{tp}</Text>
+        </TouchableOpacity>;
+      })}</View>
+      <Text style={[z.inpLabel,{color:theme.textSecondary}]}>Category</Text>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:12}}>
+        <TouchableOpacity onPress={function(){setFilters(Object.assign({},filters,{category:''}));}} style={{
+          height:34,paddingHorizontal:12,borderRadius:9999,
+          justifyContent:'center',alignItems:'center',
+          backgroundColor:!filters.category?theme.primaryLight:theme.surface,
+          borderWidth:StyleSheet.hairlineWidth,borderColor:!filters.category?theme.primary:theme.border,
+        }}>
+          <Text style={{fontFamily:!filters.category?FF.sansSemi:FF.sans,fontSize:12,color:!filters.category?theme.primary:theme.textSecondary}}>All</Text>
+        </TouchableOpacity>
+        {categoryFilterOptions.map(function(c){
+          var sel=filters.category===c;
+          return <TouchableOpacity key={c} onPress={function(){setFilters(Object.assign({},filters,{category:c}));}} style={{
+            height:34,paddingHorizontal:12,borderRadius:9999,
+            justifyContent:'center',alignItems:'center',
+            backgroundColor:sel?theme.primaryLight:theme.surface,
+            borderWidth:StyleSheet.hairlineWidth,borderColor:sel?theme.primary:theme.border,
+          }}>
+            <Text style={{fontFamily:sel?FF.sansSemi:FF.sans,fontSize:12,color:sel?theme.primary:theme.textSecondary}}>{c}</Text>
+          </TouchableOpacity>;
+        })}
       </View>
-      <View style={[z.row,{gap:8}]}> 
+      <View style={{flexDirection:'row',gap:8}}>
         <View style={{flex:1}}><Inp label="Min amount" value={filters.min} onChangeText={function(v){setFilters(Object.assign({},filters,{min:v}));}} keyboardType="numeric"/></View>
         <View style={{flex:1}}><Inp label="Max amount" value={filters.max} onChangeText={function(v){setFilters(Object.assign({},filters,{max:v}));}} keyboardType="numeric"/></View>
       </View>
-      <View style={z.row}><TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={function(){setFilters({from:'',to:'',category:'',type:'all',min:'',max:''});}}><Text style={z.bSecT}>Clear all</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{flex:1}]} onPress={function(){setShowFilters(false);}}><Text style={z.bPriT}>Apply</Text></TouchableOpacity></View>
-    </ScrollView></View></View></Modal>}
+      <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+        <View style={{flex:1}}><SecondaryButton full onPress={function(){setFilters({from:'',to:'',category:'',type:'all',min:'',max:''});}}>Clear all</SecondaryButton></View>
+        <View style={{flex:1}}><PrimaryButton full onPress={function(){setShowFilters(false);}}>Apply</PrimaryButton></View>
+      </View>
+    </ModalSheet>}
 
     <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
-    <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',paddingTop:8,marginBottom:6}]}>
-      <View style={{flex:1}}>
-        <Text style={[z.h1,{color:theme.text}]}>Finance</Text>
+    {/* Header */}
+    <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',paddingTop:8,marginBottom:14}}>
+      <View style={{flex:1,marginRight:12}}>
         <TouchableOpacity onPress={function(){haptic('light');setShowMonthPicker(true);}} accessibilityRole="button">
-          <Text style={[z.caps,{color:theme.muted,marginTop:4}]}>{viewMonth.toLocaleString('en-IN',{month:'long',year:'numeric'})} {'\u203A'}</Text>
+          <Caps>{viewMonth.toLocaleString('en-IN',{month:'long',year:'numeric'})} ›</Caps>
         </TouchableOpacity>
+        <Text style={{fontFamily:FF.serif,fontSize:30,letterSpacing:-0.8,color:theme.text,marginTop:6}}>Finance</Text>
       </View>
-      <View style={[z.row,{gap:8}]}>
-        <TouchableOpacity style={{width:42,height:42,borderRadius:12,borderWidth:1,borderColor:theme.border,backgroundColor:theme.surface,alignItems:'center',justifyContent:'center'}} onPress={function(){setShowCalendar(true);}}>
-          <Text style={{fontSize:18}}>{'\uD83D\uDCC5'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[z.bSec,{borderColor:theme.primary,paddingHorizontal:14}]} onPress={function(){setShowFilters(true);}}>
-          <Text style={[z.bSecT,{color:theme.primary}]}>Filters</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-
-    <View style={{borderRadius:20,backgroundColor:theme.primary,padding:20,marginTop:12,marginBottom:14}}>
-      <Text style={{fontSize:11,fontWeight:'600',color:'rgba(255,255,255,0.7)',letterSpacing:1.2,textTransform:'uppercase',marginBottom:6}}>Spent this month</Text>
-      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_month',nonce:Date.now()});navigation.navigate('Insights');}}>
-        <Text style={{fontSize:40,fontWeight:'700',color:'#FFFFFF',letterSpacing:-1,marginBottom:14}}>{'\u20B9'}{fmt(expenses)}</Text>
+      <TouchableOpacity onPress={function(){setShowCalendar(true);}} style={{width:40,height:40,borderRadius:9999,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center'}}>
+        <CalendarIcon size={20} color={theme.text}/>
       </TouchableOpacity>
-      <View style={{flexDirection:'row',gap:10}}>
-        <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setFilters(Object.assign({},filters,{type:'income'}));}} style={{flex:1,backgroundColor:'rgba(255,255,255,0.12)',borderRadius:12,padding:12}}>
-          <Text style={{fontSize:11,color:'rgba(255,255,255,0.7)',marginBottom:4}}>Came in</Text>
-          <Text style={{fontSize:16,fontWeight:'700',color:'#FFFFFF'}}>{'\u20B9'}{fmt(income)}</Text>
-        </TouchableOpacity>
-        <View style={{flex:1,backgroundColor:'rgba(255,255,255,0.12)',borderRadius:12,padding:12}}>
-          <Text style={{fontSize:11,color:'rgba(255,255,255,0.7)',marginBottom:4}}>Kept</Text>
-          <Text style={{fontSize:16,fontWeight:'700',color:savings>=0?'#FFFFFF':'#FFD0D0'}}>{'\u20B9'}{fmt(savings)}</Text>
-          <Text style={{fontSize:10,color:'rgba(255,255,255,0.7)',marginTop:2}}>{savePct}%</Text>
-        </View>
+    </View>
+
+    {/* Saved this month — primary hero */}
+    <Block bg={theme.primary} style={{padding:22}}>
+      <Caps color="rgba(255,255,255,0.7)">Saved this month</Caps>
+      <View style={{flexDirection:'row',alignItems:'baseline',marginTop:6}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,color:'#fff',opacity:0.85}}>₹</Text>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54}}>{fmt(Math.max(savings,0))}</Text>
+      </View>
+      <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:14}}>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{income>0?savePct+'% of earnings':'Add income to see savings rate'}</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{viewMonth.toLocaleString('en-IN',{month:'short'})}</Text>
+      </View>
+    </Block>
+
+    {/* 2-up: Earned / Spent */}
+    <View style={{flexDirection:'row',gap:10,marginTop:10}}>
+      <View style={{flex:1,backgroundColor:theme.surfaceElevated,borderRadius:20,padding:16}}>
+        <Caps>Earned</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.7,color:theme.text,marginTop:6}}>₹{fmt(income)}</Text>
+      </View>
+      <View style={{flex:1,backgroundColor:theme.accentLight,borderRadius:20,padding:16}}>
+        <Caps color={theme.accent}>Spent</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.7,color:theme.accent,marginTop:6}}>₹{fmt(expenses)}</Text>
       </View>
     </View>
 
-    {income===0&&<View style={[z.nudge,{backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}><Text style={[z.nudgeTx,{color:theme.text}]}>Add what came in first to see what your family kept.</Text></View>}
-    <View style={[z.row,{gap:8,marginTop:6}]}><TouchableOpacity style={[z.bPri,{flex:1,backgroundColor:theme.primary}]} onPress={function(){setShowTx(true);}}><Text style={z.bPriT}>+ Capture expense or income</Text></TouchableOpacity></View>
+    {/* Phase 2.2.D: condensed goals strip — top 3 by progress descending. Full list still lives below in "What you're building toward". */}
+    {(function(){
+      var allGoals=[].concat(
+        (financeGoals||[]).map(function(g){var t=Number(g.target||0);return{kind:'personal',id:g.id,name:g.name,current:Number(g.current||0),target:t,pct:t>0?(Number(g.current||0)/t)*100:0,raw:g};}),
+        (financeSharedGoals||[]).map(function(g){var t=Number(g.target_amount||0);return{kind:'shared',id:g.id,name:g.goal_name,current:Number(g.current_amount||0),target:t,pct:t>0?(Number(g.current_amount||0)/t)*100:0,raw:g};})
+      );
+      if(allGoals.length===0)return <Caps color={theme.muted} style={{marginTop:14}}>No money goals yet — start one below.</Caps>;
+      var top3=allGoals.slice().sort(function(a,b){return b.pct-a.pct;}).slice(0,3);
+      return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginTop:12}} contentContainerStyle={{gap:10,paddingRight:18}}>
+        {top3.map(function(g){
+          var pct=Math.min(Math.round(g.pct),100);
+          var fillColor=g.kind==='shared'?theme.accent:theme.primary;
+          return <TouchableOpacity key={g.kind+'-'+g.id} activeOpacity={0.85} onPress={function(){haptic('light');if(g.kind==='personal'){setEditGoal(g.raw);}else{setActiveSharedGoal(g.raw);setShowSharedGoalModal(true);}}} style={{
+            width:140,padding:12,borderRadius:16,
+            backgroundColor:theme.surface,
+            borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,
+          }}>
+            <Text numberOfLines={1} ellipsizeMode="tail" style={{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:theme.text}}>{g.name}</Text>
+            <View style={{height:4,borderRadius:9999,backgroundColor:theme.surfaceElevated,marginTop:8,overflow:'hidden'}}>
+              <View style={{width:pct+'%',height:'100%',backgroundColor:fillColor}}/>
+            </View>
+            <Text style={{fontFamily:FF.sansBold,fontSize:14,fontWeight:'700',color:theme.text,marginTop:6}}>{pct}%</Text>
+          </TouchableOpacity>;
+        })}
+      </ScrollView>;
+    })()}
+
+    {/* Where it went — all categories sorted, tappable to filter (Phase 2.2.B) */}
+    <Block style={{padding:16,marginTop:12}}>
+      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Where it went</Text>
+        <Caps color={theme.muted}>Tap to filter</Caps>
+      </View>
+      {(function(){
+        var sorted=Object.keys(catData).map(function(c){return{cat:c,amt:catData[c]||0};}).filter(function(o){return o.amt>0;}).sort(function(a,b){return b.amt-a.amt;});
+        if(sorted.length===0)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No spending yet this month.</Text>;
+        return sorted.map(function(row,i){
+          var pct=expenses>0?Math.round((row.amt/expenses)*100):0;
+          var active=filters.category===row.cat;
+          return <TouchableOpacity key={row.cat} activeOpacity={0.7} onPress={function(){haptic('light');setFilters(Object.assign({},filters,{category:row.cat}));}} style={{marginBottom:i<sorted.length-1?12:0,opacity:active?1:1}}>
+            <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:6,alignItems:'center'}}>
+              <View style={{flexDirection:'row',alignItems:'center',gap:6,flex:1}}>
+                <Text style={{fontFamily:active?FF.sansSemi:FF.sans,fontSize:13,fontWeight:active?'600':'500',color:active?theme.primary:theme.text}}>{row.cat}</Text>
+                {active?<Text style={{fontFamily:FF.sansBold,fontSize:11,color:theme.primary}}>•</Text>:null}
+                <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted}}>{pct}%</Text>
+              </View>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:13,fontWeight:'600',color:theme.text}}>₹{fmt(row.amt)}</Text>
+            </View>
+            <Progress value={pct}/>
+          </TouchableOpacity>;
+        });
+      })()}
+    </Block>
+
+    {/* Recent transactions — top 5 */}
+    <Block style={{padding:0,marginTop:12,overflow:'hidden'}}>
+      <View style={{paddingHorizontal:16,paddingTop:14,paddingBottom:8,flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Recent</Text>
+        <Caps color={theme.primary}>{filteredMonthTxs.length} this month</Caps>
+      </View>
+      {filteredMonthTxs.slice(0,5).map(function(t){
+        var isInc=t.category==='Income';
+        var memberObj=(members||[]).find(function(m){return m.id===t.memberId;});
+        var slotIdx=memberObj?(members||[]).indexOf(memberObj):0;
+        var slot=SLOTS[slotIdx%5]||SLOTS[0];
+        var cc=CATS[t.category]||CATS.Uncat;
+        return <View key={t.id} style={{flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:16,paddingVertical:12,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.border}}>
+          <Avatar name={t.memberName||'?'} color={slot.bg} size={32}/>
+          <View style={{flex:1,minWidth:0}}>
+            <Text numberOfLines={1} style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{t.merchant}</Text>
+            <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:4}}>
+              <Pill bg={cc.bg} fg={cc.text}>{t.category||'Uncat'}</Pill>
+              <Caps color={theme.muted}>{displayDate(t.date)}</Caps>
+            </View>
+          </View>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,letterSpacing:-0.2,color:isInc?theme.primary:theme.text}}>
+            {isInc?'+':'−'}₹{fmt(Math.abs(t.amount))}
+          </Text>
+        </View>;
+      })}
+      {filteredMonthTxs.length===0&&<View style={{paddingHorizontal:16,paddingVertical:14,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.border}}>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No entries yet. Capture your first below.</Text>
+      </View>}
+    </Block>
+
+    {/* Capture entry CTA */}
+    <View style={{marginTop:14}}>
+      <PrimaryButton full onPress={function(){setShowTx(true);}}>+ Capture expense or income</PrimaryButton>
+    </View>
+
+    {income===0&&<Block bg={theme.accentLight} style={{marginTop:10,borderLeftWidth:3,borderLeftColor:theme.accent,borderRadius:16,padding:14}}>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,lineHeight:20}}>Add what you earned first to see what your family saved.</Text>
+    </Block>}
+
+    {/* More details divider */}
+    <View style={{flexDirection:'row',alignItems:'center',marginTop:24,marginBottom:14}}>
+      <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
+      <Caps color={theme.muted} style={{marginHorizontal:12}}>More details</Caps>
+      <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
+    </View>
+
+    <View style={{flexDirection:'row',gap:8,marginBottom:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={function(){setShowFilters(true);}}>Filters</SecondaryButton></View>
+    </View>
     {unconfirmedRecurringTx.length>0&&<View style={[z.nudge,{marginTop:10,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}> 
-      <Text style={[z.txM,{color:theme.text,marginBottom:6}]}>These usually happen \u2014 confirm if they did</Text>
+      <Text style={[z.txM,{color:theme.text,marginBottom:6}]}>These usually happen — confirm if they did</Text>
       {unconfirmedRecurringTx.slice(0,5).map(function(t){return <View key={t.id} style={[z.row,{justifyContent:'space-between',alignItems:'center',marginBottom:6}]}> 
-        <View style={{flex:1,paddingRight:8}}><Text style={[z.body,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(t.date)} \u00b7 {'\u20B9'}{fmt(t.amount)}</Text></View>
-        <View style={z.row}><TouchableOpacity style={[z.bSec,{borderColor:theme.primary,paddingHorizontal:10,paddingVertical:6,marginRight:6}]} onPress={function(){setEditTx(t);}}><Text style={[z.bSecT,{color:theme.primary}]}>Edit</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{backgroundColor:theme.primary,paddingHorizontal:10,paddingVertical:6}]} onPress={function(){confirmTransaction(t);}}><Text style={z.bPriT}>Confirm</Text></TouchableOpacity></View>
+        <View style={{flex:1,paddingRight:8}}><Text style={[z.body,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(t.date)} · {'₹'}{fmt(t.amount)}</Text></View>
+        <View style={z.row}><View style={{marginRight:6}}><SecondaryButton onPress={function(){setEditTx(t);}} style={{height:32,paddingHorizontal:10}}>Edit</SecondaryButton></View><PrimaryButton onPress={function(){confirmTransaction(t);}} style={{height:32,paddingHorizontal:10}}>Confirm</PrimaryButton></View>
       </View>;})}
     </View>}
     <Inp label="Search entries" value={searchText} onChangeText={setSearchText} placeholder="Search by what or where"/>
@@ -3404,40 +5084,38 @@ function FinanceScreen(){
       else if(f==='To '+filters.to)nextFilters.to='';
       else if(f===filters.category)nextFilters.category='';
       else if(f===filters.type)nextFilters.type='all';
-      else if(f==='Min \u20B9'+filters.min)nextFilters.min='';
-      else if(f==='Max \u20B9'+filters.max)nextFilters.max='';
+      else if(f==='Min ₹'+filters.min)nextFilters.min='';
+      else if(f==='Max ₹'+filters.max)nextFilters.max='';
       else if(f==='Search: '+debouncedSearch.trim()){setSearchText('');setDebouncedSearch('');return;}
       setFilters(nextFilters);
-    }} style={z.filterChip}><Text style={z.filterChipTx}>{f} \u00d7</Text></TouchableOpacity>;})}</View>}
+    }} style={z.filterChip}><Text style={z.filterChipTx}>{f} ×</Text></TouchableOpacity>;})}</View>}
     <Text style={[z.cap,{marginBottom:8}]}>Showing {filteredMonthTxs.length} of {monthTxs.length} entries</Text>
 
-    <Sec>Where the money went</Sec>{categoryFilterOptions.map(function(c){var amt=catData[c]||0;var pct=expenses>0?Math.round((amt/expenses)*100):0;return<TouchableOpacity key={c} activeOpacity={0.7} onPress={function(){haptic('light');setFilters(Object.assign({},filters,{category:filters.category===c?'':c}));}} style={[z.card,{marginBottom:8,backgroundColor:filters.category===c?theme.primaryLight:theme.card,borderColor:filters.category===c?theme.primary:theme.border}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}><Text style={z.txM}>{c}</Text><View style={z.row}><Text style={[z.fv,{marginRight:8}]}>{'₹'}{fmt(amt)}</Text><View style={[z.pctB,{backgroundColor:(CAT_COLORS[c]||'#555')+'18'}]}><Text style={[z.pctT,{color:CAT_COLORS[c]||'#555'}]}>{pct}%</Text></View></View></View><Bar pct={pct} color={CAT_COLORS[c]||'#777'}/></TouchableOpacity>;})}
-
-    <Sec>This month\u2019s entries</Sec>{filteredMonthTxs.slice(0,25).map(function(t){var commentCount=(transactionComments||[]).filter(function(c){return c.transaction_id===t.id;}).length;return<View key={t.id} style={z.txRow}><TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}}><Text style={[z.body,{flex:1}]}>{t.merchant}</Text><Text style={z.cap}>{displayDate(t.date)} · {t.memberName||'Joint'}</Text></TouchableOpacity><Text style={[z.fv,{marginRight:8}]}>{'₹'}{fmt(t.amount)}</Text>{t.is_family_spending&&<Text style={[z.cap,{color:'#0F6E56',marginRight:6}]}>👨‍👩‍👧 Family</Text>}<TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){haptic('light');setCatPickTx(t);} else Alert.alert('Read only','Only admin can change other member entries.');}}><Pill label={t.category||'Uncat'}/></TouchableOpacity><TouchableOpacity onPress={function(){setSelectedTxForComments(t);}} style={z.editBtn}><Text style={z.editTx}>💬</Text>{commentCount>0&&<View style={z.commentCountBadge}><Text style={z.commentCountTx}>{commentCount}</Text></View>}</TouchableOpacity><TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity><TouchableOpacity onPress={function(){deleteTx(t);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity></View>;})}
-    {filteredMonthTxs.length===0&&<Text style={z.cap}>Nothing matches those filters.</Text>}
-    <Sec>What you\u2019re building toward</Sec>{[].concat((financeGoals||[]).map(function(g){var gt=(g.goal_type||((g.is_shared||g.goal_scope==='shared')?'shared':'personal'));return{kind:gt==='shared'?'shared':'personal',id:g.id,name:g.name,current:Number(g.current||0),target:Number(g.target||0),category:g.category||'General',raw:g,source:'goals'};}),(financeSharedGoals||[]).map(function(g){return{kind:'shared',id:g.id,name:g.goal_name,current:Number(g.current_amount||0),target:Number(g.target_amount||0),category:g.category||'General',raw:g,source:'shared_goals'};})).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return<TouchableOpacity key={g.kind+'-'+g.source+'-'+g.id} style={[z.card,{marginBottom:8}]} onPress={function(){if(g.kind==='personal'){setEditGoal(g.raw);}else{setActiveSharedGoal(g.raw);setShowSharedGoalModal(true);}}} onLongPress={function(){if(g.kind==='shared'){haptic('medium');setGoalQuickAdd(g);}}} delayLongPress={350}><View style={[z.row,{justifyContent:'space-between',alignItems:'center'}]}><View style={{flex:1,paddingRight:8}}><View style={[z.row,{alignItems:'center',flexWrap:'wrap'}]}><Text style={z.txM}>{g.name}</Text>{g.kind==='shared'&&<View style={z.goalFamilyBadge}><Text style={z.goalFamilyBadgeTx}>Family</Text></View>}{g.kind==='personal'&&<View style={[z.goalFamilyBadge,{backgroundColor:'#F2F2EE'}]}><Text style={[z.goalFamilyBadgeTx,{color:'#555'}]}>Personal</Text></View>}</View><Text style={[z.cap,{marginTop:4}]}>{g.category||'General'}</Text></View><Text style={[z.fv,{color:g.kind==='shared'?'#0F6E56':'#BA7517'}]}>{Math.min(pct,999)}%</Text></View><Text style={[z.cap,{marginVertical:6}]}>{fmt(g.current)} / {fmt(g.target)} progress</Text><Bar pct={Math.min(pct,100)} color={g.kind==='shared'?'#0F6E56':'#EF9F27'}/><Text style={[z.cap,{marginTop:4}]}>{g.kind==='shared'?'Tap to edit \u00b7 Long-press to add a contribution':'Tap to edit goal'}</Text></TouchableOpacity>;})}
-    {((financeGoals||[]).length===0&&(financeSharedGoals||[]).length===0)&&<Text style={z.cap}>No money goals yet. The first one starts below.</Text>}
-    <TouchableOpacity style={[z.bPri,{alignSelf:'flex-start'}]} onPress={function(){setGoalContext('Finance');setShowGoal(true);}}><Text style={z.bPriT}>+ New money goal</Text></TouchableOpacity>
+    <Sec>This month’s entries</Sec>{filteredMonthTxs.slice(0,25).map(function(t){var commentCount=(transactionComments||[]).filter(function(c){return c.transaction_id===t.id;}).length;return<View key={t.id} style={z.txRow}><TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}}><Text style={[z.body,{flex:1}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(t.date)} · {t.memberName||'Joint'}</Text></TouchableOpacity><Text style={[z.fv,{marginRight:8}]}>{'₹'}{fmt(t.amount)}</Text>{t.is_family_spending&&<Text style={[z.cap,{color:'#0F6E56',marginRight:6}]}>👨‍👩‍👧 Family</Text>}<TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){haptic('light');setCatPickTx(t);} else Alert.alert('Read only','Only admin can change other member entries.');}}><CategoryPill label={t.category||'Uncat'}/></TouchableOpacity><TouchableOpacity onPress={function(){setSelectedTxForComments(t);}} style={z.editBtn}><Text style={z.editTx}>💬</Text>{commentCount>0&&<View style={z.commentCountBadge}><Text style={z.commentCountTx}>{commentCount}</Text></View>}</TouchableOpacity><TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity><TouchableOpacity onPress={function(){deleteTx(t);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity></View>;})}
+    {filteredMonthTxs.length===0&&<Text style={[z.cap,{color:theme.muted}]}>Nothing matches those filters.</Text>}
+    <Sec>What you’re building toward</Sec>{[].concat((financeGoals||[]).map(function(g){var gt=(g.goal_type||((g.is_shared||g.goal_scope==='shared')?'shared':'personal'));return{kind:gt==='shared'?'shared':'personal',id:g.id,name:g.name,current:Number(g.current||0),target:Number(g.target||0),category:g.category||'General',raw:g,source:'goals'};}),(financeSharedGoals||[]).map(function(g){return{kind:'shared',id:g.id,name:g.goal_name,current:Number(g.current_amount||0),target:Number(g.target_amount||0),category:g.category||'General',raw:g,source:'shared_goals'};})).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return<TouchableOpacity key={g.kind+'-'+g.source+'-'+g.id} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]} onPress={function(){if(g.kind==='personal'){setEditGoal(g.raw);}else{setActiveSharedGoal(g.raw);setShowSharedGoalModal(true);}}} onLongPress={function(){if(g.kind==='shared'){haptic('medium');setGoalQuickAdd(g);}}} delayLongPress={350}><View style={[z.row,{justifyContent:'space-between',alignItems:'center'}]}><View style={{flex:1,paddingRight:8}}><View style={[z.row,{alignItems:'center',flexWrap:'wrap'}]}><Text style={[z.txM,{color:theme.text}]}>{g.name}</Text>{g.kind==='shared'&&<View style={z.goalFamilyBadge}><Text style={z.goalFamilyBadgeTx}>Family</Text></View>}{g.kind==='personal'&&<View style={[z.goalFamilyBadge,{backgroundColor:'#F2F2EE'}]}><Text style={[z.goalFamilyBadgeTx,{color:'#555'}]}>Personal</Text></View>}</View><Text style={[z.cap,{marginTop:4}]}>{g.category||'General'}</Text></View><Text style={[z.fv,{color:g.kind==='shared'?'#0F6E56':'#BA7517'}]}>{Math.min(pct,999)}%</Text></View><Text style={[z.cap,{marginVertical:6}]}>{fmt(g.current)} / {fmt(g.target)} progress</Text><Bar pct={Math.min(pct,100)} color={g.kind==='shared'?'#0F6E56':'#EF9F27'}/><Text style={[z.cap,{marginTop:4}]}>{g.kind==='shared'?'Tap to edit · Long-press to add a contribution':'Tap to edit goal'}</Text></TouchableOpacity>;})}
+    {((financeGoals||[]).length===0&&(financeSharedGoals||[]).length===0)&&<Text style={[z.cap,{color:theme.muted}]}>No money goals yet. The first one starts below.</Text>}
+    <View style={{alignSelf:'flex-start'}}><PrimaryButton onPress={function(){setGoalContext('Finance');setShowGoal(true);}}>+ New money goal</PrimaryButton></View>
 
     <Sec>Repeating entries</Sec>
     {(recurringTransactions||[]).map(function(r){
       var days=Math.floor((startOfDay(r.next_due_date)-startOfDay(new Date()))/86400000);
       var dueSoon=days>=0&&days<=7;
       return <TouchableOpacity key={r.id} activeOpacity={0.7} onPress={function(){
-        // F19: tap row \u2192 open the related transaction edit if one exists; otherwise open new tx prefilled with the recurring info
+        // F19: tap row → open the related transaction edit if one exists; otherwise open new tx prefilled with the recurring info
         var related=(transactions||[]).find(function(t){return t.recurring_transaction_id===r.id;});
         if(related){setEditTx(related);}
         else{
           var stub={id:null,merchant:r.description,amount:r.amount,category:r.category||'',date:r.next_due_date,recurring_transaction_id:r.id};
           setEditTx(stub);
         }
-      }} style={[z.card,{marginBottom:8,borderColor:dueSoon?'#BA7517':'#E0E0DB'}]}> 
-      <View style={[z.row,{justifyContent:'space-between'}]}><Text style={z.txM}>{r.description}</Text><Text style={z.fv}>₹{fmt(r.amount)}</Text></View>
-      <Text style={z.cap}>{r.transaction_type} · {r.frequency} · Next due {displayDate(r.next_due_date)}</Text>
+      }} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8,borderColor:dueSoon?'#BA7517':'#E0E0DB'}]}> 
+      <View style={[z.row,{justifyContent:'space-between'}]}><Text style={[z.txM,{color:theme.text}]}>{r.description}</Text><Text style={[z.fv,{color:theme.text}]}>₹{fmt(r.amount)}</Text></View>
+      <Text style={[z.cap,{color:theme.muted}]}>{r.transaction_type} · {r.frequency} · Next due {displayDate(r.next_due_date)}</Text>
       {dueSoon&&<Text style={[z.cap,{color:'#BA7517',marginTop:4,fontWeight:'500'}]}>Due in {days} day{days===1?'':'s'}</Text>}
       <TouchableOpacity style={{marginTop:8,alignSelf:'flex-start'}} onPress={function(){deactivateRecurring(r);}}><Text style={[z.cap,{color:'#E24B4A',fontWeight:'500'}]}>Disable</Text></TouchableOpacity>
     </TouchableOpacity>;})}
-    {(!recurringTransactions||recurringTransactions.length===0)&&<Text style={z.cap}>No recurring entries yet. Enable it when adding a transaction.</Text>}
+    {(!recurringTransactions||recurringTransactions.length===0)&&<Text style={[z.cap,{color:theme.muted}]}>No recurring entries yet. Enable it when adding a transaction.</Text>}
     <View style={{height:32}}/></ScrollView></View>);
 }
 
@@ -3448,11 +5126,14 @@ function WellnessScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,members,userId,isAdmin,meals,wellness,goals,memberProfiles,userProfile,quickAction,setQuickAction,refreshMeals,refreshWellness,refreshTransactions,removeMealLocal,removeWellnessLocal,logActivity,currentUserName,waterTrackingEnabled,scores,streaks,transactions}=useApp();
+  var{familyId,members,userId,isAdmin,meals,wellness,goals,memberProfiles,userProfile,quickAction,setQuickAction,refreshMeals,refreshWellness,refreshTransactions,removeMealLocal,removeWellnessLocal,logActivity,currentUserName,waterTrackingEnabled,waterTargetLitres,setWaterTargetLitres,scores,streaks,transactions,familyProteinToday,screenTargetHrs,setScreenTargetHrs,screenTimeAutoEnabled,setScreenTimeAutoEnabled,requestScreenTimePermission,activities,deleteActivity}=useApp();
   var[showMeal,setShowMeal]=useState(false);
   var[editMeal,setEditMeal]=useState(null); // B2
   var[showWater,setShowWater]=useState(false); // B3
   var[showScreen,setShowScreen]=useState(false); // B3
+  var[showActivity,setShowActivity]=useState(false); // Phase B3
+  var[editActivity,setEditActivity]=useState(null); // Phase B3
+  var[activityDate,setActivityDate]=useState(new Date()); // Phase B3
   var[showCalendar,setShowCalendar]=useState(false);
   var[calendarDate,setCalendarDate]=useState(new Date());
   var[showDayDetail,setShowDayDetail]=useState(false);
@@ -3464,6 +5145,7 @@ function WellnessScreen(){
   var[waterDate,setWaterDate]=useState(new Date());
   var[screenDate,setScreenDate]=useState(new Date());
   var[memberFilterId,setMemberFilterId]=useState(null); // W1: filter by member
+  var[editScreenTarget,setEditScreenTarget]=useState(false); // B4: pencil-edit modal toggle
   var[memberDetail,setMemberDetail]=useState(null); // W4/W6 sheet
   var[refreshing,setRefreshing]=useState(false);
   var memberFilterRef=React.useRef(null);
@@ -3536,31 +5218,62 @@ function WellnessScreen(){
     ]);
   }
   var today=isoDate(new Date());var todayMeals=meals.filter(function(m){return isoDate(m.date)===today;});
-  var proteinMapByMemberId={};todayMeals.forEach(function(m){var key=m.memberId||m.member_id||('name_'+(m.memberName||m.member_name||''));proteinMapByMemberId[key]=(proteinMapByMemberId[key]||0)+(Number(m.protein)||0);});
-  var todayW=wellness.filter(function(w){return w.date===today;});var totalWaterLitres=todayW.reduce(function(s,w){return s+(Number(w.water)||0);},0);
-  var perMemberTargets=(members||[]).map(function(m){
-    var profile=(memberProfiles&&m.userId)?memberProfiles[m.userId]:null;
-    var targets=calculateProteinTargets(profile&&profile.weightKg?profile.weightKg:null);
-    var target=targets.active;
-    var proteinKey=m.id||('name_'+m.name);
-    var consumed=proteinMapByMemberId[proteinKey]||proteinMapByMemberId['name_'+m.name]||0;
-    var wellRow=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});
-    return{member:m,target:target,targets:targets,protein:consumed,wellnessRow:wellRow};
-  });
+  var todayW=wellness.filter(function(w){return w.date===today;});
+  // Phase 2.3 step 1: per-member protein lifted to AppContext as familyProteinToday.
   var currentUserMember=(members||[]).find(function(m){return m.userId===userId;})||null;
   var currentUserMemberProfile=(currentUserMember&&memberProfiles)?memberProfiles[currentUserMember.userId]:null;
   var currentUserWeightKg=parseWeightKg(userProfile&&userProfile.weight,userProfile&&userProfile.weight_unit)||(currentUserMemberProfile&&currentUserMemberProfile.weightKg)||null;
   var currentUserProteinTargets=calculateProteinTargets(currentUserWeightKg);
-  var todayProteinForCurrentUser=currentUserMember?(proteinMapByMemberId[currentUserMember.id]||proteinMapByMemberId['name_'+currentUserMember.name]||0):0;
-  var totalProtein=perMemberTargets.reduce(function(sum,x){return sum+x.protein;},0);
-  var totalProteinTarget=perMemberTargets.reduce(function(sum,x){return sum+x.target;},0);
+  var todayProteinForCurrentUser=currentUserMember?((familyProteinToday.find(function(x){return x.member.id===currentUserMember.id;})||{}).current||0):0;
+  var totalProtein=familyProteinToday.reduce(function(sum,x){return sum+x.current;},0);
+  var totalProteinTarget=familyProteinToday.reduce(function(sum,x){return sum+x.target;},0);
   var wellnessGoals=(goals||[]).filter(function(g){var c=String(g.category||'').toLowerCase();return c==='health'||c==='protein'||c==='hydration'||c==='sleep'||c==='screen time';});
-  return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.background}]}>
+  return(<View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+    <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
     <AddMealModal visible={showMeal||!!editMeal} onClose={function(){setShowMeal(false);setEditMeal(null);setInitialMealType('lunch');}} editMeal={editMeal} initialMealType={initialMealType} initialDate={mealDate}/>
     <UnifiedCalendarModal visible={showCalendar} onClose={function(){setShowCalendar(false);}} context="wellness" selectedDate={calendarDate} onSelectDate={setCalendarDate} onOpenDayDetail={function(d){setCalendarDate(d);setDayDetailDate(d);setShowDayDetail(true);}}/>
     <DayDetailModal visible={showDayDetail} date={dayDetailDate} onClose={function(){setShowDayDetail(false);}} onChangeDate={setDayDetailDate} onEditMeal={function(m){setShowDayDetail(false);setEditMeal(m);setMealDate(toDate(m.date));}} onAddMeal={function(d){setShowDayDetail(false);setMealDate(d);setShowMeal(true);}} onAddWater={function(d){setShowDayDetail(false);setWaterDate(d);setShowWater(true);}} onAddScreen={function(d){setShowDayDetail(false);setScreenDate(d);setShowScreen(true);}} onAddTransaction={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_tx',initialDate:isoDate(d),nonce:Date.now()});}}/>
     <LogWaterModal visible={showWater} onClose={function(){setShowWater(false);}} initialDate={waterDate}/>
     <LogScreenTimeModal visible={showScreen} onClose={function(){setShowScreen(false);}} initialDate={screenDate}/>
+    <LogActivityModal visible={showActivity||!!editActivity} onClose={function(){setShowActivity(false);setEditActivity(null);}} initialDate={activityDate} editActivity={editActivity}/>
+    <ModalSheet visible={editScreenTarget} title="Your screen-time target" onClose={function(){setEditScreenTarget(false);}}>
+      <Text style={{fontFamily:FF.sans,fontSize:14,lineHeight:21,color:theme.textSecondary,marginBottom:18}}>Set your daily screen-time limit. Used by the Time on Screens hero, the "Stayed under Xh" check on Home, and your ring fill.</Text>
+      <View style={{flexDirection:'row',gap:12,alignItems:'center',marginBottom:14}}>
+        <TouchableOpacity onPress={function(){
+          var next=Math.max(LIMITS.wellness.screenTargetMinH, Number(((screenTargetHrs||2)-0.5).toFixed(1)));
+          setScreenTargetHrs&&setScreenTargetHrs(next);
+          haptic('light');
+        }} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>−</Text></TouchableOpacity>
+        <View style={{flex:1,alignItems:'center'}}>
+          <Text style={{fontFamily:FF.sansBold,fontSize:32,letterSpacing:-0.8,color:theme.text}}>{Number(screenTargetHrs||2).toFixed(1)}<Text style={{fontFamily:FF.sans,fontSize:18,color:theme.textSecondary}}> h</Text></Text>
+        </View>
+        <TouchableOpacity onPress={function(){
+          var next=Math.min(LIMITS.wellness.screenTargetMaxH, Number(((screenTargetHrs||2)+0.5).toFixed(1)));
+          setScreenTargetHrs&&setScreenTargetHrs(next);
+          haptic('light');
+        }} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>+</Text></TouchableOpacity>
+      </View>
+      <Caps color={theme.muted} style={{marginBottom:14,textAlign:'center'}}>Range: {LIMITS.wellness.screenTargetMinH}h to {LIMITS.wellness.screenTargetMaxH}h · Adjust by 0.5h</Caps>
+      {Platform.OS==='android'?<View style={{marginBottom:14,paddingVertical:14,paddingHorizontal:14,borderRadius:12,backgroundColor:theme.surfaceElevated,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+          <View style={{flex:1,marginRight:10}}>
+            <Text style={{fontFamily:FF.sansSemi,fontSize:14,color:theme.text}}>Auto-sync from device</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,marginTop:2,lineHeight:17}}>Pull screen time directly from this device's usage stats. No manual logging.</Text>
+          </View>
+          <Switch
+            value={!!screenTimeAutoEnabled}
+            onValueChange={async function(next){
+              setScreenTimeAutoEnabled&&setScreenTimeAutoEnabled(next);
+              if(next&&requestScreenTimePermission){await requestScreenTimePermission();}
+            }}
+            trackColor={{true:theme.primary,false:theme.border}}
+            thumbColor="#fff"
+          />
+        </View>
+        <Caps color={theme.muted} style={{marginTop:10}}>Coming soon — requires app update with the Android usage-stats native module. The toggle persists your preference now; auto-ingest activates once the native bridge ships.</Caps>
+      </View>:null}
+      <PrimaryButton full onPress={function(){setEditScreenTarget(false);}}>Done</PrimaryButton>
+    </ModalSheet>
     <AddGoalModal visible={showGoal} onClose={function(){setShowGoal(false);}} defaultGoalType="personal" defaultCategory="Health" contextLabel="Wellness"/>
     {editGoal&&<EditGoalModal visible={true} onClose={function(){setEditGoal(null);}} goal={editGoal} familyId={familyId}/>}
     <MemberDetailModal visible={!!memberDetail} member={memberDetail} onClose={function(){setMemberDetail(null);}}
@@ -3573,17 +5286,171 @@ function WellnessScreen(){
     <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
-    <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',paddingTop:8,marginBottom:12}]}>
-      <View style={{flex:1}}>
-        <Text style={[z.h1,{color:theme.text}]}>Wellness</Text>
-        <Text style={[z.caps,{color:theme.muted,marginTop:4}]}>{new Date().toLocaleDateString('en-IN',{month:'long',day:'numeric',year:'numeric'})}</Text>
+    {/* Header */}
+    <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',paddingTop:8,marginBottom:14}}>
+      <View style={{flex:1,marginRight:12}}>
+        <Caps>Today · {new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</Caps>
+        <Text style={{fontFamily:FF.serif,fontSize:30,letterSpacing:-0.8,color:theme.text,marginTop:6}}>Wellness</Text>
       </View>
-      <TouchableOpacity style={{width:42,height:42,borderRadius:12,borderWidth:1,borderColor:theme.border,backgroundColor:theme.surface,alignItems:'center',justifyContent:'center'}} onPress={function(){setShowCalendar(true);}}>
-        <Text style={{fontSize:18}}>{'\uD83D\uDCC5'}</Text>
+      <TouchableOpacity onPress={function(){setShowCalendar(true);}} style={{width:40,height:40,borderRadius:9999,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center'}}>
+        <CalendarIcon size={20} color={theme.text}/>
       </TouchableOpacity>
     </View>
 
-    {/* W1: Member chip strip — tap to filter to that member, tap again or 'All' to clear */}
+    {/* Phase 2.3.A v2: Protein Today hero — per-member numbers above each ring (no family-aggregate stat).
+        Sibling-pattern overlay so per-ring taps don't bubble to the hero's tap-to-log-meal handler. */}
+    <View style={{position:'relative'}}>
+      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowMeal(true);}}>
+        <Block bg={theme.primary} style={{padding:22}}>
+          <Caps color="rgba(255,255,255,0.7)">Protein today</Caps>
+          {/* Spacer reserved for the absolute-positioned ring row sibling below */}
+          <View style={{height:96,marginTop:22}}/>
+          <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:18}}>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{members.length} member{members.length===1?'':'s'}</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>Tap to log meal</Text>
+          </View>
+        </Block>
+      </TouchableOpacity>
+      {/* Ring row — sibling overlay. Y offset = padding(22) + caps(~16) + gap(22) = 60. Spacer height (96) accounts for aboveLabel + ring + name. */}
+      <View style={{position:'absolute',left:22,right:22,top:60,height:96,justifyContent:'center'}} pointerEvents="box-none">
+        {(function(){
+          var memberCount=familyProteinToday.length;
+          if(memberCount===0)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</Caps>;
+          var allZero=familyProteinToday.every(function(x){return (Number(x.current)||0)===0;});
+          if(allZero)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Today's progress will appear as meals are logged</Caps>;
+          var ringDiameter=memberCount<=4?56:(memberCount===5?52:(memberCount===6?48:44));
+          var ringStroke=memberCount<=5?4:3.5;
+          var useScroll=memberCount>=7;
+          var rings=familyProteinToday.map(function(item){
+            var nameWords=(item.member.name||'').split(' ').filter(Boolean);
+            var initials=nameWords.map(function(p){return p.charAt(0);}).slice(0,2).join('').toUpperCase()||'?';
+            var firstName=nameWords[0]||'?';
+            var regularTarget=Number(item.targets&&item.targets.regular)||0;
+            var ringTarget=regularTarget>0?regularTarget:(Number(item.target)||1);
+            var aboveLabel=<Text style={{fontSize:12,color:'#fff',textAlign:'center'}}>
+              <Text style={{fontFamily:FF.sansBold,color:'#fff'}}>{item.current}</Text>
+              <Text style={{fontFamily:FF.sans,color:'rgba(255,255,255,0.7)'}}>{regularTarget>0?' / '+regularTarget+'g':'g'}</Text>
+            </Text>;
+            return <FamilyMemberRing
+              key={item.member.id||firstName}
+              member={{initials:initials,name:firstName,current:item.current,target:ringTarget}}
+              variant="protein"
+              ringDiameter={ringDiameter}
+              ringStroke={ringStroke}
+              aboveLabel={aboveLabel}
+              onPress={function(){haptic('light');setMemberDetail(item.member);}}
+            />;
+          });
+          if(useScroll){
+            return <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,alignItems:'center',paddingHorizontal:4}}>
+              {rings}
+            </ScrollView>;
+          }
+          var justifyMode=memberCount===1?'center':(memberCount===2?'space-evenly':'space-around');
+          return <View style={{flexDirection:'row',alignItems:'center',justifyContent:justifyMode,paddingHorizontal:4}}>
+            {rings}
+          </View>;
+        })()}
+      </View>
+      <InfoIcon
+        title="How protein today works"
+        body="Each ring is one family member. The fill shows how close they are to their daily protein target. Tap a member's ring for their detail. Tap anywhere else to log a meal."
+        color="rgba(255,255,255,0.7)"
+        style={{position:'absolute',top:16,right:16}}
+      />
+    </View>
+
+    {/* Phase 2.3.B v2: Time on Screens Today hero — KEEPS the family-aggregate big stat (matches user's per-spec request),
+        adds per-member numbers above each ring (mirrors Protein hero's per-cell stack). Spacer 78→96 for aboveLabel + ring + name.
+        Pencil + InfoIcon as sibling row (top-right) so taps don't bubble to the hero's tap-to-log-screen-time handler. */}
+    <View style={{position:'relative',marginTop:12}}>
+      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowScreen(true);}}>
+        <Block bg={theme.accent} style={{padding:22}}>
+          <Caps color="rgba(255,255,255,0.7)">Time on screens today</Caps>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54,marginTop:10,height:54}}>{(function(){
+            var sum=todayW.reduce(function(s,w){return s+Number(w.screenHrs||w.screen_hrs||0);},0);
+            if(sum===0)return '—';
+            var hh=Math.floor(sum);
+            var mm=Math.round((sum-hh)*60);
+            return mm===0?hh+'h':hh+'h '+(mm<10?'0':'')+mm+'m';
+          })()}</Text>
+          {/* Spacer reserved for the absolute-positioned ring row sibling below. Height 96 fits aboveLabel + ring + name. */}
+          <View style={{height:96,marginTop:22}}/>
+          <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:18}}>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{members.length} member{members.length===1?'':'s'}</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>Tap to log screen time</Text>
+          </View>
+        </Block>
+      </TouchableOpacity>
+      {/* Ring row sibling — Y offset = padding(22) + caps(~16) + gap(10) + big-number lineHeight(54) + gap(22) ≈ 124. Height 96. */}
+      <View style={{position:'absolute',left:22,right:22,top:124,height:96,justifyContent:'center'}} pointerEvents="box-none">
+        {(function(){
+          var memberCount=(members||[]).length;
+          if(memberCount===0)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</Caps>;
+          var screenTarget=Number(screenTargetHrs)||2;
+          var familyScreenToday=(members||[]).map(function(m){
+            var wellRow=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});
+            var current=wellRow?Number(wellRow.screenHrs||wellRow.screen_hrs||0):0;
+            return{member:m,target:screenTarget,current:current};
+          });
+          var allZero=familyScreenToday.every(function(x){return x.current===0;});
+          if(allZero)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Today's screen time will appear as it's logged</Caps>;
+          var ringDiameter=memberCount<=4?56:(memberCount===5?52:(memberCount===6?48:44));
+          var ringStroke=memberCount<=5?4:3.5;
+          var useScroll=memberCount>=7;
+          var rings=familyScreenToday.map(function(item){
+            var nameWords=(item.member.name||'').split(' ').filter(Boolean);
+            var initials=nameWords.map(function(p){return p.charAt(0);}).slice(0,2).join('').toUpperCase()||'?';
+            var firstName=nameWords[0]||'?';
+            var hoursStr=item.current===0?'0h':(item.current===Math.floor(item.current)?Math.floor(item.current)+'h':item.current.toFixed(1)+'h');
+            var aboveLabel=<Text style={{fontSize:12,color:'#fff',textAlign:'center'}}>
+              <Text style={{fontFamily:FF.sansBold,color:'#fff'}}>{hoursStr}</Text>
+              <Text style={{fontFamily:FF.sans,color:'rgba(255,255,255,0.7)'}}>{' / '+item.target+'h'}</Text>
+            </Text>;
+            return <FamilyMemberBar
+              key={item.member.id||firstName}
+              member={{initials:initials,name:firstName,current:item.current,target:item.target}}
+              ringDiameter={ringDiameter}
+              ringStroke={ringStroke}
+              aboveLabel={aboveLabel}
+              onPress={function(){haptic('light');setMemberDetail(item.member);}}
+            />;
+          });
+          if(useScroll){
+            return <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,alignItems:'center',paddingHorizontal:4}}>
+              {rings}
+            </ScrollView>;
+          }
+          var justifyMode=memberCount===1?'center':(memberCount===2?'space-evenly':'space-around');
+          return <View style={{flexDirection:'row',alignItems:'center',justifyContent:justifyMode,paddingHorizontal:4}}>
+            {rings}
+          </View>;
+        })()}
+      </View>
+      {/* Pencil + InfoIcon row — both absolute-positioned siblings outside the hero TouchableOpacity so taps don't bubble */}
+      <View style={{position:'absolute',top:16,right:16,flexDirection:'row',gap:14,alignItems:'center'}}>
+        <Pressable onPress={function(){haptic('light');setEditScreenTarget(true);}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
+          {function(state){
+            var c=state.pressed?theme.primary:'rgba(255,255,255,0.7)';
+            return <View style={{
+              width:16,height:16,borderRadius:9999,
+              borderWidth:1.2,borderColor:c,
+              alignItems:'center',justifyContent:'center',
+            }}>
+              <Text style={{fontFamily:FF.sans,fontSize:9,color:c,marginTop:-1}}>✎</Text>
+            </View>;
+          }}
+        </Pressable>
+        <InfoIcon
+          title="How time on screens works"
+          body={"Each bar is one family member's screen time today. The bar fills toward your "+(Number(screenTargetHrs)||2)+"-hour cap — white while within, amber when over. Tap the pencil to change the cap."}
+          color="rgba(255,255,255,0.7)"
+        />
+      </View>
+    </View>
+
+    {/* Phase 2.3.C: Member chip strip + hint — moved above More Details divider per spec resulting order. */}
+    {members.length>0&&<Caps color={theme.muted} style={{marginTop:18,marginBottom:8,textAlign:'center'}}>Tap to focus on one member · Long-press for their detail</Caps>}
     {members.length>0&&<View style={{marginBottom:14,marginHorizontal:-20}}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:20,gap:10}}>
         <TouchableOpacity onPress={function(){haptic('light');setMemberFilterId(null);}} style={{alignItems:'center',width:72}}>
@@ -3606,76 +5473,176 @@ function WellnessScreen(){
     </View>}
 
     {memberFilterId&&<View style={[z.nudge,{backgroundColor:theme.primaryLight,borderLeftColor:theme.primary,marginBottom:14}]}>
-      <Text style={[z.cap,{color:theme.primary,fontWeight:'600'}]}>Showing {(members.find(function(m){return m.id===memberFilterId;})||{}).name||'one member'} only \u00b7 long-press an avatar for their detail</Text>
+      <Text style={[z.cap,{color:theme.primary,fontWeight:'600'}]}>Showing {(members.find(function(m){return m.id===memberFilterId;})||{}).name||'one member'} only · long-press an avatar for their detail</Text>
     </View>}
 
-    {/* Hero card — water column removed entirely (toggle is OFF by default; even when ON, this big hero stays focused on calories+protein) */}
-    <View style={{borderRadius:20,backgroundColor:theme.primary,padding:18,marginBottom:14}}>
-      <Text style={{fontSize:11,fontWeight:'600',color:'rgba(255,255,255,0.7)',letterSpacing:1.2,textTransform:'uppercase',marginBottom:14}}>{memberFilterId?(members.find(function(m){return m.id===memberFilterId;})||{}).name+' today':'What your family ate today'}</Text>
-      <View style={{flexDirection:'row',justifyContent:'space-between'}}>
-        <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowMeal(true);}} style={{flex:1}}>
-          <Text style={{fontSize:24,fontWeight:'700',color:'#FFFFFF'}}>{(memberFilterId?(todayMeals||[]).filter(function(m){return m.memberId===memberFilterId;}):(todayMeals||[])).reduce(function(s,m){return s+(m.cal||0);},0)}</Text>
-          <Text style={{fontSize:11,color:'rgba(255,255,255,0.75)',marginTop:2}}>Calories</Text>
-        </TouchableOpacity>
-        <View style={{width:1,backgroundColor:'rgba(255,255,255,0.18)',marginHorizontal:8}}/>
-        <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowMeal(true);}} style={{flex:1}}>
-          <Text style={{fontSize:24,fontWeight:'700',color:'#FFFFFF'}}>{memberFilterId?todayProteinForCurrentUser:totalProtein}<Text style={{fontSize:14,fontWeight:'500'}}>g</Text></Text>
-          <Text style={{fontSize:11,color:'rgba(255,255,255,0.75)',marginTop:2}}>Protein</Text>
-        </TouchableOpacity>
-      </View>
+    {/* Phase 2.3.D + B3: + Meal / + Screen / + Activity action buttons. Activity uses primaryLight bg per spec L78 (distinct from filled olive Meal + outlined Screen). */}
+    <View style={[z.row,{gap:8,marginTop:4}]}>
+      <View style={{flex:1}}><PrimaryButton full onPress={function(){haptic('light');setShowMeal(true);}}>+ Meal</PrimaryButton></View>
+      <View style={{flex:1}}><SecondaryButton full onPress={function(){haptic('light');setShowScreen(true);}}>+ Screen</SecondaryButton></View>
+      <View style={{flex:1}}><TouchableOpacity activeOpacity={0.8} onPress={function(){haptic('light');setShowActivity(true);}} style={{height:48,borderRadius:12,paddingHorizontal:14,alignItems:'center',justifyContent:'center',backgroundColor:theme.primaryLight}}><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:theme.primary,letterSpacing:0.1}}>+ Activity</Text></TouchableOpacity></View>
     </View>
 
-    <View style={[z.card,{marginTop:12,backgroundColor:theme.card,borderColor:theme.border}]}> 
-      {/* W3: Tap protein target card to log a meal */}
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setShowMeal(true);}} style={{marginBottom:16}}>
-        <Text style={[z.sub,{color:theme.text}]}>Your protein target today</Text>
-        <Text style={[z.fv,{marginTop:4,color:theme.text}]}>{currentUserProteinTargets.regular}g (Regular) | {currentUserProteinTargets.active}g (Active/Gym)</Text>
-        <Text style={[z.cap,{marginTop:4,color:theme.textSecondary}]}>Today: {todayProteinForCurrentUser}g</Text>
-        <Bar pct={currentUserProteinTargets.active>0?Math.min((todayProteinForCurrentUser/currentUserProteinTargets.active)*100,100):0} color={theme.success}/>
-      </TouchableOpacity>
-      {/* W4: Tap family protein bar to see who logged what */}
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');
-        // Open a quick sheet? For now jump to first non-met member, otherwise highlight
-        var firstShort=perMemberTargets.find(function(x){return x.protein<x.target;});
-        if(firstShort){setMemberDetail(firstShort.member);}
-      }} style={{marginBottom:16}}><View style={[z.row,{justifyContent:'space-between',marginBottom:4}]}><Text style={[z.sub,{color:theme.text}]}>Family protein today</Text><Text style={[z.fv,{color:theme.text}]}>{totalProtein}g / {totalProteinTarget}g</Text></View><Bar pct={totalProteinTarget>0?Math.min((totalProtein/totalProteinTarget)*100,100):0} color={theme.success}/></TouchableOpacity>
-      {/* Family water bar removed by user instruction. Per-member rows still tappable to see that member's detail. */}
-      {(memberFilterId?perMemberTargets.filter(function(x){return x.member.id===memberFilterId;}):perMemberTargets).map(function(item,i){var m=item.member;var p=item.protein;var target=item.target;var w=item.wellnessRow;return<TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){haptic('light');setMemberDetail(m);}} style={{marginBottom:12}}><View style={[z.row,{justifyContent:'space-between',marginBottom:4}]}><View style={z.row}><View style={[z.avS,{backgroundColor:SLOTS[i%5].bg,marginRight:8,borderColor:theme.border}]}><Text style={[z.avSTx,{color:SLOTS[i%5].text}]}>{m.name[0]}</Text></View><Text style={[z.body,{color:theme.text}]}>{m.name}</Text></View><Text style={[z.fv,{color:theme.text}]}>{p}g / {target}g</Text></View><Bar pct={Math.min((p/Math.max(target,1))*100,100)} color={p>=target?theme.success:theme.warning}/></TouchableOpacity>;})}
+    {/* Phase 2.3.E: Body goals — moved alongside action buttons per spec. */}
+    <Sec>Body goals you’ve set</Sec>
+    {wellnessGoals.slice(0,5).map(function(g){var pct=g.target>0?Math.round((Number(g.current||0)/Number(g.target||1))*100):0;return <TouchableOpacity key={g.id} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]} onPress={function(){haptic('light');setEditGoal(g);}}><View style={[z.row,{justifyContent:'space-between'}]}><Text style={[z.txM,{color:theme.text}]}>{g.name}</Text><Text style={[z.fv,{color:pct>=100?'#0F6E56':'#BA7517'}]}>{pct}%</Text></View><Text style={[z.cap,{color:theme.muted}]}>{g.category||'Wellness'} · {fmt(g.current||0)} / {fmt(g.target||0)}</Text><Bar pct={Math.min(pct,100)} color={pct>=100?'#0F6E56':'#EF9F27'}/></TouchableOpacity>;})}
+    {wellnessGoals.length===0&&<Text style={[z.cap,{color:theme.muted}]}>No body goals yet.</Text>}
+    <View style={{alignSelf:'flex-start',marginBottom:6}}><PrimaryButton onPress={function(){setShowGoal(true);}}>+ New body goal</PrimaryButton></View>
+
+    {/* More details divider */}
+    <View style={{flexDirection:'row',alignItems:'center',marginTop:24,marginBottom:14}}>
+      <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
+      <Caps color={theme.muted} style={{marginHorizontal:12}}>More details</Caps>
+      <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
     </View>
-    {/* B3: Action buttons — Water button only shows when toggle is ON */}
-    <View style={[z.row,{gap:8,marginTop:4}]}>
-      <TouchableOpacity style={[z.bPri,{flex:1}]} onPress={function(){haptic('light');setShowMeal(true);}}><Text style={z.bPriT}>+ Meal</Text></TouchableOpacity>
-      {waterTrackingEnabled&&<TouchableOpacity style={[z.bSec,{flex:1}]} onPress={function(){haptic('light');setShowWater(true);}}><Text style={z.bSecT}>+ Water</Text></TouchableOpacity>}
-      <TouchableOpacity style={[z.bSec,{flex:1}]} onPress={function(){haptic('light');setShowScreen(true);}}><Text style={z.bSecT}>+ Screen</Text></TouchableOpacity>
+
+    {/* Protein this week — moved below More Details divider per spec resulting order #7. */}
+    <Block style={{marginTop:0,padding:16}}>
+      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Protein this week</Text>
+        <Caps>g / day avg</Caps>
+      </View>
+      {(memberFilterId?familyProteinToday.filter(function(x){return x.member.id===memberFilterId;}):familyProteinToday).map(function(item,i,arr){
+        var m=item.member;
+        var weekAvg=Math.round((meals||[]).filter(function(ml){return isThisWeek(ml.date)&&(ml.memberId||ml.member_id)===m.id;}).reduce(function(s,ml){return s+Number(ml.protein||0);},0)/7);
+        var ok=weekAvg>=item.target;
+        return <TouchableOpacity key={'pw_'+m.id} activeOpacity={0.7} onPress={function(){haptic('light');setMemberDetail(m);}} style={{marginBottom:i<arr.length-1?12:0}}>
+          <View style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:6}}>
+            <Avatar name={m.name||'?'} color={SLOTS[i%5].bg} size={22}/>
+            <Text style={{flex:1,fontFamily:FF.sans,fontSize:14,fontWeight:'500',color:theme.text}}>{m.name}</Text>
+            <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:13,color:ok?theme.primary:theme.accent}}>{weekAvg}g</Text>
+            <Caps color={theme.muted}>/ {item.target}</Caps>
+          </View>
+          <Progress value={item.target>0?Math.min((weekAvg/item.target)*100,100):0} color={ok?theme.primary:theme.accent}/>
+        </TouchableOpacity>;
+      })}
+    </Block>
+
+    {/* Phase 2.4-cleanup A6: Water target card — unnested from inside the protein target card and placed as its own sibling directly below "Protein this week". */}
+    <View style={[z.card,{marginTop:12,backgroundColor:theme.card,borderColor:theme.border}]}>
+      <View style={[z.row,{justifyContent:'space-between',alignItems:'center',marginBottom:6}]}>
+        <Text style={[z.sub,{color:theme.text}]}>Your water target today</Text>
+        <Text style={[z.fv,{color:theme.text}]}>{Number(waterTargetLitres||2.5).toFixed(1)} L</Text>
+      </View>
+      <View style={[z.row,{gap:8,alignItems:'center',marginTop:6}]}>
+        <TouchableOpacity onPress={async function(){
+          var next=Math.max(LIMITS.wellness.waterTargetMinL, Number(((waterTargetLitres||2.5)-0.5).toFixed(1)));
+          setWaterTargetLitres&&setWaterTargetLitres(next);
+          haptic('light');
+          try{await supabase.from('users').update({water_target_litres:next}).eq('id',userId);}catch(e){}
+        }} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>−</Text></TouchableOpacity>
+        <View style={{flex:1,alignItems:'center'}}>
+          <Text style={[z.cap,{color:theme.textSecondary}]}>Adjust by 0.5 L</Text>
+        </View>
+        <TouchableOpacity onPress={async function(){
+          var next=Math.min(LIMITS.wellness.waterTargetMaxL, Number(((waterTargetLitres||2.5)+0.5).toFixed(1)));
+          setWaterTargetLitres&&setWaterTargetLitres(next);
+          haptic('light');
+          try{await supabase.from('users').update({water_target_litres:next}).eq('id',userId);}catch(e){}
+        }} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>+</Text></TouchableOpacity>
+      </View>
+      <Text style={[z.cap,{marginTop:8,color:theme.textSecondary}]}>You'll be asked at end of day if you hit your target. No more glass-by-glass logging.</Text>
     </View>
-    <Sec>Body goals you\u2019ve set</Sec>
-    {wellnessGoals.slice(0,5).map(function(g){var pct=g.target>0?Math.round((Number(g.current||0)/Number(g.target||1))*100):0;return <TouchableOpacity key={g.id} style={[z.card,{marginBottom:8}]} onPress={function(){haptic('light');setEditGoal(g);}}><View style={[z.row,{justifyContent:'space-between'}]}><Text style={z.txM}>{g.name}</Text><Text style={[z.fv,{color:pct>=100?'#0F6E56':'#BA7517'}]}>{pct}%</Text></View><Text style={z.cap}>{g.category||'Wellness'} · {fmt(g.current||0)} / {fmt(g.target||0)}</Text><Bar pct={Math.min(pct,100)} color={pct>=100?'#0F6E56':'#EF9F27'}/></TouchableOpacity>;})}
-    {wellnessGoals.length===0&&<Text style={z.cap}>No body goals yet.</Text>}
-    <TouchableOpacity style={[z.bPri,{alignSelf:'flex-start',marginBottom:6}]} onPress={function(){setShowGoal(true);}}><Text style={z.bPriT}>+ New body goal</Text></TouchableOpacity>
-    <Sec>What was eaten today</Sec>{(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).length===0&&<Text style={z.cap}>No meals captured today.</Text>}
+
+    {/* Phase 2.4-cleanup A5: Protein target card — slimmed to just the per-user target row (water target extracted, duplicate per-member bars deleted per A7). */}
+    <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setShowMeal(true);}} style={[z.card,{marginTop:12,backgroundColor:theme.card,borderColor:theme.border}]}>
+      <Text style={[z.sub,{color:theme.text}]}>Your protein target today</Text>
+      <Text style={[z.fv,{marginTop:4,color:theme.text}]}>{currentUserProteinTargets.regular}g (Regular) | {currentUserProteinTargets.active}g (Active/Gym)</Text>
+      <Text style={[z.cap,{marginTop:4,color:theme.textSecondary}]}>Today: {todayProteinForCurrentUser}g</Text>
+      <Bar pct={currentUserProteinTargets.active>0?Math.min((todayProteinForCurrentUser/currentUserProteinTargets.active)*100,100):0} color={theme.success}/>
+    </TouchableOpacity>
+
+    {/* What was eaten today — summary by meal type. Moved here from upper position per spec resulting order #11. */}
+    <Block style={{marginTop:12,padding:16}}>
+      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>What was eaten today</Text>
+        <TouchableOpacity onPress={function(){haptic('light');setShowMeal(true);}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
+          <Caps color={theme.primary}>+ Log meal</Caps>
+        </TouchableOpacity>
+      </View>
+      {(function(){
+        var byType={breakfast:[],lunch:[],dinner:[],snack:[]};
+        (memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).forEach(function(m){
+          var t=String(m.mealTime||m.meal_time||'').toLowerCase();
+          if(byType[t])byType[t].push(m);
+          else byType.snack.push(m);
+        });
+        var typeOrder=['breakfast','lunch','dinner','snack'];
+        var rendered=[];
+        typeOrder.forEach(function(t){
+          var rows=byType[t];
+          if(!rows||rows.length===0)return;
+          var summary=rows.map(function(r){return r.items;}).join(' · ');
+          var totalKcal=rows.reduce(function(s,r){return s+Number(r.cal||0);},0);
+          var totalP=rows.reduce(function(s,r){return s+Number(r.protein||0);},0);
+          rendered.push(<View key={t} style={{paddingVertical:10,borderTopWidth:rendered.length>0?StyleSheet.hairlineWidth:0,borderTopColor:theme.border}}>
+            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline'}}>
+              <Caps>{t.charAt(0).toUpperCase()+t.slice(1)}</Caps>
+              <Caps color={theme.textSecondary}>{totalKcal} kcal · {totalP}g protein</Caps>
+            </View>
+            <Text style={{fontFamily:FF.sans,fontSize:14,fontWeight:'500',color:theme.text,marginTop:4}}>{summary}</Text>
+          </View>);
+        });
+        if(rendered.length===0)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,paddingVertical:6}}>No meals captured yet today.</Text>;
+        return rendered;
+      })()}
+    </Block>
+    <Sec>Today’s meal log</Sec>{(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).length===0&&<Text style={[z.cap,{color:theme.muted}]}>No meals captured today.</Text>}
     {/* W11: Meal time/member name now opens edit on tap */}
-    {(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).map(function(m,i){return<View key={m.id||('meal_'+(m.memberId||m.member_name||'member')+'_'+(m.date||'date')+'_'+(m.mealTime||m.meal_type||'type')+'_'+i)} style={[z.card,{marginBottom:8}]}>
+    {(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).map(function(m,i){return<View key={m.id||('meal_'+(m.memberId||m.member_name||'member')+'_'+(m.date||'date')+'_'+(m.mealTime||m.meal_type||'type')+'_'+i)} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}>
       <View style={[z.row,{justifyContent:'space-between',marginBottom:4}]}>
-        <TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,m.memberId)){haptic('light');setEditMeal(m);}else{Alert.alert('Read only','Only admin can edit other member logs.');}}}><Text style={z.txM}>{m.mealTime} - {m.memberName}</Text><Text style={z.cap}>{displayDate(m.date)}</Text></TouchableOpacity>
+        <TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,m.memberId)){haptic('light');setEditMeal(m);}else{Alert.alert('Read only','Only admin can edit other member logs.');}}}><Text style={[z.txM,{color:theme.text}]}>{m.mealTime} - {m.memberName}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(m.date)}</Text></TouchableOpacity>
         <View style={z.row}><TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,m.memberId)){setEditMeal(m);}else{Alert.alert('Read only','Only admin can edit other member logs.');}}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity><TouchableOpacity onPress={function(){deleteMeal(m);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity></View>
       </View>
-      <Text style={[z.body,{marginBottom:6}]}>{m.items}</Text>
-      <View style={z.row}><Text style={z.macro}>Protein: {m.protein}g</Text><Text style={z.macro}>Carbs: {m.carbs}g</Text><Text style={z.macro}>Cal: {m.cal}</Text></View>
+      <Text style={[z.body,{marginBottom:6,color:theme.text}]}>{m.items}</Text>
+      <View style={z.row}><Text style={[z.macro,{backgroundColor:theme.surfaceElevated,color:theme.textSecondary}]}>Protein: {m.protein}g</Text><Text style={[z.macro,{backgroundColor:theme.surfaceElevated,color:theme.textSecondary}]}>Carbs: {m.carbs}g</Text><Text style={[z.macro,{backgroundColor:theme.surfaceElevated,color:theme.textSecondary}]}>Cal: {m.cal}</Text></View>
     </View>;})}
-    <Sec>Time on screens today</Sec>{(memberFilterId?members.filter(function(m){return m.id===memberFilterId;}):members).map(function(m){var w=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});var hrs=w?w.screenHrs||0:0;var under=hrs<=4;return<TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){haptic('light');setScreenDate(new Date());setShowScreen(true);}} style={[z.card,{marginBottom:8}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}><Text style={z.txM}>{m.name}</Text><View style={z.row}><Text style={[z.fv,{color:hrs===0?'#888':under?'#085041':'#E24B4A'}]}>{hrs>0?hrs+' hrs':'\u2014'}</Text>{w&&<TouchableOpacity onPress={function(){deleteWellnessRow(w);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity>}</View></View>{hrs>0&&<Bar pct={Math.min((hrs/4)*100,100)} color={under?'#0F6E56':'#E24B4A'}/>}</TouchableOpacity>;})}
-    {/* W14: Insight card now jumps to Insights protein trend */}
-    {totalProtein>0&&<TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_protein_trend',nonce:Date.now()});navigation.navigate('Insights');}} style={z.insight}><Text style={z.insightTx}>Your family ate {totalProtein}g of protein today. {totalProtein>=totalProteinTarget?'Everyone close to target.':'One egg or some paneer would close the gap.'} {'\u203A'}</Text></TouchableOpacity>}
+    {/* Phase B3: Today's activities — list of activity rows for today, filtered by member if a filter is active. */}
+    <Sec>Today’s activities</Sec>
+    {(function(){
+      var todayISO=isoDate(new Date());
+      var todayActivities=(activities||[]).filter(function(a){return a.date===todayISO;});
+      if(memberFilterId)todayActivities=todayActivities.filter(function(a){return a.memberId===memberFilterId;});
+      if(todayActivities.length===0)return <Text style={[z.cap,{color:theme.muted}]}>No activity logged today. Tap + Activity to start.</Text>;
+      return todayActivities.map(function(a,i){
+        var canEdit=canModifyMemberData(isAdmin,members,userId,a.memberId);
+        var memberName=a.memberName||(members.find(function(m){return m.id===a.memberId;})||{}).name||'Member';
+        var typeLabel=String(a.activity_type||'activity');
+        typeLabel=typeLabel.charAt(0).toUpperCase()+typeLabel.slice(1);
+        return <View key={a.id||('act_'+i)} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}>
+          <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}]}>
+            <View style={{flex:1}}>
+              <Text style={[z.txM,{color:theme.text}]}>{typeLabel} · {a.duration_minutes} min</Text>
+              <Text style={[z.cap,{color:theme.muted,marginTop:2}]}>{memberName} · {displayDate(a.date)}</Text>
+            </View>
+            {canEdit?<View style={z.row}>
+              <TouchableOpacity onPress={function(){haptic('light');setEditActivity(a);}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity>
+              <TouchableOpacity onPress={function(){
+                Alert.alert('Delete activity','Remove this activity log?',[
+                  {text:'Cancel',style:'cancel'},
+                  {text:'Delete',style:'destructive',onPress:async function(){try{await deleteActivity(a.id);haptic('success');}catch(e){haptic('error');showFriendlyError('Could not delete',e);}}}
+                ]);
+              }} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity>
+            </View>:null}
+          </View>
+          {a.note?<Text style={[z.body,{color:theme.text,marginTop:4}]}>{a.note}</Text>:null}
+        </View>;
+      });
+    })()}
+    <Sec>Time on screens today</Sec>{(memberFilterId?members.filter(function(m){return m.id===memberFilterId;}):members).map(function(m){var w=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});var hrs=w?w.screenHrs||0:0;var under=hrs<=4;return<TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){haptic('light');setScreenDate(new Date());setShowScreen(true);}} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}><Text style={[z.txM,{color:theme.text}]}>{m.name}</Text><View style={z.row}><Text style={[z.fv,{color:hrs===0?'#888':under?'#085041':'#E24B4A'}]}>{hrs>0?hrs+' hrs':'—'}</Text>{w&&<TouchableOpacity onPress={function(){deleteWellnessRow(w);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity>}</View></View>{hrs>0&&<Bar pct={Math.min((hrs/4)*100,100)} color={under?'#0F6E56':'#E24B4A'}/>}</TouchableOpacity>;})}
+    {/* W14: Insight card jumps to Reflect protein trend */}
+    {totalProtein>0&&<TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_protein_trend',nonce:Date.now()});navigation.navigate('Reflect');}} style={z.insight}><Text style={z.insightTx}>Your family ate {totalProtein}g of protein today. {totalProtein>=totalProteinTarget?'Everyone close to target.':'One egg or some paneer would close the gap.'} {'›'}</Text></TouchableOpacity>}
     <View style={{height:32}}/></ScrollView></View>);
 }
 
 // ═══════════════════════════════════════════════════════════════
 // INSIGHTS SCREEN
 // ═══════════════════════════════════════════════════════════════
-function InsightsScreen(){
+function ReflectScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{userId,familyId,transactions,meals,wellness,todayNudge,nudgeHistory,refreshNudges,refreshTodayNudge,refreshTransactions,refreshMeals,refreshWellness,recurringTransactions,refreshRecurringTransactions,quickAction,setQuickAction,dismissNudge,dismissedNudgeIds,upsertTransactionLocal}=useApp();
+  var{userId,familyId,members,transactions,meals,wellness,todayNudge,nudgeHistory,refreshNudges,refreshTodayNudge,refreshTransactions,refreshMeals,refreshWellness,recurringTransactions,refreshRecurringTransactions,quickAction,setQuickAction,dismissNudge,dismissedNudgeIds,upsertTransactionLocal,activities}=useApp();
   var[selectedDate,setSelectedDate]=useState(new Date());
   var[showCalendar,setShowCalendar]=useState(false);
   var[showDayDetail,setShowDayDetail]=useState(false);
@@ -3685,8 +5652,9 @@ function InsightsScreen(){
   var[historyOpen,setHistoryOpen]=useState(false);
   var[analyticsPeriod,setAnalyticsPeriod]=useState('month');
   var[monthCache,setMonthCache]=useState({});
+  var[showWholeMonth,setShowWholeMonth]=useState(false); // Phase 2.4.A: collapse "The whole month" by default
   var[trendModal,setTrendModal]=useState(null); // {kind:'spend'|'protein'} for I8/I9
-  var[editTx,setEditTx]=useState(null); // I15: tap a recurring row \u2192 open the matching tx
+  var[editTx,setEditTx]=useState(null); // I15: tap a recurring row → open the matching tx
   var[refreshing,setRefreshing]=useState(false);
 
   useEffect(function(){refreshNudges&&refreshNudges();refreshRecurringTransactions&&refreshRecurringTransactions();},[]);
@@ -3703,7 +5671,7 @@ function InsightsScreen(){
       setQuickAction(null);
     }
     if(quickAction.action==='focus_week'){
-      // already on Insights — ensure selectedDate is today, scroll-to-top happens by default
+      // already on Reflect — ensure selectedDate is today, scroll-to-top happens by default
       setSelectedDate(new Date());
       setQuickAction(null);
     }
@@ -3740,6 +5708,24 @@ function InsightsScreen(){
   var proteinTrend=weekly.map(function(w){
     return (meals||[]).filter(function(m){return isoDate(m.date)===w.date;}).reduce(function(s,m){return s+(m.protein||0);},0);
   });
+
+  // Hero block computations (added for design-faithful top section)
+  var daysOnRhythm=weekly.filter(function(w){return w.percent>=80;}).length;
+  var personalStreak=0;
+  for(var sk=0;sk<90;sk++){
+    var sd=addDays(new Date(),-sk);
+    if(calcStreakCompletion(familyId,sd,meals,wellness))personalStreak++;
+    else break;
+  }
+  var monthlyTxs=(transactions||[]).filter(function(t){return isThisMonth(t.date);});
+  var monthIncome=monthlyTxs.filter(function(t){return t.category==='Income';}).reduce(function(s,t){return s+(t.amount||0);},0);
+  var monthExpenses=monthlyTxs.filter(function(t){return t.category!=='Income';}).reduce(function(s,t){return s+(t.amount||0);},0);
+  var savedThisMonth=monthIncome-monthExpenses;
+  var savingsRate=monthIncome>0?Math.round((savedThisMonth/monthIncome)*100):0;
+  var weekMealsAll=(meals||[]).filter(function(m){return isThisWeek(m.date);});
+  var weekProteinTotal=weekMealsAll.reduce(function(s,m){return s+Number(m.protein||0);},0);
+  var familySize=Math.max((members||[]).length,1);
+  var familyAvgProtein=Math.round(weekProteinTotal/7/familySize);
 
   function monthDaysGrid(baseMonth){
     var first=new Date(baseMonth.getFullYear(),baseMonth.getMonth(),1);
@@ -3798,165 +5784,292 @@ function InsightsScreen(){
   }
 
   function quickActionCard(title,subtitle,action){
-    return <TouchableOpacity key={title} style={[z.card,{marginBottom:8}]} onPress={function(){setQuickAction&&setQuickAction(action);if(action&&action.tab)navigation.navigate(action.tab);}}>
-      <Text style={z.txM}>{title}</Text>
-      <Text style={z.cap}>{subtitle}</Text>
+    return <TouchableOpacity key={title} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]} onPress={function(){setQuickAction&&setQuickAction(action);if(action&&action.tab)navigation.navigate(action.tab);}}>
+      <Text style={[z.txM,{color:theme.text}]}>{title}</Text>
+      <Text style={[z.cap,{color:theme.muted}]}>{subtitle}</Text>
     </TouchableOpacity>;
   }
 
   var quickCards=[];
   if(selectedSummary.percent<100){
-    if(!selectedSummary.flags.transaction)quickCards.push(quickActionCard('Capture an entry','The day isn\u2019t fully seen yet',{action:'open_tx',tab:'Finance',nonce:Date.now()}));
+    if(!selectedSummary.flags.transaction)quickCards.push(quickActionCard('Capture an entry','The day isn’t fully seen yet',{action:'open_tx',tab:'Finance',nonce:Date.now()}));
     if(!selectedSummary.flags.breakfast)quickCards.push(quickActionCard('Note breakfast','Breakfast still pending',{action:'open_meal',mealType:'breakfast',tab:'Wellness',nonce:Date.now()}));
     if(!selectedSummary.flags.lunch)quickCards.push(quickActionCard('Note lunch','Lunch still pending',{action:'open_meal',mealType:'lunch',tab:'Wellness',nonce:Date.now()}));
     if(!selectedSummary.flags.dinner)quickCards.push(quickActionCard('Note dinner','Dinner still pending',{action:'open_meal',mealType:'dinner',tab:'Wellness',nonce:Date.now()}));
     if(!selectedSummary.flags.screen)quickCards.push(quickActionCard('Note screen time','Screen time still pending',{action:'open_screen',tab:'Wellness',nonce:Date.now()}));
   }
 
-  return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.background}]}> 
+  return(<View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+    <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
     <UnifiedCalendarModal visible={showCalendar} onClose={function(){setShowCalendar(false);}} context="insights" selectedDate={selectedDate} onSelectDate={setSelectedDate} onOpenDayDetail={function(d){setSelectedDate(d);setDayDetailDate(d);setShowDayDetail(true);}}/>
     <DayDetailModal visible={showDayDetail} date={dayDetailDate} onClose={function(){setShowDayDetail(false);}} onChangeDate={function(d){setDayDetailDate(d);setSelectedDate(d);}} onAddTransaction={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_tx',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Finance');}} onAddMeal={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_meal',mealType:'lunch',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}} onAddWater={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_water',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}} onAddScreen={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_screen',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}}/>
-    <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
+
+    <ScrollView style={z.fl} contentContainerStyle={{padding:16,paddingTop:8,paddingBottom:32}} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
-      <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',paddingTop:8,marginBottom:6}]}>
-        <View style={{flex:1}}>
-          <Text style={[z.h1,{color:theme.text}]}>Insights</Text>
-          <Text style={[z.caps,{color:theme.muted,marginTop:4}]}>What your family\u2019s week looks like</Text>
+      {/* Header */}
+      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',paddingTop:8,marginBottom:14}}>
+        <View style={{flex:1,marginRight:12}}>
+          <Caps>{new Date().toLocaleString('en-IN',{month:'long',year:'numeric'})}</Caps>
+          <Text style={{fontFamily:FF.serif,fontSize:36,letterSpacing:-1,color:theme.text,marginTop:6,lineHeight:38}}>Reflections</Text>
         </View>
-        <View style={[z.row,{gap:8}]}>
-          <TouchableOpacity style={{width:42,height:42,borderRadius:12,borderWidth:1,borderColor:theme.border,backgroundColor:theme.surface,alignItems:'center',justifyContent:'center'}} onPress={function(){setShowCalendar(true);}}>
-            <Text style={{fontSize:18}}>{'\uD83D\uDCC5'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[z.bSec,{borderColor:theme.primary,paddingHorizontal:14}]} onPress={generateNow}>
-            <Text style={[z.bSecT,{color:theme.primary}]}>Reflect now</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={function(){setShowCalendar(true);}} style={{
+          width:40,height:40,borderRadius:9999,
+          backgroundColor:theme.surfaceElevated,
+          alignItems:'center',justifyContent:'center',
+        }}>
+          <CalendarIcon size={20} color={theme.text}/>
+        </TouchableOpacity>
       </View>
 
-      {visibleTodayNudge&&<View style={[z.nudge,{marginTop:12,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}>
-        <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}]}>
-          <Text style={[z.cap,{color:theme.accent,textTransform:'uppercase',letterSpacing:0.6,fontWeight:'700'}]}>Today\u2019s reflection</Text>
-          <TouchableOpacity onPress={function(){dismissNudge&&dismissNudge(visibleTodayNudge.id);}}><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Dismiss</Text></TouchableOpacity>
-        </View>
-        <Text style={[z.nudgeTx,{color:theme.text}]}>{visibleTodayNudge.nudge_text}</Text>
-        <Text style={[z.cap,{marginTop:6,color:theme.accent,fontWeight:'600'}]}>{displayDate(visibleTodayNudge.sent_at)}</Text>
-      </View>}
+      {/* Overall reflections banner */}
+      <Text style={{fontFamily:FF.serif,fontSize:22,letterSpacing:-0.4,color:theme.text,marginTop:8,marginBottom:6}}>Overall reflections</Text>
+      <Caps color={theme.muted} style={{marginBottom:10}}>Patterns across money and wellness</Caps>
 
-      <Sec>Past reflections</Sec>
-      <View style={[z.row,{alignItems:'center',gap:8,marginBottom:8}]}> 
-        <TouchableOpacity style={[z.bSec,{flex:1}]} onPress={function(){setHistoryOpen(true);}}><Text style={z.bSecT}>{selectedHistoryDate?selectedHistoryDate:'Filter by date'}</Text></TouchableOpacity>
-        {selectedHistoryDate?<TouchableOpacity style={z.bSec} onPress={function(){setSelectedHistoryDate('');}}><Text style={z.bSecT}>Clear</Text></TouchableOpacity>:null}
+      {/* Pattern hero — primary block with italic-serif prose + 2 stats */}
+      <Block bg={theme.primary} style={{padding:20}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}>
+          <Caps color="rgba(255,255,255,0.7)">The pattern this week</Caps>
+          {visibleTodayNudge&&<TouchableOpacity onPress={function(){dismissNudge&&dismissNudge(visibleTodayNudge.id);}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
+            <Caps color="rgba(255,255,255,0.85)">Dismiss</Caps>
+          </TouchableOpacity>}
+        </View>
+        <Text style={{fontFamily:FF.serifItalic,fontSize:19,color:'#fff',marginTop:8,lineHeight:25}}>
+          {visibleTodayNudge?'“'+visibleTodayNudge.nudge_text+'”':'“Steady week. Keep going at your own rhythm.”'}
+        </Text>
+        <View style={{height:StyleSheet.hairlineWidth,backgroundColor:'rgba(255,255,255,0.25)',marginVertical:16}}/>
+        <View style={{flexDirection:'row',gap:24}}>
+          <View style={{flex:1}}>
+            <Caps color="rgba(255,255,255,0.7)">Days on rhythm</Caps>
+            <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:'#fff',marginTop:4}}>{daysOnRhythm}<Text style={{fontSize:14,fontWeight:'500',color:'rgba(255,255,255,0.7)'}}> / 7</Text></Text>
+          </View>
+          <View style={{flex:1}}>
+            <Caps color="rgba(255,255,255,0.7)">Streak</Caps>
+            <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:'#fff',marginTop:4}}>{personalStreak}<Text style={{fontSize:14,fontWeight:'500',color:'rgba(255,255,255,0.7)'}}> {personalStreak===1?'day':'days'}</Text></Text>
+          </View>
+        </View>
+      </Block>
+
+      {/* Finance banner */}
+      <Text style={{fontFamily:FF.serif,fontSize:22,letterSpacing:-0.4,color:theme.text,marginTop:24,marginBottom:6}}>Reflections on Finance</Text>
+      <Caps color={theme.muted} style={{marginBottom:10}}>How money has been moving this month</Caps>
+
+      {/* Savings hero */}
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setTrendModal({kind:'spend'});}}>
+        <Block style={{padding:20}}>
+          <Hero label="Saved this month" prefix="₹" value={fmt(Math.max(savedThisMonth,0))} size={36} accent={theme.primary}/>
+          <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:14,lineHeight:20}}>
+            {monthIncome>0?savingsRate+'% of your earnings · tap for full trend':'Add some income to see your savings rate · tap for full trend'}
+          </Text>
+        </Block>
+      </TouchableOpacity>
+
+      {/* Wellness banner */}
+      <Text style={{fontFamily:FF.serif,fontSize:22,letterSpacing:-0.4,color:theme.text,marginTop:24,marginBottom:6}}>Reflections on Wellness</Text>
+      <Caps color={theme.muted} style={{marginBottom:10}}>What your bodies have been telling you</Caps>
+
+      {/* Protein hero */}
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setTrendModal({kind:'protein'});}}>
+        <Block bg={theme.accentLight} style={{padding:20}}>
+          <Hero label="Family avg protein" value={familyAvgProtein+'g'} suffix="/ day" size={36} accent={theme.accent}/>
+          <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:14,lineHeight:20}}>
+            Across {familySize} member{familySize===1?'':'s'} · last 7 days · tap for full trend
+          </Text>
+        </Block>
+      </TouchableOpacity>
+
+      {/* Phase B5: Activity this week — per-member minutes total, sorted descending. Mirrors Protein this week pattern. */}
+      <Block style={{marginTop:12,padding:16}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Activity this week</Text>
+          <Caps>min · last 7 days</Caps>
+        </View>
+        {(function(){
+          var rows=(members||[]).map(function(m){
+            var mins=(activities||[]).filter(function(a){return isThisWeek(a.date)&&(a.memberId||a.member_id)===m.id;}).reduce(function(s,a){return s+Number(a.duration_minutes||0);},0);
+            return{member:m,minutes:mins};
+          }).sort(function(a,b){return b.minutes-a.minutes;});
+          var hasAny=rows.some(function(r){return r.minutes>0;});
+          if(!hasAny)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,paddingVertical:6}}>No activity logged this week. Walks, workouts, yoga — they all count.</Text>;
+          var maxMins=rows.reduce(function(mx,r){return Math.max(mx,r.minutes);},1);
+          return rows.map(function(r,i,arr){
+            var pct=Math.round((r.minutes/Math.max(maxMins,1))*100);
+            return <View key={'aw_'+r.member.id} style={{marginBottom:i<arr.length-1?12:0}}>
+              <View style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:6}}>
+                <Avatar name={r.member.name||'?'} color={SLOTS[i%5].bg} size={22}/>
+                <Text style={{flex:1,fontFamily:FF.sans,fontSize:14,fontWeight:'500',color:theme.text}}>{r.member.name}</Text>
+                <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:13,color:r.minutes>0?theme.primary:theme.muted}}>{r.minutes} min</Text>
+              </View>
+              <Progress value={pct} color={r.minutes>0?theme.primary:theme.surfaceElevated}/>
+            </View>;
+          });
+        })()}
+      </Block>
+
+      {/* Reflect now CTA */}
+      <View style={{marginTop:20}}>
+        <PrimaryButton full onPress={generateNow}>Reflect now</PrimaryButton>
       </View>
-      {historyOpen&&<Modal visible={true} transparent animationType="fade"><View style={[z.modalWrap,{justifyContent:'center'}]}><View style={[z.modal,{margin:20,maxHeight:420}]}> 
-        <Text style={z.h1}>Choose date</Text>
+
+      {/* More details divider */}
+      <View style={{flexDirection:'row',alignItems:'center',marginTop:32,marginBottom:14}}>
+        <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
+        <Caps color={theme.muted} style={{marginHorizontal:12}}>More details</Caps>
+        <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
+      </View>
+
+      {/* How the week went */}
+      <Block style={{padding:16}}>
+        <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setSelectedDate(new Date());setCurrentMonth(startOfDay(new Date()));}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline',marginBottom:14}}>
+          <Caps>Average daily completeness</Caps>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:theme.text}}>{weeklyAvg}<Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}>%</Text></Text>
+        </TouchableOpacity>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',height:90}}>
+          {weekly.map(function(w,i){
+            var dayOffset=6-i;
+            var barDate=addDays(new Date(),-dayOffset);
+            var barColor=w.percent>=100?theme.primary:w.percent>=50?theme.accent:theme.danger;
+            return <TouchableOpacity key={w.date} activeOpacity={0.7} onPress={function(){haptic('light');setSelectedDate(barDate);setDayDetailDate(barDate);setShowDayDetail(true);}} style={{flex:1,alignItems:'center'}}>
+              <View style={{height:Math.max((w.percent/100)*70,4),width:'70%',borderRadius:6,backgroundColor:barColor}}/>
+              <Caps color={theme.muted} size={9} ls={0.4} style={{marginTop:6}}>{['M','T','W','T','F','S','S'][i]}</Caps>
+            </TouchableOpacity>;
+          })}
+        </View>
+      </Block>
+
+      {/* Past reflections */}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:8}}>Past reflections</Text>
+      <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
+        <View style={{flex:1}}><SecondaryButton full onPress={function(){setHistoryOpen(true);}}>{selectedHistoryDate?selectedHistoryDate:'Filter by date'}</SecondaryButton></View>
+        {selectedHistoryDate?<View style={{flex:0.6}}><SecondaryButton full onPress={function(){setSelectedHistoryDate('');}}>Clear</SecondaryButton></View>:null}
+      </View>
+      <ModalSheet visible={historyOpen} title="Choose date" onClose={function(){setHistoryOpen(false);}}>
         <DateField label="Reflection date" value={selectedHistoryDate?new Date(selectedHistoryDate):new Date()} onChange={function(d){setSelectedHistoryDate(isoDate(d));setHistoryOpen(false);}} maximumDate={new Date()}/>
-        <TouchableOpacity style={z.bSec} onPress={function(){setHistoryOpen(false);}}><Text style={z.bSecT}>Done</Text></TouchableOpacity>
-      </View></View></Modal>}
-      {historyList.slice(0,10).map(function(n){return<View key={n.id} style={[z.card,{marginBottom:8}]}><View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start'}]}><Text style={[z.cap,{marginBottom:4,textTransform:'uppercase',flex:1}]}>{n.domain||'general'} · {displayDate(n.sent_at)}</Text><TouchableOpacity onPress={function(){dismissNudge&&dismissNudge(n.id);}}><Text style={[z.cap,{color:'#BA7517',fontWeight:'500'}]}>Dismiss</Text></TouchableOpacity></View><Text style={z.body}>{n.nudge_text}</Text></View>;})}
-      {historyList.length===0&&<Text style={z.cap}>No reflections for this date.</Text>}
+        <SecondaryButton full onPress={function(){setHistoryOpen(false);}}>Done</SecondaryButton>
+      </ModalSheet>
+      {historyList.slice(0,10).map(function(n){
+        return <Block key={n.id} style={{padding:14,marginBottom:8}}>
+          <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
+            <Caps style={{flex:1,marginRight:8}}>{n.domain||'general'} · {displayDate(n.sent_at)}</Caps>
+            <TouchableOpacity onPress={function(){dismissNudge&&dismissNudge(n.id);}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
+              <Caps color={theme.accent}>Dismiss</Caps>
+            </TouchableOpacity>
+          </View>
+          <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,lineHeight:20}}>{n.nudge_text}</Text>
+        </Block>;
+      })}
+      {historyList.length===0&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>No reflections for this date.</Text>}
 
-      <Sec>How the week went</Sec>
-      <View style={z.card}>
-        {/* I6: tap average to scroll calendar to this week */}
-        <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setSelectedDate(new Date());setCurrentMonth(startOfDay(new Date()));}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><Text style={z.sub}>Average daily completeness</Text><Text style={z.fv}>{weeklyAvg}%</Text></TouchableOpacity>
-        {/* I7: tap a daily bar to open This Day modal */}
-        <View style={z.barRow}>{weekly.map(function(w,i){
-          var dayOffset=6-i;
-          var barDate=addDays(new Date(),-dayOffset);
-          return <TouchableOpacity key={w.date} activeOpacity={0.7} onPress={function(){haptic('light');setSelectedDate(barDate);setDayDetailDate(barDate);setShowDayDetail(true);}} style={z.barC}><View style={[z.bar,{height:Math.max((w.percent/100)*80,4),backgroundColor:getCompletionColor(w.percent)}]}/><Text style={z.barL}>{['M','T','W','T','F','S','S'][i]}</Text></TouchableOpacity>;
-        })}</View>
+      {/* What you spend on */}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:8}}>What you spend on</Text>
+      <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
+        {['week','month','quarter'].map(function(p){
+          var sel=analyticsPeriod===p;
+          return <TouchableOpacity key={p} style={[z.chip,sel&&z.chipSel]} onPress={function(){haptic('light');setAnalyticsPeriod(p);}}>
+            <Text style={[z.chipTx,sel&&z.chipSelTx]}>{p}</Text>
+          </TouchableOpacity>;
+        })}
       </View>
-      <View style={[z.row,{gap:8}]}> 
-        {/* I8: tap spend trend mini-card to open full-screen trend */}
-        <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setTrendModal({kind:'spend'});}} style={[z.card,{flex:1}]}> 
-          <Text style={z.sub}>Where spending is heading</Text>
-          {txTrend.map(function(v,i){return <Text key={i} style={z.cap}>{i===6?'Today':i+'d ago'}: ₹{fmt(v)}</Text>;})}
-          <Text style={[z.cap,{color:theme.primary,fontWeight:'600',marginTop:4}]}>See full trend \u203A</Text>
-        </TouchableOpacity>
-        {/* I9: tap protein trend mini-card to open full-screen trend */}
-        <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setTrendModal({kind:'protein'});}} style={[z.card,{flex:1}]}> 
-          <Text style={z.sub}>Where protein is heading</Text>
-          {proteinTrend.map(function(v,i){return <Text key={i} style={z.cap}>{i===6?'Today':i+'d ago'}: {v}g</Text>;})}
-          <Text style={[z.cap,{color:theme.primary,fontWeight:'600',marginTop:4}]}>See full trend \u203A</Text>
-        </TouchableOpacity>
-      </View>
+      {pieData.length>0?<Block style={{padding:14}}>
+        <PieChart data={pieData} width={Math.min(Dimensions.get('window').width-56,340)} height={170} accessor="amount" backgroundColor="transparent" paddingLeft="8" chartConfig={{color:function(){return theme.text;}}}/>
+      </Block>:<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>No spending data for selected period.</Text>}
 
-      <Sec>What you spend on</Sec>
-      <View style={[z.row,{gap:8,marginBottom:8}]}> 
-        {['week','month','quarter'].map(function(p){var sel=analyticsPeriod===p;return <TouchableOpacity key={p} style={[z.chip,sel&&z.chipSel]} onPress={function(){haptic('light');setAnalyticsPeriod(p);}}><Text style={[z.chipTx,sel&&z.chipSelTx]}>{p}</Text></TouchableOpacity>;})}
-      </View>
-      {pieData.length>0?<View style={z.card}>
-        <PieChart data={pieData} width={Math.min(Dimensions.get('window').width-56,340)} height={170} accessor="amount" backgroundColor="transparent" paddingLeft="8" chartConfig={{color:function(){return '#333';}}}/>
-      </View>:<Text style={z.cap}>No spending data for selected period.</Text>}
-      {/* I12: tap a daily bar in week chart \u2192 This Day modal */}
-      <View style={z.card}>
-        <Text style={z.sub}>What was spent each day this week</Text>
-        <BarChart data={{labels:days.map(function(d){return d.label;}),datasets:[{data:days.map(function(d){return d.value;})}]}} width={Math.min(Dimensions.get('window').width-56,340)} height={180} fromZero yAxisLabel="₹" withInnerLines={false} showBarTops={false} chartConfig={{backgroundGradientFrom:'#FFFFFF',backgroundGradientTo:'#FFFFFF',decimalPlaces:0,color:function(){return '#085041';},labelColor:function(){return '#555';},propsForBackgroundLines:{strokeWidth:0,stroke:'transparent'}}} style={{marginTop:8,borderRadius:8}}/>
-        <View style={[z.row,{justifyContent:'space-between',marginTop:8}]}>{days.map(function(d,i){return <TouchableOpacity key={'spendday'+i} onPress={function(){haptic('light');setDayDetailDate(toDate(d.date));setSelectedDate(toDate(d.date));setShowDayDetail(true);}} style={{flex:1,alignItems:'center',paddingVertical:6}}><Text style={[z.cap,{color:theme.primary,fontWeight:'600'}]}>{d.label}</Text></TouchableOpacity>;})}</View>
-      </View>
-
-      <Sec>The whole month</Sec>
-      <View style={z.card}>
-        <View style={[z.row,{justifyContent:'space-between',marginBottom:10}]}> 
-          <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()-1,1));}}><Text style={z.linkTx}>‹ Prev</Text></TouchableOpacity>
-          <Text style={z.txM}>{currentMonth.toLocaleString('en-IN',{month:'long',year:'numeric'})}</Text>
-          <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()+1,1));}}><Text style={z.linkTx}>Next ›</Text></TouchableOpacity>
+      {/* Daily spend bars */}
+      <Block style={{padding:14,marginTop:10}}>
+        <Caps>What was spent each day this week</Caps>
+        <BarChart data={{labels:days.map(function(d){return d.label;}),datasets:[{data:days.map(function(d){return d.value;})}]}} width={Math.min(Dimensions.get('window').width-56,340)} height={180} fromZero yAxisLabel="₹" withInnerLines={false} showBarTops={false} chartConfig={{backgroundGradientFrom:theme.surface,backgroundGradientTo:theme.surface,decimalPlaces:0,color:function(){return theme.primary;},labelColor:function(){return theme.textSecondary;},propsForBackgroundLines:{strokeWidth:0,stroke:'transparent'}}} style={{marginTop:8,borderRadius:8}}/>
+        <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:4}}>
+          {days.map(function(d,i){
+            return <TouchableOpacity key={'spendday'+i} onPress={function(){haptic('light');setDayDetailDate(toDate(d.date));setSelectedDate(toDate(d.date));setShowDayDetail(true);}} style={{flex:1,alignItems:'center',paddingVertical:6}}>
+              <Caps color={theme.primary}>{d.label}</Caps>
+            </TouchableOpacity>;
+          })}
         </View>
-        <View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}>{['M','T','W','T','F','S','S'].map(function(d,idx){return<Text key={d+'_'+idx} style={[z.cap,{width:'14%',textAlign:'center'}]}>{d}</Text>;})}</View>
+      </Block>
+
+      {/* The whole month — Phase 2.4.A: collapsed by default, tap header to expand */}
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setShowWholeMonth(function(v){return !v;});}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginTop:22,marginBottom:showWholeMonth?8:0}}>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>The whole month</Text>
+        <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.muted}}>{showWholeMonth?'▼':'▶'}</Text>
+      </TouchableOpacity>
+      {showWholeMonth?<Block style={{padding:14}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()-1,1));}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
+            <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>‹ Prev</Text>
+          </TouchableOpacity>
+          <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{currentMonth.toLocaleString('en-IN',{month:'long',year:'numeric'})}</Text>
+          <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()+1,1));}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
+            <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>Next ›</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:6}}>
+          {['M','T','W','T','F','S','S'].map(function(d,idx){
+            return <Caps key={d+'_'+idx} color={theme.muted} style={{width:'14%',textAlign:'center'}}>{d}</Caps>;
+          })}
+        </View>
         <View style={{flexDirection:'row',flexWrap:'wrap'}}>
           {monthCells.map(function(cell){
             var d=cell.dateObj;
             var inMonth=d.getMonth()===currentMonth.getMonth();
-            var bg=inMonth?getCompletionColor(cell.percent)+'22':'#F2F2EE';
+            var dotColor=cell.percent>=100?theme.primary:cell.percent>=50?theme.accent:theme.danger;
             var isSel=isoDate(d)===selectedISO;
-            return <TouchableOpacity key={cell.date} style={[z.calCell,{backgroundColor:bg,borderColor:isSel?'#085041':'transparent'}]}
+            return <TouchableOpacity key={cell.date} style={[z.calCell,{backgroundColor:isSel?theme.primaryLight:'transparent',borderColor:isSel?theme.primary:'transparent'}]}
               onPress={function(){
-                // I13: tap selected day again to open This Day modal; first tap selects
-                if(isSel){haptic('light');setDayDetailDate(d);setShowDayDetail(true);} else {haptic('light');setSelectedDate(d);}
+                if(isSel){haptic('light');setDayDetailDate(d);setShowDayDetail(true);}
+                else{haptic('light');setSelectedDate(d);}
               }}
               onLongPress={function(){haptic('medium');setDayDetailDate(d);setSelectedDate(d);setShowDayDetail(true);}}
               delayLongPress={300}
             >
-              <Text style={[z.calCellTx,!inMonth&&{color:'#BBB'}]}>{d.getDate()}</Text>
-              <View style={[z.calDot,{backgroundColor:getCompletionColor(cell.percent)}]}/>
+              <Text style={[z.calCellTx,{color:inMonth?theme.text:theme.muted}]}>{d.getDate()}</Text>
+              <View style={[z.calDot,{backgroundColor:dotColor}]}/>
             </TouchableOpacity>;
           })}
         </View>
-        <Text style={[z.cap,{marginTop:8,textAlign:'center',color:theme.muted}]}>Tap a day to select. Tap again or long-press to see the day in detail.</Text>
-      </View>
-      {/* I14: tap "On this day" card to open This Day modal */}
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setDayDetailDate(selectedDate);setShowDayDetail(true);}} style={z.card}>
-        <Text style={z.txM}>On this day: {displayDate(selectedDate)}</Text>
-        <Text style={z.cap}>Captured: {selectedSummary.completed}/5 ({selectedSummary.percent}%)</Text>
-        <Text style={[z.cap,{marginTop:6}]}>Entries: {selectedTx.length} · Meals: {selectedMeals.length} · Body logs: {selectedWell.length}</Text>
-        <Text style={[z.cap,{color:theme.primary,fontWeight:'600',marginTop:6}]}>Open day in detail \u203A</Text>
+        <Caps color={theme.muted} style={{marginTop:8,textAlign:'center'}}>Tap a day to select. Tap again or long-press to see the day in detail.</Caps>
+      </Block>:null}
+
+      {/* On this day */}
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setDayDetailDate(selectedDate);setShowDayDetail(true);}} style={{marginTop:10}}>
+        <Block style={{padding:14}}>
+          <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>On this day: {displayDate(selectedDate)}</Text>
+          <Caps color={theme.muted} style={{marginTop:4}}>Captured: {selectedSummary.completed}/5 ({selectedSummary.percent}%)</Caps>
+          <Caps color={theme.muted} style={{marginTop:2}}>Entries: {selectedTx.length} · Meals: {selectedMeals.length} · Body logs: {selectedWell.length}</Caps>
+          <Caps color={theme.primary} style={{marginTop:8}}>Open day in detail ›</Caps>
+        </Block>
       </TouchableOpacity>
 
-      <Sec>Things due soon</Sec>
-      {/* I15: tap a recurring row to open the related transaction */}
-      {upcomingRecurring.map(function(r){return<TouchableOpacity activeOpacity={0.7} onPress={function(){
-        var related=(transactions||[]).find(function(t){return t.recurring_transaction_id===r.id;});
-        if(related){haptic('light');setEditTx(related);}
-        else{
-          haptic('light');
-          var stub={id:null,merchant:r.description,amount:r.amount,category:r.category||'',date:r.next_due_date,recurring_transaction_id:r.id};
-          setEditTx(stub);
-        }
-      }} key={r.id} style={[z.card,{marginBottom:8}]}><View style={[z.row,{justifyContent:'space-between'}]}><Text style={z.txM}>{r.description}</Text><Text style={z.fv}>₹{fmt(r.amount)}</Text></View><Text style={z.cap}>Due: {displayDate(r.next_due_date)} · {r.frequency}</Text></TouchableOpacity>;})}
-      {upcomingRecurring.length===0&&<Text style={z.cap}>Nothing due in the next 7 days.</Text>}
+      {/* Things due soon */}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:8}}>Things due soon</Text>
+      {upcomingRecurring.map(function(r){
+        return <TouchableOpacity activeOpacity={0.7} key={r.id} onPress={function(){
+          var related=(transactions||[]).find(function(t){return t.recurring_transaction_id===r.id;});
+          if(related){haptic('light');setEditTx(related);}
+          else{
+            haptic('light');
+            var stub={id:null,merchant:r.description,amount:r.amount,category:r.category||'',date:r.next_due_date,recurring_transaction_id:r.id};
+            setEditTx(stub);
+          }
+        }} style={{marginBottom:8}}>
+          <Block style={{padding:14}}>
+            <View style={{flexDirection:'row',justifyContent:'space-between'}}>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{r.description}</Text>
+              <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>₹{fmt(r.amount)}</Text>
+            </View>
+            <Caps color={theme.muted} style={{marginTop:4}}>Due: {displayDate(r.next_due_date)} · {r.frequency}</Caps>
+          </Block>
+        </TouchableOpacity>;
+      })}
+      {upcomingRecurring.length===0&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>Nothing due in the next 7 days.</Text>}
 
-      <Sec>What would close today</Sec>
-      {quickCards.length>0?quickCards:<Text style={z.cap}>This day is fully captured 🎉</Text>}
-      <View style={{height:28}}/>
+      <View style={{height:32}}/>
     </ScrollView>
-    {/* Trend detail modal mounted at root */}
+
     <TrendDetailModal visible={!!trendModal} onClose={function(){setTrendModal(null);}}
       kind={trendModal&&trendModal.kind}
       data={trendModal&&trendModal.kind==='spend'?txTrend:proteinTrend}
       labels={['6d','5d','4d','3d','2d','1d','Today']}
     />
-    {/* I15 follow-up: edit transaction modal mounted */}
     {editTx&&<AddTxModal visible={true} onClose={function(){setEditTx(null);}} editTx={editTx}/>}
   </View>);
 }
@@ -3970,15 +6083,13 @@ function FamilyScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,setFamilyName,members,transactions,meals,goals,wellness,scores,streaks,isAdmin,userId,memberProfiles,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction}=useApp();
+  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings}=useApp();
   var now=new Date();var today=isoDate(now);
   var monday=mondayOfWeek(now);
   var[inviteSheet,setInviteSheet]=useState(null); // B7: holds the member whose invite modal is open
+  var[showInvitePicker,setShowInvitePicker]=useState(false); // Phase 2.5.A: "+ Invite" → picker sheet
   var[showSharedGoalModal,setShowSharedGoalModal]=useState(false);
   var[activeSharedGoal,setActiveSharedGoal]=useState(null);
-  var[contributeGoal,setContributeGoal]=useState(null);
-  var[activityFilterDate,setActivityFilterDate]=useState(new Date());
-  var[showActivityDatePicker,setShowActivityDatePicker]=useState(false);
   var[showRename,setShowRename]=useState(false); // FA2
   var[memberDetail,setMemberDetail]=useState(null); // FA5/FA6/FA7/FA8/FA11/FA16
   var[scoreScope,setScoreScope]=useState(null); // {scope:'family'|'member', member:...} for FA4/FA14/FA6
@@ -4002,11 +6113,6 @@ function FamilyScreen(){
     setRefreshing(false);
   }
 
-  function jumpThisWeek(tab){
-    setQuickAction&&setQuickAction({action:'focus_week',nonce:Date.now()});
-    navigation.navigate(tab);
-  }
-
   // B6: This week's scores per member, summed from the family_scores table
   var thisWeekScores=(scores||[]).filter(function(s){var d=new Date(s.date);return d>=monday;});
   var prevWeekScores=(scores||[]).filter(function(s){var d=new Date(s.date);var wk=new Date(monday);wk.setDate(wk.getDate()-7);return d>=wk && d<monday;});
@@ -4015,6 +6121,15 @@ function FamilyScreen(){
   var totalScore=(members||[]).reduce(function(sum,m){return sum+ptsForMember(m.id,thisWeekScores);},0)+familyBonusPts;
   var prevTotalScore=(members||[]).reduce(function(sum,m){return sum+ptsForMember(m.id,prevWeekScores);},0);
   var deltaFromLastWeek=totalScore-prevTotalScore;
+
+  // Unique days since Monday with any activity for the given member, capped at 7
+  function daysHitInWeek(mid){
+    var hits={};
+    (meals||[]).forEach(function(ml){if(ml.memberId===mid){var d=isoDate(ml.date);if(new Date(d)>=monday)hits[d]=1;}});
+    (transactions||[]).forEach(function(t){if(t.memberId===mid&&t.confirmed){var d=isoDate(t.date);if(new Date(d)>=monday)hits[d]=1;}});
+    (wellness||[]).forEach(function(w){if(w.memberId===mid&&new Date(w.date)>=monday)hits[w.date]=1;});
+    return Math.min(Object.keys(hits).length,7);
+  }
 
   // Per-member card data
   var memberScores=(members||[]).map(function(m,i){
@@ -4030,154 +6145,187 @@ function FamilyScreen(){
     var isCurrentUser=m.userId===userId;
     var roleLabel=getMemberRoleDisplay(m);
     var isAdminRole=isMemberAdmin(m);
-    return{id:m.id,name:m.name,role:roleLabel,isAdminRole:isAdminRole,pts:weekPts,streak:topStreak,daily:dM+dT+dW,max:3,color:CARD_BG[i%5],joined:joined,isCurrentUser:isCurrentUser,inviteCode:m.inviteCode,inviteExpiresAt:m.inviteExpiresAt};
+    var roleDisplay=isAdminRole?(roleLabel+' · Admin'):roleLabel;
+    var initials=(m.name||'').split(' ').filter(Boolean).map(function(p){return p.charAt(0);}).slice(0,2).join('').toUpperCase()||'?';
+    return{id:m.id,name:m.name,role:roleDisplay,isAdminRole:isAdminRole,pts:weekPts,streak:topStreak,daily:dM+dT+dW,max:3,color:CARD_BG[i%5],joined:joined,isCurrentUser:isCurrentUser,inviteCode:m.inviteCode,inviteExpiresAt:m.inviteExpiresAt,initials:initials,hit:daysHitInWeek(m.id)+'/7'};
   });
 
-  var objectives=[];
-  (goals||[]).forEach(function(g){objectives.push({icon:'\uD83C\uDFFA',label:g.name,scope:'Goal progress',pct:g.target>0?Math.round((g.current/g.target)*100):0,detail:fmt(g.current)+' / '+fmt(g.target)});});
-  var proteinByMemberId={};
-  (meals||[]).forEach(function(ml){
-    if(isoDate(ml.date)!==today)return;
-    var mk=ml.memberId||ml.member_id||('name_'+String(ml.memberName||ml.member_name||''));
-    proteinByMemberId[mk]=(proteinByMemberId[mk]||0)+Number(ml.protein||0);
-  });
-  var memberProteinTargets=(members||[]).map(function(m){
-    var profile=(memberProfiles&&m.userId)?memberProfiles[m.userId]:null;
-    var targets=calculateProteinTargets(profile&&profile.weightKg?profile.weightKg:null);
-    var consumed=proteinByMemberId[m.id]||proteinByMemberId['name_'+m.name]||0;
-    return {member:m,protein:consumed,targets:targets};
-  });
-  var activityFilterISO=isoDate(activityFilterDate);
-  var filteredActivities=(activityFeed||[]).filter(function(a){return isoDate(a.created_at)===activityFilterISO;});
+  // Featured shared goal: prefer the highest-progress not-yet-complete; fall back to most recent.
+  var featuredSharedGoal=(function(){
+    var arr=(sharedGoals||[]).slice();
+    if(arr.length===0)return null;
+    var inProgress=arr.filter(function(g){return Number(g.current_amount||0)<Number(g.target_amount||0);});
+    if(inProgress.length>0){
+      inProgress.sort(function(a,b){
+        var ap=Number(a.target_amount)>0?Number(a.current_amount||0)/Number(a.target_amount):0;
+        var bp=Number(b.target_amount)>0?Number(b.current_amount||0)/Number(b.target_amount):0;
+        return bp-ap;
+      });
+      return inProgress[0];
+    }
+    return arr[0];
+  })();
 
-  return(<View style={[z.fScr,{paddingTop:ins.top,backgroundColor:theme.background}]}>
+  // Latest 5 activities (any date) — design has no date filter.
+  var latestActivities=(activityFeed||[]).slice(0,5);
+  function activityActorColor(name){
+    var idx=(members||[]).findIndex(function(m){return m.name===name;});
+    return idx>=0?CARD_BG[idx%5]:theme.primary;
+  }
+
+  return(<View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+    <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
     {inviteSheet&&<InviteModal member={inviteSheet} familyId={familyId} familyName={familyName} onClose={function(){setInviteSheet(null);}}/>}
+    {/* Phase 2.5.A: invite picker — list all pending members; tap row to open InviteModal for that one */}
+    <ModalSheet visible={showInvitePicker} title="Invite who?" onClose={function(){setShowInvitePicker(false);}}>
+      {(function(){
+        var pending=(memberScores||[]).filter(function(c){return !c.joined && c.id!==creatorMemberId;});
+        if(pending.length===0)return <View>
+          <Text style={{fontFamily:FF.sans,fontSize:14,lineHeight:21,color:theme.textSecondary,marginBottom:18}}>No pending members. Add new ones from Settings → Family.</Text>
+          <PrimaryButton full onPress={function(){setShowInvitePicker(false);if(openSettings)openSettings();}}>Open Settings</PrimaryButton>
+        </View>;
+        return <View>
+          {pending.map(function(c){
+            return <TouchableOpacity key={c.id} activeOpacity={0.7} onPress={function(){haptic('light');setShowInvitePicker(false);setInviteSheet(c);}} style={{
+              flexDirection:'row',alignItems:'center',
+              paddingVertical:12,paddingHorizontal:14,marginBottom:6,
+              backgroundColor:theme.surface,
+              borderRadius:14,
+              borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,
+            }}>
+              <Avatar name={c.name||'?'} color={c.color} size={32}/>
+              <View style={{flex:1,marginLeft:12}}>
+                <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{c.name||'Unknown'}</Text>
+                <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.textSecondary,marginTop:1}}>{c.role}</Text>
+              </View>
+              <Text style={{fontFamily:FF.sansBold,fontSize:14,color:theme.primary}}>›</Text>
+            </TouchableOpacity>;
+          })}
+        </View>;
+      })()}
+    </ModalSheet>
     <SharedGoalModal visible={showSharedGoalModal} onClose={function(){setShowSharedGoalModal(false);setActiveSharedGoal(null);}} goal={activeSharedGoal}/>
-    <SharedGoalContributionModal visible={!!contributeGoal} onClose={function(){setContributeGoal(null);}} goal={contributeGoal}/>
     <RenameFamilyModal visible={showRename} onClose={function(){setShowRename(false);}} familyId={familyId} currentName={familyName} onRenamed={function(newName){setFamilyName&&setFamilyName(newName);}}/>
     <MemberDetailModal visible={!!memberDetail} member={memberDetail} onClose={function(){setMemberDetail(null);}}
       onJumpProtein={function(m){setMemberDetail(null);setQuickAction&&setQuickAction({action:'focus_member',memberName:m.name,nonce:Date.now()});navigation.navigate('Wellness');}}
       onJumpScreens={function(m){setMemberDetail(null);setQuickAction&&setQuickAction({action:'focus_member',memberName:m.name,nonce:Date.now()});navigation.navigate('Wellness');}}
       onJumpStreak={function(m){setMemberDetail(null);setScoreScope({scope:'member',member:m});}}
       onJumpScoreBreakdown={function(m){setMemberDetail(null);setScoreScope({scope:'member',member:m});}}
-      onJumpToday={function(m){setMemberDetail(null);setActivityFilterDate(new Date());}}
+      onJumpToday={function(m){setMemberDetail(null);}}
     />
     <ScoreBreakdownModal visible={!!scoreScope} onClose={function(){setScoreScope(null);}} scope={scoreScope&&scoreScope.scope} member={scoreScope&&scoreScope.member}/>
-    <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
+
+    <ScrollView style={z.fl} contentContainerStyle={{paddingHorizontal:18,paddingTop:8,paddingBottom:32}} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
-    <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',paddingTop:8,marginBottom:18}]}>
-      <View style={{flex:1}}>
-        <Text style={[z.caps,{color:theme.muted,marginBottom:4}]}>Family</Text>
-        {/* FA2: tap family name (admin) to rename */}
-        <TouchableOpacity activeOpacity={isAdmin?0.7:1} onPress={function(){if(isAdmin){haptic('light');setShowRename(true);}}}>
-          <Text style={[z.h1,{color:theme.text,fontSize:26}]} numberOfLines={1}>{familyName||'Your Family'}{isAdmin?' \u270E':''}</Text>
-        </TouchableOpacity>
-      </View>
-      {isAdmin&&<TouchableOpacity style={[z.bSec,{borderColor:theme.primary,paddingHorizontal:14}]} onPress={function(){var pendingMember=(memberScores||[]).find(function(c){return !c.joined && c.id!==creatorMemberId;});if(pendingMember){setInviteSheet(pendingMember);}else{Alert.alert('Add members in Settings','Invite codes are managed from the Family section in Settings.');}}}>
-        <Text style={[z.bSecT,{color:theme.primary}]}>+ Invite</Text>
-      </TouchableOpacity>}
-    </View>
-
-    {/* FA4: tap big star score to see breakdown */}
-    <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setScoreScope({scope:'family'});}} style={{flexDirection:'row',alignItems:'center',backgroundColor:theme.surface,borderWidth:1,borderColor:theme.border,borderRadius:18,padding:18,marginBottom:18}}>
-      <View style={{width:54,height:54,borderRadius:27,backgroundColor:theme.accentLight,alignItems:'center',justifyContent:'center',marginRight:14}}>
-        <Text style={{fontSize:24}}>{'\u2B50'}</Text>
-      </View>
-      <View style={{flex:1}}>
-        <Text style={{fontSize:32,fontWeight:'700',color:theme.text,letterSpacing:-0.8,lineHeight:36}}>{fmt(totalScore)}</Text>
-        <Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary,marginTop:2}}>This week{deltaFromLastWeek!==0?(deltaFromLastWeek>0?' \u00b7 \u2191':' \u00b7 \u2193')+' '+Math.abs(deltaFromLastWeek)+' from last week':''}</Text>
-      </View>
-      <Text style={{fontSize:18,color:theme.muted}}>{'\u203A'}</Text>
-    </TouchableOpacity>
-
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:20,marginHorizontal:-20}} contentContainerStyle={{paddingHorizontal:20}}>
-      {/* FA5/FA6/FA7/FA8: every member chip is tappable. Tap = open detail; long-press = open detail too (consistent) */}
-      {memberScores.map(function(c,i){var memObj=members.find(function(m){return m.id===c.id;});return<TouchableOpacity key={c.id} activeOpacity={0.85} onPress={function(){haptic('light');if(memObj)setMemberDetail(memObj);}} onLongPress={function(){if(c.isAdminRole){haptic('medium');Alert.alert('Admin','Admin transfer is not yet supported. Contact support.');}}} delayLongPress={400} style={[z.chCard,{backgroundColor:c.color,marginRight:12,opacity:c.joined?1:0.78}]}>
-        <View style={z.chAv}><Text style={[z.chAvT,{color:c.color}]}>{(c.name||'?')[0]}</Text></View>
-        <View style={[z.row,{alignItems:'center',justifyContent:'center',flexWrap:'wrap'}]}><Text style={[z.chNm,{maxWidth:120,minHeight:34,textAlign:'center',paddingHorizontal:6,flexWrap:'wrap'}]} numberOfLines={2} ellipsizeMode="tail">{c.name||'Unknown'}</Text>{c.isAdminRole&&<View style={z.adminBadge}><Text style={z.adminBadgeTx}>{'\uD83D\uDC51'} Admin</Text></View>}</View>
-        <Text style={z.chRole}>{c.role}</Text>
-        <Text style={z.chPts}>{c.pts} pts</Text>
-        <Text style={z.chStrk}>{c.streak>0?c.streak+'-day streak':'No streak yet'}</Text>
-        <View style={{marginTop:8,width:'100%'}}>
-          <View style={z.chPTrk}><View style={[z.chPFl,{width:(c.daily/c.max*100)+'%'}]}/></View>
-          <Text style={z.chDly}>{c.daily}/{c.max} today</Text>
+      {/* Header */}
+      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',paddingTop:8,marginBottom:14}}>
+        <View style={{flex:1,marginRight:12}}>
+          <Caps>Family</Caps>
+          <TouchableOpacity activeOpacity={isAdmin?0.7:1} onPress={function(){if(isAdmin){haptic('light');setShowRename(true);}}}>
+            <Text style={{fontFamily:FF.serif,fontSize:30,letterSpacing:-0.8,color:theme.text,marginTop:6}} numberOfLines={1}>{familyName||'Your family'}{isAdmin?' ✎':''}</Text>
+          </TouchableOpacity>
         </View>
-        {!c.joined && isAdmin && c.id!==creatorMemberId && <TouchableOpacity style={z.chInvite} onPress={function(){haptic('light');setInviteSheet(c);}}><Text style={z.chInviteTx}>Invite {c.name}</Text></TouchableOpacity>}
-        {!c.joined && !isAdmin && <Text style={[z.chDly,{marginTop:8}]}>Not joined yet</Text>}
-      </TouchableOpacity>;})}
+        {isAdmin&&<TouchableOpacity hitSlop={{top:8,bottom:8,left:8,right:8}} onPress={function(){haptic('light');setShowInvitePicker(true);}}>
+          <Caps color={theme.primary} ls={0.4}>+ Invite</Caps>
+        </TouchableOpacity>}
+      </View>
+
+      {/* Hero score */}
+      <View style={{position:'relative'}}>
+      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setScoreScope({scope:'family'});}}>
+        <Block bg={theme.primary} style={{padding:22}}>
+          <Caps color="rgba(255,255,255,0.7)">Family score this week</Caps>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54,marginTop:8}}>{fmt(totalScore)}</Text>
+          <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:12}}>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{deltaFromLastWeek===0?'Same as last week':(deltaFromLastWeek>0?'+':'')+deltaFromLastWeek+' vs last week'}</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>Tap for breakdown ›</Text>
+          </View>
+        </Block>
+      </TouchableOpacity>
+      {/* Phase 2.5.B: InfoIcon — absolute-positioned sibling so its tap doesn't bubble to the score-breakdown TouchableOpacity */}
+      <InfoIcon
+        title="How the family score works"
+        body={"Your family score grows as everyone logs their day:\n\n• Logging a meal: 10 pts (cap 30/day)\n• Logging an activity: 10 pts (cap 30/day)\n• Hitting your protein target: 25 pts\n• Hitting your water target: 15 pts\n• Screen time under limit: 15 pts\n• Confirming all pending money entries: 20 pts\n• Logging a transaction: 5 pts (cap 25/day)\n• Contributing to a goal: 10 pts (cap 20/day)\n\nStreak bonuses kick in at 3 days (+10), 7 days (+25), and 30 days (+100). Goal completions add 50 (halfway) and 150 (done). Activity logging boosts your score but does NOT count toward your daily streak — rest days are okay.\n\nScores reset weekly. Tap the hero for a member-by-member breakdown."}
+        color="rgba(255,255,255,0.7)"
+        style={{position:'absolute',top:18,right:18}}
+      />
+      </View>
+
+      {/* Members — vertical stack of MemberStreakRing cards per design source */}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:10}}>Members</Text>
+      <View>
+        {memberScores.map(function(c){
+          var memObj=members.find(function(m){return m.id===c.id;});
+          return <MemberStreakRing key={c.id} member={{
+            initials:c.initials,
+            name:c.name||'Unknown',
+            role:c.role,
+            score:c.pts,
+            streak:c.streak,
+            best:Math.max(c.streak,7),
+            hit:c.hit,
+            isYou:c.isCurrentUser,
+          }} onPress={function(){haptic('light');if(memObj)setMemberDetail(memObj);}}/>;
+        })}
+      </View>
+
+      {/* Activity feed */}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:10}}>What’s been happening</Text>
+      {latestActivities.length>0?<Block style={{padding:14}}>
+        {latestActivities.map(function(a,i,arr){
+          var data=a&&a.activity_data?a.activity_data:{};
+          var actorName=data.user_name||'Someone';
+          var isLast=i===arr.length-1;
+          return <View key={a.id} style={{flexDirection:'row',alignItems:'center',paddingVertical:10,borderBottomWidth:isLast?0:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
+            <Avatar name={actorName} color={activityActorColor(actorName)} size={28}/>
+            <View style={{flex:1,marginLeft:10}}>
+              <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.text,lineHeight:18}}>{buildActivityMessage(a)}</Text>
+              <Caps color={theme.muted} style={{marginTop:2}}>{relativeTime(a.created_at)}</Caps>
+            </View>
+          </View>;
+        })}
+      </Block>:<Block style={{padding:14}}>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>Nothing’s happened in your family yet.</Text>
+        <Caps color={theme.muted} style={{marginTop:6}}>Capture a meal or money entry and it’ll show up here.</Caps>
+      </Block>}
+
+      {/* Shared goal — single accent block per design. Tap → SharedGoalModal (view/edit/contribute). Multi-goal management lives on Finance tab. */}
+      {featuredSharedGoal?(function(){
+        var g=featuredSharedGoal;
+        var pct=Number(g.target_amount)>0?Math.round((Number(g.current_amount||0)/Number(g.target_amount))*100):0;
+        var done=pct>=100;
+        return <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setActiveSharedGoal(g);setShowSharedGoalModal(true);}} style={{marginTop:12}}>
+          <Block bg={theme.accent} style={{padding:22}}>
+            <Caps color="rgba(255,255,255,0.75)">Shared goal · {g.goal_name}</Caps>
+            <View style={{flexDirection:'row',alignItems:'baseline',marginTop:8}}>
+              <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:36,letterSpacing:-1.4,color:'#fff',lineHeight:38}}>₹{fmt(g.current_amount||0)}</Text>
+              <Text style={{fontFamily:FF.sans,fontWeight:'500',fontSize:14,color:'rgba(255,255,255,0.8)',marginLeft:6}}>/ ₹{fmt(g.target_amount||0)}</Text>
+            </View>
+            <View style={{marginTop:12}}>
+              <Progress value={Math.min(pct,100)} color="#fff" track="rgba(255,255,255,0.25)"/>
+            </View>
+            <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:10}}>
+              <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{pct}% there{(sharedGoals||[]).length>1?' · '+((sharedGoals||[]).length-1)+' more':''}</Text>
+              <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{done?'🎉 Completed':'Tap to manage ›'}</Text>
+            </View>
+          </Block>
+        </TouchableOpacity>;
+      })():<Caps color={theme.muted} style={{marginTop:14}}>No shared goals yet. Start one from the Finance tab.</Caps>}
+
+      <View style={{height:32}}/>
     </ScrollView>
-    <Sec>What your family is working toward</Sec>{objectives.length===0&&<Text style={[z.cap,{color:theme.muted}]}>Add goals and capture meals to see what your family is working toward.</Text>}
-    {/* FA10: tap an objective row to open the related goal — we navigate to Finance focus_goals (it's where goals live) */}
-    {objectives.map(function(ob,i){return<TouchableOpacity key={i} activeOpacity={0.7} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_goals',nonce:Date.now()});navigation.navigate('Finance');}} style={[z.card,{marginBottom:8,backgroundColor:theme.card,borderColor:theme.border}]}><View style={[z.row,{marginBottom:6}]}><Text style={{fontSize:20,marginRight:8}}>{ob.icon}</Text><View style={{flex:1}}><Text style={[z.txM,{color:theme.text}]}>{ob.label}</Text><Text style={[z.cap,{color:theme.muted}]}>{ob.scope}{ob.detail?' · '+ob.detail:''}</Text></View><Text style={[z.fv,{color:theme.warning}]}>{ob.pct}%</Text></View><Bar pct={Math.min(ob.pct||0,100)} color={theme.warning}/></TouchableOpacity>;})}
-    <Sec>Each person\u2019s protein</Sec>
-    {/* FA11: tap a person row to open their wellness detail */}
-    {memberProteinTargets.map(function(item){
-      var member=item.member;
-      var protein=item.protein;
-      var activeTarget=item.targets.active;
-      var regularTarget=item.targets.regular;
-      var progress=activeTarget>0?Math.min((protein/activeTarget)*100,100):0;
-      return <TouchableOpacity key={'protein_'+member.id} activeOpacity={0.7} onPress={function(){haptic('light');setMemberDetail(member);}} style={[z.card,{marginBottom:8,backgroundColor:theme.card,borderColor:theme.border}]}> 
-        <View style={[z.row,{justifyContent:'space-between',alignItems:'center'}]}>
-          <Text style={[z.txM,{color:theme.text,flex:1,marginRight:8}]} numberOfLines={2} ellipsizeMode="tail">{member.name||'Unknown'}</Text>
-          <Text style={[z.cap,{color:theme.textSecondary}]}>R: {regularTarget}g · A: {activeTarget}g</Text>
-        </View>
-        <Text style={[z.fv,{marginTop:6,color:theme.text}]}>{protein}g / {activeTarget}g</Text>
-        <Bar pct={progress} color={protein>=activeTarget?theme.success:theme.warning}/>
-      </TouchableOpacity>;
-    })}
-    <Sec>How this week looked</Sec><View style={[z.card,{backgroundColor:theme.card,borderColor:theme.border}]}>
-      {/* FA12: each count is tappable and jumps to the relevant tab */}
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpThisWeek('Finance');}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><Text style={z.sub}>Money entries</Text><Text style={z.fv}>{transactions.filter(function(t){return isThisWeek(t.date);}).length} captured</Text></TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpThisWeek('Wellness');}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><Text style={z.sub}>Meals</Text><Text style={z.fv}>{meals.filter(function(m){return isThisWeek(m.date);}).length} captured</Text></TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_goals',nonce:Date.now()});navigation.navigate('Finance');}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><Text style={z.sub}>Goals</Text><Text style={z.fv}>{goals.length} active</Text></TouchableOpacity>
-      {familyBonusPts>0 && <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setScoreScope({scope:'family'});}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><Text style={z.sub}>Family bonuses</Text><Text style={[z.fv,{color:'#BA7517'}]}>+{familyBonusPts} pts</Text></TouchableOpacity>}
-      <View style={z.hDiv}/>
-      {/* FA14: tap family score to open same breakdown */}
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setScoreScope({scope:'family'});}} style={{alignItems:'center',marginTop:12}}><Text style={z.fScLbl}>Your family\u2019s score this week</Text><Text style={[z.fScNum,{fontSize:28}]}>{'\u2605'}  {fmt(totalScore)}</Text></TouchableOpacity>
-    </View>
-
-    <Sec>Goals you\u2019re chasing together</Sec>
-    <Text style={[z.cap,{marginBottom:8}]}>Family goals are created from Finance \u2014 choose &quot;Shared Family Goal&quot; there.</Text>
-    {(sharedGoals||[]).map(function(g){
-      var pct=g.target_amount>0?Math.round((Number(g.current_amount||0)/Number(g.target_amount))*100):0;
-      var contribs=(sharedGoalContributions||[]).filter(function(c){return c.shared_goal_id===g.id;});
-      var byUser={};
-      contribs.forEach(function(c){var key=c.user_name||'Member';byUser[key]=(byUser[key]||0)+Number(c.amount||0);});
-      return <View key={g.id} style={[z.card,{marginBottom:10,borderColor:pct>=100?'#0F6E56':'#E0E0DB'}]}>
-        <View style={[z.row,{justifyContent:'space-between'}]}><Text style={z.txM}>{g.goal_name}</Text><Text style={[z.fv,{color:pct>=100?'#0F6E56':'#BA7517'}]}>{pct}%</Text></View>
-        <Text style={z.cap}>₹{fmt(g.current_amount||0)} / ₹{fmt(g.target_amount||0)} · {g.category||'General'}</Text>
-        <Bar pct={Math.min(pct,100)} color={pct>=100?'#0F6E56':'#EF9F27'} h={8}/>
-        {pct>=100&&<Text style={[z.cap,{color:'#0F6E56',marginTop:4}]}>🎉 Goal completed!</Text>}
-        {/* FA16: each contributor line is tappable \u2192 that member's detail */}
-        <View style={{marginTop:8}}>{Object.keys(byUser).slice(0,3).map(function(u){var matchM=(members||[]).find(function(m){return m.name===u;});return <TouchableOpacity key={u} activeOpacity={0.7} onPress={function(){if(matchM){haptic('light');setMemberDetail(matchM);}}}><Text style={[z.cap,{color:matchM?theme.primary:theme.muted,fontWeight:matchM?'600':'400'}]}>{u}: ₹{fmt(byUser[u])}{matchM?' \u203A':''}</Text></TouchableOpacity>;})}</View>
-        <View style={[z.row,{gap:8,marginTop:10}]}> 
-          <TouchableOpacity style={[z.bSec,{flex:1}]} onPress={function(){setActiveSharedGoal(g);setShowSharedGoalModal(true);}}><Text style={z.bSecT}>Edit</Text></TouchableOpacity>
-          <TouchableOpacity style={[z.bPri,{flex:1}]} onPress={function(){setContributeGoal(g);}}><Text style={z.bPriT}>Add to this</Text></TouchableOpacity>
-        </View>
-      </View>;
-    })}
-    {(!sharedGoals||sharedGoals.length===0)&&<Text style={z.cap}>No shared goals yet. The Finance tab is where they start.</Text>}
-
-    <Sec>What\u2019s been happening</Sec>
-    <View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}> 
-      <TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={function(){haptic('light');setActivityFilterDate(new Date());}}><Text style={z.bSecT}>Today</Text></TouchableOpacity>
-      <TouchableOpacity style={[z.bSec,{flex:1,marginRight:8}]} onPress={function(){haptic('light');setActivityFilterDate(addDays(new Date(),-1));}}><Text style={z.bSecT}>Yesterday</Text></TouchableOpacity>
-      <TouchableOpacity style={[z.bSec,{flex:1}]} onPress={function(){setShowActivityDatePicker(true);}}><Text style={z.bSecT}>{displayDate(activityFilterDate)} 📅</Text></TouchableOpacity>
-    </View>
-    {showActivityDatePicker&&<DateField label="Filter activity date" value={activityFilterDate} onChange={function(d){setActivityFilterDate(d);setShowActivityDatePicker(false);}} maximumDate={new Date()}/>}
-    {filteredActivities.slice(0,30).map(function(a){return <View key={a.id} style={[z.card,{marginBottom:6,backgroundColor:'#FFF'}]}><Text style={z.body}>{buildActivityMessage(a)}</Text><Text style={z.cap}>{relativeTime(a.created_at)}</Text></View>;})}
-    {filteredActivities.length===0&&<View style={z.card}><Text style={z.cap}>Nothing happened in your family on {displayDate(activityFilterDate)}.</Text><Text style={[z.cap,{marginTop:6}]}>Try another date from the filter.</Text></View>}
-
-    <View style={{height:32}}/></ScrollView></View>);
+  </View>);
 }
 
 // B7: Invite sheet — shown to admin when they tap "Invite [Name]". Generates a 6-char code
 // tied to that member slot, copies to clipboard, and offers native share sheet.
 function InviteModal({member,familyId,familyName,onClose}){
+  var theme=useThemeColors();
   var[code,setCode]=useState('');
   var[loading,setLoading]=useState(false);
+  // Phase A3: invite-time tier picker. Default 'member' (safer); creator/co-admin elevates to 'co_admin'.
+  var[accessRoleChoice,setAccessRoleChoice]=useState('member');
 
   async function generate(){
     haptic('light');
@@ -4186,7 +6334,7 @@ function InviteModal({member,familyId,familyName,onClose}){
       var newCode=generateInviteCode();
       var existing=await supabase.from('family_invites').select('id').eq('family_id',familyId).eq('invited_member_name',member.name).eq('status','pending').maybeSingle();
       if(existing&&existing.data&&existing.data.id){
-        var upd=await supabase.from('family_invites').update({invite_code:newCode}).eq('id',existing.data.id);
+        var upd=await supabase.from('family_invites').update({invite_code:newCode,invited_access_role:accessRoleChoice}).eq('id',existing.data.id);
         if(upd.error)throw upd.error;
       }else{
         var ins=await supabase.from('family_invites').insert({
@@ -4195,6 +6343,7 @@ function InviteModal({member,familyId,familyName,onClose}){
           invite_code:newCode,
           invited_member_name:member.name||'Member',
           invited_member_role:(member.role||'parent').toLowerCase(),
+          invited_access_role:accessRoleChoice,
           status:'pending',
         });
         if(ins.error)throw ins.error;
@@ -4218,22 +6367,48 @@ function InviteModal({member,familyId,familyName,onClose}){
     try{Clipboard.setString(code);Alert.alert('Copied','Invite code copied to clipboard.');}catch(e){}
   }
 
-  return(<Modal visible={true} animationType="slide" transparent><View style={z.modalWrap}><View style={z.modal}>
-    <Text style={z.h1}>Invite {member.name}</Text>
-    <Text style={[z.body,{color:'#555',marginBottom:16}]}>Share this code with {member.name}.</Text>
+  function TierOption(props){
+    var sel=accessRoleChoice===props.value;
+    return <TouchableOpacity onPress={function(){haptic('light');setAccessRoleChoice(props.value);}} style={{
+      flexDirection:'row',alignItems:'flex-start',
+      paddingVertical:12,paddingHorizontal:14,marginBottom:8,
+      borderRadius:14,backgroundColor:sel?theme.primaryLight:theme.surface,
+      borderWidth:StyleSheet.hairlineWidth,borderColor:sel?theme.primary:theme.border,
+    }}>
+      <View style={{width:18,height:18,borderRadius:9999,borderWidth:1.5,borderColor:sel?theme.primary:theme.muted,marginRight:10,marginTop:2,alignItems:'center',justifyContent:'center'}}>
+        {sel?<View style={{width:8,height:8,borderRadius:9999,backgroundColor:theme.primary}}/>:null}
+      </View>
+      <View style={{flex:1}}>
+        <Text style={{fontFamily:FF.sansSemi,fontSize:14,color:sel?theme.primary:theme.text}}>{props.title}</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,marginTop:3,lineHeight:17}}>{props.desc}</Text>
+      </View>
+    </TouchableOpacity>;
+  }
+  var tierLabel=accessRoleChoice==='co_admin'?'Co-admin':'Member';
+
+  return(<ModalSheet visible={true} title={'Invite '+member.name} onClose={onClose}>
+    <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginBottom:16,lineHeight:20}}>Share this code with {member.name}. They'll enter it on signup to join the {familyName||'family'}.</Text>
+    {!code?<View style={{marginBottom:16}}>
+      <Text style={{fontFamily:FF.sansSemi,fontSize:13,color:theme.text,marginBottom:8,letterSpacing:0.2}}>Permission tier</Text>
+      <TierOption value="co_admin" title="Co-admin" desc="Can log and edit data for the whole family. Use for spouses, partners, second adults."/>
+      <TierOption value="member" title="Member" desc="Can only edit their own meals, transactions, wellness logs. Use for kids, grandparents, or anyone who manages just their own data."/>
+    </View>:null}
     {code?<View>
-      <View style={[z.card,{alignItems:'center',paddingVertical:20,marginBottom:12}]}>
-        <Text style={[z.caps,{marginBottom:8}]}>Invite Code</Text>
-        <Text style={{fontSize:32,fontWeight:'500',letterSpacing:4,color:'#085041'}}>{code}</Text>
+      <Block bg={theme.primary} style={{alignItems:'center',paddingVertical:24,marginBottom:14}}>
+        <Caps color="rgba(255,255,255,0.7)">Invite code · {tierLabel}</Caps>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:42,letterSpacing:8,color:'#fff',marginTop:8}}>{code}</Text>
+        <Caps color="rgba(255,255,255,0.7)" style={{marginTop:8}}>Expires in 7 days</Caps>
+      </Block>
+      <View style={{flexDirection:'row',gap:10,marginBottom:12}}>
+        <View style={{flex:1}}><SecondaryButton full onPress={copyCode}>Copy</SecondaryButton></View>
+        <View style={{flex:1.4}}><PrimaryButton full onPress={shareCode}>Share via…</PrimaryButton></View>
       </View>
-      <View style={[z.row,{gap:8,marginBottom:12}]}>
-        <TouchableOpacity style={[z.bSec,{flex:1}]} onPress={copyCode}><Text style={z.bSecT}>Copy Code</Text></TouchableOpacity>
-        <TouchableOpacity style={[z.bPri,{flex:1}]} onPress={shareCode}><Text style={z.bPriT}>Share</Text></TouchableOpacity>
-      </View>
-      <TouchableOpacity onPress={generate} disabled={loading} style={{alignItems:'center'}}><Text style={[z.linkTx,{color:'#888'}]}>{loading?'Generating...':'Generate a new code'}</Text></TouchableOpacity>
-    </View>:<TouchableOpacity style={z.bPri} onPress={generate} disabled={loading}><Text style={z.bPriT}>{loading?'Generating...':'Generate Invite Code'}</Text></TouchableOpacity>}
-    <TouchableOpacity style={[z.bSec,{marginTop:16}]} onPress={onClose}><Text style={z.bSecT}>Close</Text></TouchableOpacity>
-  </View></View></Modal>);
+      <TouchableOpacity onPress={generate} disabled={loading} style={{alignItems:'center',paddingVertical:8}}>
+        <Caps color={theme.muted}>{loading?'Generating…':'Generate a new code'}</Caps>
+      </TouchableOpacity>
+    </View>:<PrimaryButton full disabled={loading} onPress={generate}>{loading?'Generating…':'Generate invite code'}</PrimaryButton>}
+    <View style={{marginTop:8}}><SecondaryButton full onPress={onClose}>Close</SecondaryButton></View>
+  </ModalSheet>);
 }
 
 // B7: Settings screen — opened from the Home header. Contains the Family admin panel.
@@ -4266,32 +6441,25 @@ function RenameFamilyModal({visible,onClose,familyId,currentName,onRenamed}){
     }catch(e){haptic('error');showFriendlyError('Could not rename family',e);}
     finally{setSaving(false);}
   }
-  return(<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-    <View style={[z.modalWrap,{justifyContent:'center'}]}>
-      <View style={[z.modal,{margin:20,backgroundColor:theme.surface}]}>
-        <Text style={[z.h1,{color:theme.text}]}>Rename your family</Text>
-        <Inp label="Family name" value={name} onChangeText={setName} placeholder="Our Family" maxLength={48}/>
-        <View style={[z.row,{gap:8,marginTop:8}]}>
-          <TouchableOpacity style={[z.bSec,{flex:1,borderColor:theme.primary}]} onPress={onClose}><Text style={[z.bSecT,{color:theme.primary}]}>Cancel</Text></TouchableOpacity>
-          <TouchableOpacity style={[z.bPri,{flex:1,backgroundColor:theme.primary,opacity:!name.trim()||saving?0.5:1}]} onPress={save} disabled={!name.trim()||saving}><Text style={z.bPriT}>{saving?'Saving\u2026':'Save'}</Text></TouchableOpacity>
-        </View>
-      </View>
+  return(<ModalSheet visible={visible} title="Rename your family" onClose={onClose}>
+    <Inp label="Family name" value={name} onChangeText={setName} placeholder="Our Family" maxLength={48}/>
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={!name.trim()||saving} onPress={save}>{saving?'Saving…':'Save'}</PrimaryButton></View>
     </View>
-  </Modal>);
+  </ModalSheet>);
 }
 
 // Member detail — opened by tapping a member chip on Family / Settings / Wellness
 // Shows weekly stats for that member + jump-to-detail buttons.
 function MemberDetailModal({visible,onClose,member,onJumpProtein,onJumpScreens,onJumpStreak,onJumpScoreBreakdown,onJumpToday}){
   var theme=useThemeColors();
-  var{transactions,meals,wellness,scores,streaks,memberProfiles}=useApp();
+  var{transactions,meals,wellness,scores,streaks,memberProfiles,members}=useApp();
   if(!member)return null;
   var today=isoDate(new Date());
   var monday=mondayOfWeek(new Date());
-  var weekTx=(transactions||[]).filter(function(t){return t.memberId===member.id&&toDate(t.date)>=monday;});
   var weekMeals=(meals||[]).filter(function(m){return m.memberId===member.id&&toDate(m.date)>=monday;});
   var todayMeals=(meals||[]).filter(function(m){return m.memberId===member.id&&isoDate(m.date)===today;});
-  var todayProtein=todayMeals.reduce(function(s,m){return s+Number(m.protein||0);},0);
   var profile=(memberProfiles&&member.userId)?memberProfiles[member.userId]:null;
   var targets=calculateProteinTargets(profile&&profile.weightKg?profile.weightKg:null);
   var weekScreens=(wellness||[]).filter(function(w){return w.memberId===member.id&&toDate(w.date)>=monday;});
@@ -4300,64 +6468,77 @@ function MemberDetailModal({visible,onClose,member,onJumpProtein,onJumpScreens,o
   var weekPts=memScores.reduce(function(s,r){return s+(r.points_earned||0);},0);
   var memStreaks=(streaks||[]).filter(function(s){return s.member_id===member.id;});
   var topStreak=memStreaks.reduce(function(mx,s){return Math.max(mx,s.current_streak||0);},0);
-  return(<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-    <View style={z.modalWrap}>
-      <View style={[z.modal,{backgroundColor:theme.surface}]}>
-        <View style={[z.row,{justifyContent:'space-between',alignItems:'center',marginBottom:14}]}>
-          <View>
-            <Text style={[z.h1,{color:theme.text,marginBottom:0}]}>{member.name}</Text>
-            <Text style={[z.cap,{color:theme.textSecondary}]}>{getMemberRoleDisplay(member)}</Text>
-          </View>
-          <TouchableOpacity onPress={onClose}><Text style={{fontSize:14,fontWeight:'600',color:theme.primary}}>Done</Text></TouchableOpacity>
-        </View>
-        <ScrollView style={{maxHeight:520}}>
-          <Text style={[z.cap,{textTransform:'uppercase',letterSpacing:0.6,fontWeight:'700',color:theme.muted,marginBottom:6}]}>This week</Text>
-          <View style={[z.row,{justifyContent:'space-between',marginBottom:14,gap:10}]}>
-            <View style={{flex:1,backgroundColor:theme.primaryLight,borderRadius:12,padding:14}}>
-              <Text style={{fontSize:11,color:theme.primary,fontWeight:'600'}}>POINTS</Text>
-              <Text style={{fontSize:22,fontWeight:'700',color:theme.primary}}>{weekPts}</Text>
-            </View>
-            <View style={{flex:1,backgroundColor:theme.primaryLight,borderRadius:12,padding:14}}>
-              <Text style={{fontSize:11,color:theme.primary,fontWeight:'600'}}>STREAK</Text>
-              <Text style={{fontSize:22,fontWeight:'700',color:theme.primary}}>{topStreak}d</Text>
-            </View>
-          </View>
-
-          <TouchableOpacity onPress={function(){onJumpProtein&&onJumpProtein(member);}} style={[z.card,{marginBottom:8}]}>
-            <View style={[z.row,{justifyContent:'space-between'}]}>
-              <View style={{flex:1}}><Text style={z.txM}>Protein today</Text><Text style={z.cap}>Target {targets.active}g (active) \u00b7 {targets.regular}g (regular)</Text></View>
-              <Text style={[z.fv,{color:todayProtein>=targets.active?theme.success:theme.warning}]}>{todayProtein}g</Text>
-            </View>
-            <Bar pct={targets.active>0?Math.min((todayProtein/targets.active)*100,100):0} color={todayProtein>=targets.active?theme.success:theme.warning}/>
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={function(){onJumpScreens&&onJumpScreens(member);}} style={[z.card,{marginBottom:8}]}>
-            <View style={[z.row,{justifyContent:'space-between'}]}>
-              <View style={{flex:1}}><Text style={z.txM}>Screen time this week</Text><Text style={z.cap}>{weekScreens.length} day{weekScreens.length===1?'':'s'} captured</Text></View>
-              <Text style={z.fv}>{weekScreenHrs.toFixed(1)} hrs</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={function(){onJumpToday&&onJumpToday(member);}} style={[z.card,{marginBottom:8}]}>
-            <Text style={z.txM}>Today\u2019s logs</Text>
-            <Text style={z.cap}>{todayMeals.length} meal{todayMeals.length===1?'':'s'} \u00b7 {(transactions||[]).filter(function(t){return t.memberId===member.id&&isoDate(t.date)===today;}).length} entr{((transactions||[]).filter(function(t){return t.memberId===member.id&&isoDate(t.date)===today;}).length===1)?'y':'ies'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={function(){onJumpScoreBreakdown&&onJumpScoreBreakdown(member);}} style={[z.card,{marginBottom:8}]}>
-            <Text style={z.txM}>Where {weekPts} points came from</Text>
-            <Text style={z.cap}>Tap to see the breakdown</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={function(){onJumpStreak&&onJumpStreak(member);}} style={[z.card,{marginBottom:8}]}>
-            <Text style={z.txM}>Streak history</Text>
-            <Text style={z.cap}>Best running streak: {topStreak} days</Text>
-          </TouchableOpacity>
-
-          <View style={{height:18}}/>
-        </ScrollView>
+  var weekProtein=weekMeals.reduce(function(s,m){return s+Number(m.protein||0);},0);
+  var avgProtein=weekMeals.length>0?Math.round(weekProtein/7):0;
+  var avgScreenHrs=weekScreens.length>0?(weekScreenHrs/7):0;
+  var avgScreenH=Math.floor(avgScreenHrs);
+  var avgScreenM=Math.round((avgScreenHrs-avgScreenH)*60);
+  var avatarColor=(function(){
+    var idx=(members||[]).findIndex(function(m){return m.id===member.id;});
+    return idx>=0?CARD_BG[idx%5]:theme.primary;
+  })();
+  return(<ModalSheet visible={visible} title="" onClose={onClose}>
+    {/* Member header — avatar + serif name + role */}
+    <View style={{flexDirection:'row',alignItems:'center',marginBottom:16}}>
+      <Avatar name={member.name||'?'} color={avatarColor} size={56}/>
+      <View style={{flex:1,marginLeft:14}}>
+        <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:24,letterSpacing:-0.4,color:theme.text}}>{member.name}</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:2}}>{getMemberRoleDisplay(member)}</Text>
       </View>
     </View>
-  </Modal>);
+
+    {/* 2x2 stat grid */}
+    <View style={{flexDirection:'row',gap:8,marginBottom:8}}>
+      <View style={{flex:1}}>
+        <Block bg={theme.primary} style={{padding:16}}>
+          <Caps color="rgba(255,255,255,0.7)">Score this week</Caps>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:'#fff',marginTop:4}}>{weekPts}</Text>
+        </Block>
+      </View>
+      <View style={{flex:1}}>
+        <Block bg={theme.accent} style={{padding:16}}>
+          <Caps color="rgba(255,255,255,0.75)">Streak</Caps>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:'#fff',marginTop:4}}>{topStreak}<Text style={{fontSize:13,fontWeight:'500',color:'rgba(255,255,255,0.85)'}}> days</Text></Text>
+        </Block>
+      </View>
+    </View>
+    <View style={{flexDirection:'row',gap:8,marginBottom:16}}>
+      <View style={{flex:1}}>
+        <Block bg={theme.surfaceElevated} style={{padding:16}}>
+          <Caps>Avg protein</Caps>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{avgProtein}g</Text>
+        </Block>
+      </View>
+      <View style={{flex:1}}>
+        <Block bg={theme.surfaceElevated} style={{padding:16}}>
+          <Caps>Avg screens</Caps>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{avgScreenH}h {avgScreenM}m</Text>
+        </Block>
+      </View>
+    </View>
+
+    {/* Jump rows */}
+    {[
+      {label:"Today's log",detail:todayMeals.length+' meal'+(todayMeals.length===1?'':'s')+' · '+(transactions||[]).filter(function(t){return t.memberId===member.id&&isoDate(t.date)===today;}).length+' entries',onPress:function(){onJumpToday&&onJumpToday(member);}},
+      {label:'Score breakdown',detail:'Where '+weekPts+' points came from',onPress:function(){onJumpScoreBreakdown&&onJumpScoreBreakdown(member);}},
+      {label:'Protein detail',detail:'Today: '+todayMeals.reduce(function(s,m){return s+Number(m.protein||0);},0)+'g · Target '+targets.active+'g',onPress:function(){onJumpProtein&&onJumpProtein(member);}},
+      {label:'Screen time detail',detail:weekScreens.length+' day'+(weekScreens.length===1?'':'s')+' captured · '+weekScreenHrs.toFixed(1)+' hrs total',onPress:function(){onJumpScreens&&onJumpScreens(member);}},
+    ].map(function(item,idx){
+      return <TouchableOpacity key={idx} activeOpacity={0.7} onPress={item.onPress} style={{
+        backgroundColor:theme.surface,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:14,
+        paddingVertical:14,paddingHorizontal:16,marginBottom:8,
+        flexDirection:'row',justifyContent:'space-between',alignItems:'center',
+      }}>
+        <View style={{flex:1,marginRight:8}}>
+          <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{item.label}</Text>
+          <Caps color={theme.muted} style={{marginTop:2}}>{item.detail}</Caps>
+        </View>
+        <Text style={{fontFamily:FF.sans,fontSize:18,color:theme.muted}}>›</Text>
+      </TouchableOpacity>;
+    })}
+
+    <View style={{height:8}}/>
+  </ModalSheet>);
 }
 
 // Score breakdown — used from Family big-star card and "How this week looked" Family Score
@@ -4392,33 +6573,26 @@ function ScoreBreakdownModal({visible,onClose,scope,member}){
     family_bonus:'Family bonus',
     other:'Other',
   };
-  return(<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-    <View style={z.modalWrap}>
-      <View style={[z.modal,{backgroundColor:theme.surface,maxHeight:'80%'}]}>
-        <View style={[z.row,{justifyContent:'space-between',alignItems:'center',marginBottom:10}]}>
-          <View>
-            <Text style={[z.h1,{color:theme.text,marginBottom:0}]}>Score breakdown</Text>
-            <Text style={[z.cap,{color:theme.textSecondary}]}>{scope==='family'?'Whole family this week':((member&&member.name)||'Member')+' \u00b7 this week'}</Text>
-          </View>
-          <TouchableOpacity onPress={onClose}><Text style={{fontSize:14,fontWeight:'600',color:theme.primary}}>Done</Text></TouchableOpacity>
+  return(<ModalSheet visible={visible} title="Score breakdown" onClose={onClose}>
+    <Caps color={theme.textSecondary} style={{marginBottom:14}}>{scope==='family'?'Whole family · this week':((member&&member.name)||'Member')+' · this week'}</Caps>
+    <Block bg={theme.primary} style={{padding:20,marginBottom:14}}>
+      <Caps color="rgba(255,255,255,0.7)">This week</Caps>
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:48,letterSpacing:-1.8,color:'#fff',lineHeight:50,marginTop:6}}>{fmt(totalPts)}<Text style={{fontSize:16,fontWeight:'500',color:'rgba(255,255,255,0.7)'}}> pts</Text></Text>
+    </Block>
+    <Caps style={{marginBottom:8}}>By category</Caps>
+    {typeKeys.length===0&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>Nothing earned yet this week.</Text>}
+    {typeKeys.map(function(k){
+      var pct=totalPts>0?(byType[k].pts/totalPts)*100:0;
+      return <Block key={k} style={{padding:14,marginBottom:8}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline',marginBottom:6}}>
+          <Text style={{fontFamily:FF.sansSemi,fontSize:13,fontWeight:'600',color:theme.text}}>{nicelabel[k]||k}</Text>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:13,color:theme.primary}}>+{byType[k].pts}<Text style={{color:theme.muted,fontWeight:'500'}}> · {byType[k].count}×</Text></Text>
         </View>
-        <View style={{borderRadius:14,backgroundColor:theme.primaryLight,padding:14,marginBottom:14}}>
-          <Text style={{fontSize:11,fontWeight:'600',color:theme.primary,letterSpacing:0.6}}>TOTAL</Text>
-          <Text style={{fontSize:30,fontWeight:'700',color:theme.primary}}>{fmt(totalPts)} pts</Text>
-        </View>
-        <ScrollView style={{maxHeight:420}}>
-          {typeKeys.length===0&&<Text style={z.cap}>Nothing earned yet this week.</Text>}
-          {typeKeys.map(function(k){return<View key={k} style={[z.card,{marginBottom:8}]}>
-            <View style={[z.row,{justifyContent:'space-between'}]}>
-              <View style={{flex:1}}><Text style={z.txM}>{nicelabel[k]||k}</Text><Text style={z.cap}>{byType[k].count} time{byType[k].count===1?'':'s'}</Text></View>
-              <Text style={[z.fv,{color:theme.primary}]}>+{byType[k].pts}</Text>
-            </View>
-          </View>;})}
-          <View style={{height:18}}/>
-        </ScrollView>
-      </View>
-    </View>
-  </Modal>);
+        <Progress value={pct}/>
+      </Block>;
+    })}
+    <View style={{height:8}}/>
+  </ModalSheet>);
 }
 
 // Quick category change — fired by tapping a category Pill on a transaction
@@ -4440,23 +6614,25 @@ function CategoryQuickPickModal({visible,onClose,transaction}){
     }catch(e){haptic('error');showFriendlyError('Could not change category',e);}
     finally{setSaving(false);}
   }
-  return(<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-    <View style={[z.modalWrap,{justifyContent:'flex-end'}]}>
-      <View style={[z.modal,{backgroundColor:theme.surface}]}>
-        <Text style={[z.h1,{color:theme.text}]}>Change category</Text>
-        <Text style={[z.cap,{marginBottom:12,color:theme.textSecondary}]}>{transaction.merchant} \u00b7 {'\u20B9'}{fmt(transaction.amount)}</Text>
-        <View style={[z.row,{flexWrap:'wrap',gap:8,marginBottom:14}]}>
-          {CAT_LIST.map(function(c){
-            var sel=transaction.category===c;
-            return <TouchableOpacity key={c} style={[z.chip,sel&&z.chipSel,{opacity:saving?0.5:1}]} disabled={saving} onPress={function(){haptic('light');pick(c);}}>
-              <Text style={[z.chipTx,sel&&z.chipSelTx]}>{c}</Text>
-            </TouchableOpacity>;
-          })}
-        </View>
-        <TouchableOpacity style={[z.bSec,{borderColor:theme.primary}]} onPress={onClose}><Text style={[z.bSecT,{color:theme.primary}]}>Close</Text></TouchableOpacity>
-      </View>
+  return(<ModalSheet visible={visible} title="Change category" onClose={onClose}>
+    <Caps color={theme.textSecondary} style={{marginBottom:12}}>{transaction.merchant} · ₹{fmt(transaction.amount)}</Caps>
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:14}}>
+      {CAT_LIST.map(function(c){
+        var sel=transaction.category===c;
+        var cc=CATS[c]||CATS.Uncat;
+        return <TouchableOpacity key={c} disabled={saving} onPress={function(){haptic('light');pick(c);}} style={{
+          paddingVertical:6,paddingHorizontal:12,borderRadius:9999,
+          backgroundColor:sel?cc.bg:theme.surfaceElevated,
+          borderWidth:sel?1.5:StyleSheet.hairlineWidth,
+          borderColor:sel?cc.text:theme.border,
+          opacity:saving?0.5:1,
+        }}>
+          <Text style={{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:sel?cc.text:theme.textSecondary}}>{c}</Text>
+        </TouchableOpacity>;
+      })}
     </View>
-  </Modal>);
+    <SecondaryButton full onPress={onClose}>Close</SecondaryButton>
+  </ModalSheet>);
 }
 
 // Trend detail — full-screen view of spend or protein trend
@@ -4465,78 +6641,61 @@ function TrendDetailModal({visible,onClose,kind,data,labels}){
   if(!visible)return null;
   var width=Math.min(Dimensions.get('window').width-40,360);
   var title=kind==='spend'?'Where spending is heading':'Where protein is heading';
-  var unit=kind==='spend'?'\u20B9':'g';
+  var unit=kind==='spend'?'₹':'g';
   var max=Math.max.apply(null,(data||[0]).concat([1]));
   var avg=data&&data.length?Math.round(data.reduce(function(a,b){return a+b;},0)/data.length):0;
-  return(<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-    <View style={z.modalWrap}>
-      <View style={[z.modal,{backgroundColor:theme.surface,maxHeight:'80%'}]}>
-        <View style={[z.row,{justifyContent:'space-between',alignItems:'center',marginBottom:14}]}>
-          <Text style={[z.h1,{color:theme.text,marginBottom:0}]}>{title}</Text>
-          <TouchableOpacity onPress={onClose}><Text style={{fontSize:14,fontWeight:'600',color:theme.primary}}>Done</Text></TouchableOpacity>
-        </View>
-        <View style={[z.card,{backgroundColor:theme.card}]}>
-          <Text style={[z.cap,{textTransform:'uppercase',letterSpacing:0.5,fontWeight:'700',color:theme.muted,marginBottom:6}]}>Daily average over 7 days</Text>
-          <Text style={{fontSize:30,fontWeight:'700',color:theme.text,marginBottom:14}}>{unit}{fmt(avg)}{kind==='protein'?'':''}</Text>
-          <LineChart
-            data={{labels:labels||[],datasets:[{data:data||[0]}]}}
-            width={width}
-            height={200}
-            yAxisLabel={kind==='spend'?'\u20B9':''}
-            yAxisSuffix={kind==='protein'?'g':''}
-            withInnerLines={false}
-            chartConfig={{backgroundGradientFrom:'#FFFFFF',backgroundGradientTo:'#FFFFFF',decimalPlaces:0,color:function(){return '#085041';},labelColor:function(){return '#555';},propsForDots:{r:'3',strokeWidth:'1.5',stroke:'#085041'}}}
-            bezier
-            style={{borderRadius:8}}
-          />
-          <Text style={[z.cap,{marginTop:10,color:theme.textSecondary}]}>Peak: {unit}{fmt(max)}</Text>
-        </View>
-      </View>
-    </View>
-  </Modal>);
+  return(<ModalSheet visible={visible} title={title} onClose={onClose}>
+    <Block style={{padding:14}}>
+      <Caps>Daily average over 7 days</Caps>
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:30,letterSpacing:-1,color:theme.text,marginTop:6,marginBottom:14}}>{unit}{fmt(avg)}</Text>
+      <LineChart
+        data={{labels:labels||[],datasets:[{data:data||[0]}]}}
+        width={width}
+        height={200}
+        yAxisLabel={kind==='spend'?'₹':''}
+        yAxisSuffix={kind==='protein'?'g':''}
+        withInnerLines={false}
+        chartConfig={{backgroundGradientFrom:theme.surface,backgroundGradientTo:theme.surface,decimalPlaces:0,color:function(){return theme.primary;},labelColor:function(){return theme.textSecondary;},propsForDots:{r:'3',strokeWidth:'1.5',stroke:theme.primary}}}
+        bezier
+        style={{borderRadius:8}}
+      />
+      <Caps color={theme.textSecondary} style={{marginTop:10}}>Peak: {unit}{fmt(max)}</Caps>
+    </Block>
+  </ModalSheet>);
 }
 
 function OurPromiseScreen({onClose}){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
-  return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.background}]}>
-    <View style={[z.row,{justifyContent:'space-between',paddingHorizontal:20,paddingTop:8,paddingBottom:16}]}>
-      <Text style={[z.h1,{color:theme.text}]}>Our Promise</Text>
-      <TouchableOpacity onPress={function(){haptic('light');onClose();}} style={{paddingHorizontal:8,paddingVertical:4}}><Text style={{fontSize:16,fontWeight:'600',color:theme.primary}}>Done</Text></TouchableOpacity>
-    </View>
-    <ScrollView style={z.fl} contentContainerStyle={{paddingHorizontal:24,paddingBottom:60}} showsVerticalScrollIndicator={false}>
-      <Text style={{fontSize:22,fontWeight:'600',color:theme.text,lineHeight:30,marginBottom:24,letterSpacing:-0.3}}>
-        We are not here to keep your attention. We are here to give it back.
+  var sections=[
+    {label:'One',title:'Your family is the unit. Not you alone.',body:'Every other app gives each person a separate dashboard. Yours shows the whole family at once — money, meals, time, goals — so you can finally see the picture instead of guessing at it.'},
+    {label:'Two',title:'One nudge a day. Never between 10 PM and 8 AM.',body:'No streaks designed to break you. No gamification. No re-prompts. If you miss a day, the day passes. We will not pull you back into the app to fix a number.'},
+    {label:'Three',title:'We are trying to become unnecessary.',body:"After six months you should know your family's spending patterns, eating patterns, and screen patterns by heart. The habits should outlive the app. If they do, we did our job — even if you stop opening this."},
+  ];
+  return(<View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+    <NavBar title="" trailing={<TouchableOpacity onPress={function(){haptic('light');onClose();}} hitSlop={{top:8,bottom:8,left:8,right:8}}><Caps color={theme.primary} ls={0.4}>Done</Caps></TouchableOpacity>}/>
+    <ScrollView style={{flex:1}} contentContainerStyle={{paddingHorizontal:24,paddingTop:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
+      <Caps color={theme.primary}>Our promise</Caps>
+      <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:32,letterSpacing:-1,color:theme.text,marginTop:12,lineHeight:38}}>
+        We are not here to keep{'\n'}<Text style={{fontStyle:'italic'}}>your attention.</Text>{'\n'}We are here to give it back.
       </Text>
 
-      <View style={{height:1,backgroundColor:theme.border,marginVertical:8}}/>
+      <View style={{height:StyleSheet.hairlineWidth,backgroundColor:theme.border,marginTop:28,marginBottom:8}}/>
 
-      <Text style={{fontSize:13,fontWeight:'600',color:theme.accent,letterSpacing:1.2,textTransform:'uppercase',marginTop:20,marginBottom:8}}>One</Text>
-      <Text style={{fontSize:18,fontWeight:'500',color:theme.text,lineHeight:26,marginBottom:6}}>Your family is the unit. Not you alone.</Text>
-      <Text style={{fontSize:14,color:theme.textSecondary,lineHeight:22,marginBottom:20}}>
-        Every other app gives each person a separate dashboard. Yours shows the whole family at once — money, meals, time, goals — so you can finally see the picture instead of guessing at it.
-      </Text>
+      <View style={{marginTop:16}}>
+        {sections.map(function(s,i){
+          return <View key={s.label} style={{marginBottom:24}}>
+            <Caps color={theme.accent} ls={1.0}>{s.label}</Caps>
+            <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:22,letterSpacing:-0.4,color:theme.text,marginTop:10,lineHeight:28}}>{s.title}</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:8,lineHeight:22}}>{s.body}</Text>
+          </View>;
+        })}
+      </View>
 
-      <Text style={{fontSize:13,fontWeight:'600',color:theme.accent,letterSpacing:1.2,textTransform:'uppercase',marginTop:12,marginBottom:8}}>Two</Text>
-      <Text style={{fontSize:18,fontWeight:'500',color:theme.text,lineHeight:26,marginBottom:6}}>One nudge a day. Never between 10 PM and 8 AM.</Text>
-      <Text style={{fontSize:14,color:theme.textSecondary,lineHeight:22,marginBottom:20}}>
-        No streaks designed to break you. No gamification. No re-prompts. If you miss a day, the day passes. We will not pull you back into the app to fix a number.
-      </Text>
+      <View style={{height:StyleSheet.hairlineWidth,backgroundColor:theme.border,marginVertical:16}}/>
 
-      <Text style={{fontSize:13,fontWeight:'600',color:theme.accent,letterSpacing:1.2,textTransform:'uppercase',marginTop:12,marginBottom:8}}>Three</Text>
-      <Text style={{fontSize:18,fontWeight:'500',color:theme.text,lineHeight:26,marginBottom:6}}>We are trying to become unnecessary.</Text>
-      <Text style={{fontSize:14,color:theme.textSecondary,lineHeight:22,marginBottom:20}}>
-        After six months you should know your family's spending patterns, eating patterns, and screen patterns by heart. The habits should outlive the app. If they do, we did our job — even if you stop opening this.
-      </Text>
-
-      <View style={{height:1,backgroundColor:theme.border,marginVertical:24}}/>
-
-      <Text style={{fontSize:14,color:theme.textSecondary,lineHeight:22,marginBottom:6,fontStyle:'italic'}}>
-        This app is not a tracker. It is a mirror.
-      </Text>
-      <Text style={{fontSize:14,color:theme.textSecondary,lineHeight:22,marginBottom:40,fontStyle:'italic'}}>
-        Trackers tell you what happened. A mirror shows you what you didn't know was there.
-      </Text>
+      <Text style={{fontFamily:FF.serif,fontWeight:'400',fontStyle:'italic',fontSize:18,color:theme.textSecondary,lineHeight:26,marginBottom:8}}>This app is not a tracker. It is a mirror.</Text>
+      <Text style={{fontFamily:FF.serif,fontWeight:'400',fontStyle:'italic',fontSize:18,color:theme.textSecondary,lineHeight:26,marginBottom:40}}>Trackers tell you what happened. A mirror shows you what you didn't know was there.</Text>
     </ScrollView>
   </View>);
 }
@@ -4554,6 +6713,10 @@ function SettingsScreen({onClose}){
   var[showOurPromise,setShowOurPromise]=useState(false);
   var[showRename,setShowRename]=useState(false); // S3
   var[memberDetail,setMemberDetail]=useState(null); // S4
+  var[showAddMember,setShowAddMember]=useState(false);
+  var[newMemberName,setNewMemberName]=useState('');
+  var[newMemberRole,setNewMemberRole]=useState('parent');
+  var[addingMember,setAddingMember]=useState(false);
   var[debugTaps,setDebugTaps]=useState(0);
   var[debugEnabled,setDebugEnabled]=useState(false);
   var creatorMember=(members||[]).find(function(m){return m.userId===userId;})||((isAdmin&&members&&members.length)?members[0]:null);
@@ -4562,16 +6725,37 @@ function SettingsScreen({onClose}){
 
   async function removeMember(m){
     try{
-      var{data,error}=await supabase.from('family_members').delete().eq('id',m.id).select();
-      console.log('[MEMBER UNLINK]',{memberId:m.id,data:data,error:error});
-      if(error)throw error;
+      if(m._virtual && m.inviteId){
+        var canc=await supabase.from('family_invites').update({status:'cancelled'}).eq('id',m.inviteId).select();
+        console.log('[INVITE CANCEL]',{inviteId:m.inviteId,data:canc.data,error:canc.error});
+        if(canc.error)throw canc.error;
+      }else{
+        var res=await supabase.from('family_members').delete().eq('id',m.id).select();
+        console.log('[MEMBER UNLINK]',{memberId:m.id,data:res.data,error:res.error});
+        if(res.error)throw res.error;
+      }
       await refreshMembers();
       haptic('success');
       setRemoveConfirm(null);
     }catch(e){haptic('error');showFriendlyError('Could not update family member',e);}
   }
 
-  return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.background}]}> 
+  // Reusable list-row helper: matches design's flat button rows (label + value or chevron).
+  function listRow(label,value,onPress,opts){
+    var danger=opts&&opts.danger;
+    var emoji=opts&&opts.emoji;
+    return <TouchableOpacity activeOpacity={0.7} onPress={onPress} style={{
+      backgroundColor:theme.surface,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,
+      paddingVertical:13,paddingHorizontal:14,marginBottom:6,
+      flexDirection:'row',alignItems:'center',
+    }}>
+      {emoji?<Text style={{fontSize:16,marginRight:10}}>{emoji}</Text>:null}
+      <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:danger?theme.danger:theme.text,flex:1}}>{label}</Text>
+      {value?<Text style={{fontFamily:FF.sans,fontWeight:'500',fontSize:13,color:theme.muted}}>{value}</Text>:<Text style={{fontFamily:FF.sans,fontSize:18,color:theme.muted}}>›</Text>}
+    </TouchableOpacity>;
+  }
+
+  return(<View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
     {inviteSheet&&<InviteModal member={inviteSheet} familyId={familyId} familyName={familyName} onClose={function(){setInviteSheet(null);}}/>}
     <ProfileModal visible={showProfile} onClose={function(){setShowProfile(false);}}/>
     {showOurPromise&&<Modal visible={true} animationType="slide" onRequestClose={function(){setShowOurPromise(false);}}><OurPromiseScreen onClose={function(){setShowOurPromise(false);}}/></Modal>}
@@ -4583,237 +6767,252 @@ function SettingsScreen({onClose}){
       onJumpScoreBreakdown={function(){setMemberDetail(null);onClose&&onClose();}}
       onJumpToday={function(){setMemberDetail(null);onClose&&onClose();}}
     />
-    {removeConfirm&&<Modal visible={true} transparent animationType="fade"><View style={[z.modalWrap,{justifyContent:'center'}]}><View style={[z.modal,{margin:20,backgroundColor:theme.surface}]}>
-      <Text style={[z.h1,{color:theme.text}]}>Remove {removeConfirm.name}?</Text>
-      <Text style={[z.body,{marginBottom:16,color:theme.textSecondary}]}>This unlinks their account. Their existing logs stay in the family history.</Text>
-      <View style={z.row}><TouchableOpacity style={[z.bSec,{flex:1,marginRight:8,borderColor:theme.primary}]} onPress={function(){setRemoveConfirm(null);}}><Text style={[z.bSecT,{color:theme.primary}]}>Cancel</Text></TouchableOpacity><TouchableOpacity style={[z.bPri,{flex:1,backgroundColor:theme.danger}]} onPress={function(){removeMember(removeConfirm);}}><Text style={z.bPriT}>Remove</Text></TouchableOpacity></View>
-    </View></View></Modal>}
-    <View style={[z.row,{justifyContent:'space-between',paddingHorizontal:20,paddingTop:8,paddingBottom:16}]}>
-      <Text style={[z.h1,{color:theme.text}]}>Settings</Text>
-      <TouchableOpacity onPress={function(){haptic('light');onClose();}} style={{paddingHorizontal:8,paddingVertical:4}}><Text style={{fontSize:16,fontWeight:'600',color:theme.primary}}>Done</Text></TouchableOpacity>
-    </View>
-    <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}>
+    {removeConfirm&&<ModalSheet visible={true} title={'Remove '+removeConfirm.name+'?'} onClose={function(){setRemoveConfirm(null);}}>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginBottom:16,lineHeight:20}}>This unlinks their account. Their existing logs stay in the family history.</Text>
+      <View style={{flexDirection:'row',gap:10}}>
+        <View style={{flex:1}}><SecondaryButton full onPress={function(){setRemoveConfirm(null);}}>Cancel</SecondaryButton></View>
+        <View style={{flex:1}}><PrimaryButton full accent onPress={function(){removeMember(removeConfirm);}}>Remove</PrimaryButton></View>
+      </View>
+    </ModalSheet>}
+
+    <NavBar title="Settings" trailing={<TouchableOpacity onPress={function(){haptic('light');onClose();}} hitSlop={{top:8,bottom:8,left:8,right:8}}><Caps color={theme.primary} ls={0.4}>Done</Caps></TouchableOpacity>}/>
+
+    <ScrollView style={{flex:1}} contentContainerStyle={{padding:16,paddingTop:12,paddingBottom:32}} showsVerticalScrollIndicator={false}>
       {/* Profile card */}
-      <TouchableOpacity onPress={function(){setShowProfile(true);}} style={{flexDirection:'row',alignItems:'center',backgroundColor:theme.surface,borderWidth:1,borderColor:theme.border,borderRadius:18,padding:16,marginBottom:14}}>
-        <View style={[z.profileAvatar,{backgroundColor:theme.primaryLight,borderColor:theme.border}]}>
-          <Text style={[z.profileAvatarTx,{color:theme.primary}]}>{userInitials}</Text>
-        </View>
-        <View style={{flex:1,marginLeft:14}}>
-          <Text style={{fontSize:16,fontWeight:'700',color:theme.text}}>{currentUserName||'User'}</Text>
-          <Text style={{fontSize:12,color:theme.textSecondary,marginTop:2}}>{userProfile&&userProfile.email?userProfile.email:''}</Text>
-          {isAdmin&&<View style={{marginTop:6,backgroundColor:theme.accentLight,borderRadius:8,paddingVertical:3,paddingHorizontal:8,alignSelf:'flex-start'}}>
-            <Text style={{fontSize:11,fontWeight:'700',color:theme.accent,letterSpacing:0.3}}>{'\uD83D\uDC51'} FAMILY ADMIN</Text>
-          </View>}
-        </View>
-        <Text style={{fontSize:18,color:theme.muted}}>{'\u203A'}</Text>
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){setShowProfile(true);}}>
+        <Block style={{padding:16,marginBottom:14}}>
+          <View style={{flexDirection:'row',alignItems:'center'}}>
+            <Avatar name={currentUserName||'?'} color={theme.primary} size={48}/>
+            <View style={{flex:1,marginLeft:14}}>
+              <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:16,color:theme.text}}>{currentUserName||'User'}</Text>
+              {userProfile&&userProfile.email?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:2}}>{userProfile.email}</Text>:null}
+              {isAdmin&&<View style={{marginTop:6,alignSelf:'flex-start'}}><Pill bg={theme.primaryLight} fg={theme.primary}>Admin · Family</Pill></View>}
+            </View>
+            <Text style={{fontFamily:FF.sans,fontSize:18,color:theme.muted}}>›</Text>
+          </View>
+        </Block>
       </TouchableOpacity>
 
-      {/* App Theme */}
-      <Sec>App Theme</Sec>
-      <View style={{flexDirection:'row',backgroundColor:theme.surfaceElevated,borderRadius:14,padding:4,marginBottom:8}}>
-        {[{key:'light',label:'Light'},{key:'dark',label:'Dark'},{key:'system',label:'System'}].map(function(opt){
-          var sel=themeMode===opt.key;
-          return <TouchableOpacity key={'tm_'+opt.key} style={{flex:1,paddingVertical:10,alignItems:'center',borderRadius:10,backgroundColor:sel?theme.surface:'transparent'}} onPress={function(){haptic('light');setThemeMode(opt.key);}}>
-            <Text style={{fontSize:13,fontWeight:'600',color:sel?theme.primary:theme.textSecondary}}>{opt.label}</Text>
-          </TouchableOpacity>;
-        })}
-      </View>
-      <Text style={[z.cap,{color:theme.muted,marginBottom:8}]}>System follows your device\u2019s appearance setting.</Text>
-
-      <Sec>Family</Sec>
-      {/* S3: tap family card (admin) to rename */}
-      <TouchableOpacity activeOpacity={isAdmin?0.7:1} onPress={function(){if(isAdmin){haptic('light');setShowRename(true);}}} style={[z.card,{marginBottom:8,backgroundColor:theme.card,borderColor:theme.border}]}><Text style={[z.txM,{color:theme.text}]}>{familyName}{isAdmin?' \u270E':''}</Text><Text style={[z.cap,{color:theme.muted}]}>{members.length} member{members.length!==1?'s':''}</Text><Text style={[z.cap,{marginTop:4,color:theme.muted}]}>Signed in as {currentUserName||'User'}</Text>{isAdmin&&<Text style={[z.cap,{color:theme.primary,marginTop:4,fontWeight:'600'}]}>You are the Family Admin</Text>}</TouchableOpacity>
+      {/* Family */}
+      <Caps style={{marginTop:8,marginBottom:8}}>Family</Caps>
+      <Block style={{padding:16,marginBottom:8}}>
+        <View style={{flexDirection:'row',alignItems:'center'}}>
+          <View style={{
+            width:44,height:44,borderRadius:12,backgroundColor:theme.primary,
+            alignItems:'center',justifyContent:'center',marginRight:12,
+          }}>
+            <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:22,color:'#fff'}}>{(familyName||'F').charAt(0).toUpperCase()}</Text>
+          </View>
+          <View style={{flex:1}}>
+            <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:theme.text}}>{familyName||'Your family'}</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,marginTop:2}}>{members.length} member{members.length!==1?'':''}{isAdmin?' · You are admin':''}</Text>
+          </View>
+        </View>
+        {isAdmin&&<View style={{flexDirection:'row',gap:8,marginTop:14}}>
+          <View style={{flex:1}}><SecondaryButton full onPress={function(){haptic('light');setShowRename(true);}}>Rename</SecondaryButton></View>
+        </View>}
+      </Block>
+      {/* Member list */}
       {members.map(function(m){
         var isSelf=m.userId===userId||m.id===creatorMemberId;
         var status=isSelf?'You':(m.userId?'Joined':(m.inviteCode?'Invite pending':'Not invited'));
         var statusColor=isSelf?theme.primary:(m.userId?theme.primary:(m.inviteCode?theme.accent:theme.muted));
         var roleLabel=getMemberRoleDisplay(m);
-        return<TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){if(isSelf){haptic('light');setShowProfile(true);}else{haptic('light');setMemberDetail(m);}}} style={[z.card,{marginBottom:8}]}> 
-        <View style={[z.row,{justifyContent:'space-between',alignItems:'center'}]}>
-          <View style={{flex:1}}><Text style={z.txM}>{m.name}</Text><Text style={z.cap}>{roleLabel}</Text></View>
-          <Text style={[z.cap,{color:statusColor,fontWeight:'500'}]}>{status}</Text>
-        </View>
-        {isAdmin && !m.userId && m.id!==creatorMemberId && <View style={[z.row,{marginTop:12,gap:8}]}>
-          <TouchableOpacity style={[z.bSec,{flex:1}]} onPress={function(){setInviteSheet(m);}}><Text style={z.bSecT}>{m.inviteCode?'Regenerate Code':'Invite'}</Text></TouchableOpacity>
-        </View>}
-        {isAdmin && m.userId && m.userId!==userId && <TouchableOpacity style={{marginTop:12,alignSelf:'flex-start'}} onPress={function(){setRemoveConfirm(m);}}><Text style={[z.cap,{color:'#E24B4A',fontWeight:'500'}]}>Remove from family</Text></TouchableOpacity>}
-      </TouchableOpacity>;})}
-      <Sec>About you</Sec>
-      <TouchableOpacity style={[z.card,{marginBottom:8}]} onPress={function(){setShowProfile(true);}}>
-        <Text style={z.txM}>Your profile</Text>
-        <Text style={z.cap}>Avatar, personal details, privacy controls</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[z.card,{marginBottom:8}]} onPress={function(){haptic('light');openQuestionnaire&&openQuestionnaire();}}>
-        <Text style={z.txM}>Revisit your answers</Text>
-        <Text style={z.cap}>Update what you told us when you joined</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[z.card,{marginBottom:8,flexDirection:'row',alignItems:'center'}]} onPress={function(){haptic('light');setShowOurPromise(true);}}>
-        <Text style={{fontSize:18,marginRight:10}}>{'\uD83E\uDD1D'}</Text>
-        <View style={{flex:1}}>
-          <Text style={z.txM}>Our Promise</Text>
-          <Text style={z.cap}>Why this app is different from a tracker</Text>
-        </View>
-        <Text style={{fontSize:18,color:theme.muted}}>{'\u203A'}</Text>
-      </TouchableOpacity>
+        return <TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){if(isSelf){haptic('light');setShowProfile(true);}else{haptic('light');setMemberDetail(m);}}}>
+          <Block style={{padding:14,marginBottom:8}}>
+            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+              <View style={{flex:1}}>
+                <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>{m.name}</Text>
+                <Caps color={theme.muted} style={{marginTop:2}}>{roleLabel}</Caps>
+              </View>
+              <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:12,color:statusColor}}>{status}</Text>
+            </View>
+            {isAdmin && !m.userId && m.id!==creatorMemberId && <View style={{marginTop:12}}>
+              <SecondaryButton onPress={function(){setInviteSheet(m);}}>{m.inviteCode?'Regenerate code':'Invite'}</SecondaryButton>
+            </View>}
+            {isAdmin && m.userId && m.userId!==userId && <TouchableOpacity style={{marginTop:12,alignSelf:'flex-start'}} onPress={function(){setRemoveConfirm(m);}}>
+              <Caps color={theme.danger}>Remove from family</Caps>
+            </TouchableOpacity>}
+          </Block>
+        </TouchableOpacity>;
+      })}
+      {isAdmin&&<TouchableOpacity style={{flexDirection:'row',alignItems:'center',justifyContent:'center',borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderStyle:'dashed',borderRadius:14,paddingVertical:14,marginBottom:8,backgroundColor:'transparent'}} onPress={function(){haptic('light');setShowAddMember(true);}}>
+        <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>+ Add Member</Text>
+      </TouchableOpacity>}
 
-      <Sec>How the app behaves</Sec>
-      <View style={[z.card,{marginBottom:8}]}> 
-        <View style={[z.row,{justifyContent:'space-between'}]}>
-          <View style={{flex:1,paddingRight:10}}><Text style={z.txM}>Evening reminders</Text><Text style={z.cap}>Smart reminder at 8 PM if today is incomplete</Text></View>
+      {/* Appearance */}
+      <Caps style={{marginTop:20,marginBottom:8}}>Appearance</Caps>
+      <Block style={{padding:8,marginBottom:6}}>
+        <View style={{flexDirection:'row',gap:8}}>
+          {[{key:'light',label:'Light'},{key:'dark',label:'Dark'},{key:'system',label:'System'}].map(function(opt){
+            var sel=themeMode===opt.key;
+            return <TouchableOpacity key={'tm_'+opt.key} style={{
+              flex:1,height:64,borderRadius:12,
+              backgroundColor:sel?theme.primary:theme.surfaceElevated,
+              alignItems:'center',justifyContent:'center',gap:6,
+              borderWidth:sel?0:StyleSheet.hairlineWidth,borderColor:theme.border,
+            }} onPress={function(){haptic('light');setThemeMode(opt.key);}}>
+              <View style={{width:18,height:18,borderRadius:9999,backgroundColor:sel?'#fff':theme.text}}/>
+              <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:12,color:sel?'#fff':theme.textSecondary}}>{opt.label}</Text>
+            </TouchableOpacity>;
+          })}
+        </View>
+      </Block>
+      <Caps color={theme.muted} style={{marginBottom:8}}>System follows your device's appearance setting.</Caps>
+
+      {/* Account */}
+      <Caps style={{marginTop:20,marginBottom:8}}>Account</Caps>
+      {listRow('Your profile',null,function(){setShowProfile(true);})}
+      {listRow('Revisit your answers',null,function(){haptic('light');openQuestionnaire&&openQuestionnaire();})}
+      {listRow('Our promise',null,function(){haptic('light');setShowOurPromise(true);},{emoji:'🤝'})}
+
+      {/* Behavior toggles */}
+      <Caps style={{marginTop:20,marginBottom:8}}>How the app behaves</Caps>
+      <Block style={{padding:14,marginBottom:6}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+          <View style={{flex:1,paddingRight:10}}>
+            <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>Evening reminders</Text>
+            <Caps color={theme.muted} style={{marginTop:2}}>Smart reminder at 8 PM if today is incomplete</Caps>
+          </View>
           <Switch value={notificationEnabled} onValueChange={async function(next){setNotificationEnabled&&setNotificationEnabled(next);try{await supabase.from('users').update({notification_enabled:next}).eq('id',userId);}catch(e){}}}/>
         </View>
-      </View>
-      <View style={[z.card,{marginBottom:8}]}> 
-        <View style={[z.row,{justifyContent:'space-between'}]}>
-          <View style={{flex:1,paddingRight:10}}><Text style={z.txM}>Show water tracking</Text><Text style={z.cap}>Adds water entry to Wellness. Off by default.</Text></View>
+      </Block>
+      <Block style={{padding:14,marginBottom:6}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+          <View style={{flex:1,paddingRight:10}}>
+            <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>Show water tracking</Text>
+            <Caps color={theme.muted} style={{marginTop:2}}>Adds water entry to Wellness. Off by default.</Caps>
+          </View>
           <Switch value={waterTrackingEnabled} onValueChange={async function(next){setWaterTrackingEnabled&&setWaterTrackingEnabled(next);try{await supabase.from('users').update({water_tracking_enabled:next}).eq('id',userId);}catch(e){}}}/>
         </View>
-      </View>
+      </Block>
 
-      <Sec>Your data</Sec>
-      <TouchableOpacity style={[z.card,{marginBottom:8}]} onPress={async function(){
+      {/* Your data */}
+      <Caps style={{marginTop:20,marginBottom:8}}>Your data</Caps>
+      {listRow('Pull latest from cloud',null,async function(){
         try{
           await refreshActivityFeed&&refreshActivityFeed();
           Alert.alert('Refreshed','Synced latest family activity.');
         }catch(e){
           showFriendlyError('Could not refresh data',e);
         }
-      }}>
-        <Text style={z.txM}>Pull latest from cloud</Text>
-        <Text style={z.cap}>Sync the latest comments, goals, and family activity</Text>
-      </TouchableOpacity>
+      })}
 
-      <Sec>Under the hood</Sec>
-      <TouchableOpacity style={[z.card,{marginBottom:8}]} onPress={function(){var n=debugTaps+1;setDebugTaps(n);if(n>=7){setDebugEnabled(true);Alert.alert('Debug mode','Developer options unlocked for this session.');}}}><Text style={z.txM}>App Version</Text><Text style={z.cap}>v1.0.0 · Tap 7 times to unlock debug options</Text></TouchableOpacity>
-      {debugEnabled&&<View style={[z.card,{marginBottom:8,backgroundColor:'#F2F2EE'}]}><Text style={z.cap}>Debug enabled</Text><Text style={z.cap}>User: {userId}</Text><Text style={z.cap}>Family: {familyId}</Text><Text style={z.cap}>Members: {members.length}</Text></View>}
+      {/* Under the hood */}
+      <Caps style={{marginTop:20,marginBottom:8}}>Under the hood</Caps>
+      {listRow('App version','v1.0.0',function(){var n=debugTaps+1;setDebugTaps(n);if(n>=7){setDebugEnabled(true);Alert.alert('Debug mode','Developer options unlocked for this session.');}})}
+      {debugEnabled&&<Block bg={theme.surfaceElevated} style={{padding:14,marginBottom:6}}>
+        <Caps>Debug enabled</Caps>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.muted,marginTop:6}}>User: {userId}</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.muted}}>Family: {familyId}</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.muted}}>Members: {members.length}</Text>
+      </Block>}
 
-      <TouchableOpacity style={[z.card,{marginBottom:8}]} onPress={async function(){
-        haptic('light');
-        try{
-          if(userProfile&&userProfile.user_type==='member'){
-            await supabase.from('family_members').delete().eq('family_id',familyId).eq('user_id',userId);
-            await supabase.from('users').update({family_id:null}).eq('id',userId);
-          }
-        }catch(e){console.log('[MEMBER LOGOUT RESET ERROR]',e);} 
-        supabase.auth.signOut();
-      }}>
-        <Text style={[z.txM,{color:'#E24B4A'}]}>Sign Out</Text>
-      </TouchableOpacity>
+      {/* Diagnostics (build #5) — exports invite-join flow logs via Share intent */}
+      <Caps style={{marginTop:20,marginBottom:8}}>Diagnostics</Caps>
+      {listRow('Send debug logs','Share invite-join trace',function(){haptic('light');shareDiagLogs();})}
+
+      {/* Sign out */}
+      <View style={{marginTop:20}}>
+        {listRow('Sign out',null,async function(){
+          haptic('light');
+          try{
+            if(userProfile&&userProfile.user_type==='member'){
+              await supabase.from('family_members').delete().eq('family_id',familyId).eq('user_id',userId);
+              await supabase.from('users').update({family_id:null}).eq('id',userId);
+            }
+          }catch(e){console.log('[MEMBER LOGOUT RESET ERROR]',e);}
+          supabase.auth.signOut();
+        },{danger:true})}
+      </View>
+
+      {showAddMember&&<ModalSheet visible={true} title="Add a member" onClose={function(){setShowAddMember(false);setNewMemberName('');setNewMemberRole('parent');}}>
+        <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginBottom:16,lineHeight:20}}>Enter their name and role. We'll generate an invite code you can share.</Text>
+        <Inp label="Name" value={newMemberName} onChangeText={setNewMemberName} placeholder="First name is fine" maxLength={48}/>
+        <Caps style={{marginTop:8,marginBottom:8}}>Role</Caps>
+        <View style={[z.row,{gap:8,marginBottom:18,flexWrap:'wrap'}]}>
+          {[{label:'Parent',value:'parent'},{label:'Child',value:'child'},{label:'Other',value:'other'}].map(function(opt){
+            var sel=newMemberRole===opt.value;
+            return <TouchableOpacity key={'add_role_'+opt.value} style={[z.chip,sel&&z.chipSel]} onPress={function(){haptic('light');setNewMemberRole(opt.value);}}>
+              <Text style={[z.chipTx,sel&&z.chipSelTx]}>{opt.label}</Text>
+            </TouchableOpacity>;
+          })}
+        </View>
+        <View style={{flexDirection:'row',gap:10}}>
+          <View style={{flex:1}}><SecondaryButton full disabled={addingMember} onPress={function(){setShowAddMember(false);setNewMemberName('');setNewMemberRole('parent');}}>Cancel</SecondaryButton></View>
+          <View style={{flex:1.4}}><PrimaryButton full disabled={addingMember||!normalizeText(newMemberName)} onPress={async function(){
+            var clean=normalizeText(newMemberName);
+            if(!clean){haptic('error');Alert.alert('Missing name','Enter a name for this member.');return;}
+            setAddingMember(true);
+            try{
+              var newCode=generateInviteCode();
+              var ins=await supabase.from('family_invites').insert({
+                family_id:familyId,
+                invited_by:userId,
+                invite_code:newCode,
+                invited_member_name:clean,
+                invited_member_role:newMemberRole,
+                status:'pending',
+              }).select().single();
+              if(ins.error)throw ins.error;
+              await refreshMembers();
+              haptic('success');
+              setShowAddMember(false);
+              setNewMemberName('');
+              setNewMemberRole('parent');
+              setInviteSheet({id:'invite_'+ins.data.id,inviteId:ins.data.id,name:clean,role:newMemberRole,userId:null,inviteCode:newCode,_virtual:true});
+            }catch(e){haptic('error');showFriendlyError('Could not add member',e);}
+            setAddingMember(false);
+          }}>{addingMember?'Adding…':'Add member'}</PrimaryButton></View>
+        </View>
+      </ModalSheet>}
+
       <View style={{height:32}}/>
     </ScrollView>
   </View>);
 }
 
 // ═══════════════════════════════════════════════════════════════
-// FLOATING TAB BAR — pill nav with Family centered as hero
-// Order: Home | Finance | Family (raised) | Wellness | Insights
+// MAIN TABS — wires the design TabBar atom to react-navigation.
+// Order: Home | Finance | Family | Wellness | Reflect.
 // ═══════════════════════════════════════════════════════════════
-function FloatingTabBar(props){
+var TAB_ID_TO_ROUTE={home:'Home',finance:'Finance',family:'Family',wellness:'Wellness',reflect:'Reflect'};
+var TAB_ROUTE_TO_ID={Home:'home',Finance:'finance',Family:'family',Wellness:'wellness',Reflect:'reflect'};
+
+function TabBarAdapter(props){
   var state=props.state;
   var navigation=props.navigation;
-  var insets=useSafeAreaInsets();
-  var theme=useThemeColors();
-  var icons={Home:'\u2302',Finance:'\u20B9',Wellness:'\u2661',Insights:'\u25CE',Family:'\u2665'};
-
-  function renderTab(routeName,iconChar,focused,onPress){
-    return (
-      <TouchableOpacity
-        key={'tab_'+routeName}
-        style={{flex:1,alignItems:'center',justifyContent:'center',paddingVertical:8}}
-        onPress={onPress}
-        accessibilityRole="button"
-        accessibilityLabel={routeName}
-      >
-        <Text style={{fontSize:22,color:focused?theme.primary:theme.muted,marginBottom:2}}>{iconChar}</Text>
-        <Text style={{fontSize:10,fontWeight:focused?'700':'500',color:focused?theme.primary:theme.muted,letterSpacing:0.2}}>{routeName}</Text>
-      </TouchableOpacity>
-    );
+  var activeRoute=state.routes[state.index]&&state.routes[state.index].name;
+  var activeId=TAB_ROUTE_TO_ID[activeRoute]||'family';
+  function handleChange(id){
+    var routeName=TAB_ID_TO_ROUTE[id];
+    if(!routeName)return;
+    var idx=-1;
+    for(var i=0;i<state.routes.length;i++){if(state.routes[i].name===routeName){idx=i;break;}}
+    if(idx<0)return;
+    var route=state.routes[idx];
+    var event=navigation.emit({type:'tabPress',target:route.key,canPreventDefault:true});
+    if(state.index!==idx&&!event.defaultPrevented){
+      haptic('light');
+      navigation.navigate(route.name);
+    }
   }
-
-  // Build a navigation-friendly index lookup keyed by name (route order in Tab.Navigator may differ)
-  var routeIndex={};
-  state.routes.forEach(function(r,i){routeIndex[r.name]=i;});
-
-  function pressFor(routeName){
-    return function(){
-      var idx=routeIndex[routeName];
-      if(idx==null)return;
-      var route=state.routes[idx];
-      var event=navigation.emit({type:'tabPress',target:route.key,canPreventDefault:true});
-      if(state.index!==idx&&!event.defaultPrevented){
-        haptic('light');
-        navigation.navigate(route.name);
-      }
-    };
-  }
-
-  function isFocused(routeName){return state.routes[state.index]&&state.routes[state.index].name===routeName;}
-
-  return (
-    <View pointerEvents="box-none" style={{position:'absolute',left:0,right:0,bottom:0,paddingBottom:Math.max(insets.bottom,8),paddingHorizontal:16,backgroundColor:'transparent'}}>
-      <View style={{
-        flexDirection:'row',
-        backgroundColor:theme.navBarBg,
-        borderRadius:32,
-        height:64,
-        alignItems:'center',
-        paddingHorizontal:8,
-        shadowColor:'#000',
-        shadowOffset:{width:0,height:8},
-        shadowOpacity:0.12,
-        shadowRadius:18,
-        elevation:10,
-        borderWidth:1,
-        borderColor:theme.border,
-      }}>
-        {renderTab('Home',icons.Home,isFocused('Home'),pressFor('Home'))}
-        {renderTab('Finance',icons.Finance,isFocused('Finance'),pressFor('Finance'))}
-
-        {/* Center hero: Family — raised circle */}
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Family"
-          onPress={pressFor('Family')}
-          style={{width:64,alignItems:'center',justifyContent:'center'}}
-        >
-          <View style={{
-            width:58,height:58,borderRadius:29,
-            backgroundColor:theme.primary,
-            alignItems:'center',justifyContent:'center',
-            marginTop:-26,
-            shadowColor:theme.primary,shadowOffset:{width:0,height:6},shadowOpacity:0.35,shadowRadius:10,elevation:8,
-            borderWidth:4,borderColor:theme.background,
-          }}>
-            <Text style={{fontSize:22,color:'#FFFFFF'}}>{icons.Family}</Text>
-          </View>
-          <Text style={{fontSize:10,fontWeight:isFocused('Family')?'700':'600',color:isFocused('Family')?theme.primary:theme.textSecondary,letterSpacing:0.2,marginTop:2}}>Family</Text>
-        </TouchableOpacity>
-
-        {renderTab('Wellness',icons.Wellness,isFocused('Wellness'),pressFor('Wellness'))}
-        {renderTab('Insights',icons.Insights,isFocused('Insights'),pressFor('Insights'))}
-      </View>
-    </View>
-  );
+  return <TabBar active={activeId} onChange={handleChange}/>;
 }
 
 var Tab=createBottomTabNavigator();
 function MainTabs(){
-  var theme=useThemeColors();
   return(
     <Tab.Navigator
-      screenOptions={{
-        headerShown:false,
-        tabBarStyle:{display:'none'}, // hidden — FloatingTabBar replaces it
-        tabBarActiveTintColor:theme.primary,
-        tabBarInactiveTintColor:theme.muted,
-      }}
-      tabBar={function(props){return React.createElement(FloatingTabBar,props);}}
+      initialRouteName="Family"
+      screenOptions={{headerShown:false}}
+      tabBar={function(props){return React.createElement(TabBarAdapter,props);}}
     >
       <Tab.Screen name="Home" component={HomeScreen}/>
       <Tab.Screen name="Finance" component={FinanceScreen}/>
       <Tab.Screen name="Family" component={FamilyScreen}/>
       <Tab.Screen name="Wellness" component={WellnessScreen}/>
-      <Tab.Screen name="Insights" component={InsightsScreen}/>
+      <Tab.Screen name="Reflect" component={ReflectScreen}/>
     </Tab.Navigator>
   );
 }
@@ -4827,6 +7026,8 @@ function AppInner(){
   var[onboarded,setOnboarded]=useState(false);
   var[members,setMembers]=useState([]);var[transactions,setTransactions]=useState([]);
   var[meals,setMeals]=useState([]);var[goals,setGoals]=useState([]);var[wellness,setWellness]=useState([]);
+  // Phase B1: activities table (ACTIVITY_LOGGING_SPEC.md). Already migrated server-side with RLS + indexes.
+  var[activities,setActivities]=useState([]);
   var[transactionComments,setTransactionComments]=useState([]);
   var[sharedGoals,setSharedGoals]=useState([]);
   var[sharedGoalContributions,setSharedGoalContributions]=useState([]);
@@ -4840,6 +7041,9 @@ function AppInner(){
   var[streaks,setStreaks]=useState([]);
   // B7: Admin flag — true if this user created the family
   var[isAdmin,setIsAdmin]=useState(false);
+  // Phase A1: current user's access_role from family_members (PERMISSIONS_SPEC.md two-tier model).
+  // 'co_admin' | 'member' | null (null when not yet loaded). Combined with userProfile.user_type to compute tier.
+  var[currentUserAccessRole,setCurrentUserAccessRole]=useState(null);
   var[currentScreen,setCurrentScreen]=useState('loading');
   var[currentUser,setCurrentUser]=useState(null);
   var[inviteCode,setInviteCode]=useState('');
@@ -4852,7 +7056,50 @@ function AppInner(){
   var[recurringTransactions,setRecurringTransactions]=useState([]);
   var[notificationEnabled,setNotificationEnabled]=useState(true);
   var[waterTrackingEnabled,setWaterTrackingEnabled]=useState(false);
+  // PHASE 6: water target — persisted on users.water_target_litres
+  var[waterTargetLitres,setWaterTargetLitresState]=useState(2.5);
+  // Wrap setter so calls also persist to DB
+  function setWaterTargetLitres(next){
+    setWaterTargetLitresState(next);
+    if(user&&user.id){
+      supabase.from('users').update({water_target_litres:next}).eq('id',user.id)
+        .then(function(res){if(res&&res.error)console.log('[WATER TARGET PERSIST ERROR]',res.error);});
+    }
+  }
+  // Screen target — persisted on users.screen_target_hours (column confirmed to exist in Supabase)
+  var[screenTargetHrs,setScreenTargetHrsState]=useState(2);
+  function setScreenTargetHrs(next){
+    setScreenTargetHrsState(next);
+    if(user&&user.id){
+      supabase.from('users').update({screen_target_hours:next}).eq('id',user.id)
+        .then(function(res){if(res&&res.error)console.log('[SCREEN TARGET PERSIST ERROR]',res.error);});
+    }
+  }
+  // Android auto-intake (screen time from device UsageStatsManager) — JS scaffolding only.
+  // Native module + Expo Prebuild migration + permission grant flow pending; column users.screen_time_auto_enabled
+  // does not exist yet, so this fire-and-forget DB write may silently fail until the column is added.
+  // When the native module lands, replace the stub `requestScreenTimePermission` with the real bridge call
+  // and have a periodic background task upsert wellness rows with source='auto-android'.
+  var[screenTimeAutoEnabled,setScreenTimeAutoEnabledState]=useState(false);
+  function setScreenTimeAutoEnabled(next){
+    setScreenTimeAutoEnabledState(next);
+    if(user&&user.id){
+      supabase.from('users').update({screen_time_auto_enabled:next}).eq('id',user.id)
+        .then(function(){}).catch(function(){});
+    }
+  }
+  function requestScreenTimePermission(){
+    // STUB: replace with native module call to launch Settings → Usage Access for the app.
+    // For now, just toggle the flag on. The native module will handle the OS permission grant.
+    if(Platform.OS!=='android')return Promise.resolve(false);
+    console.log('[SCREEN TIME AUTO] Permission grant flow stubbed — wire native module here');
+    return Promise.resolve(true);
+  }
   var navRef=useNavigationContainerRef();
+  // STEP 5: set true when PASSWORD_RECOVERY fires so subsequent SIGNED_IN/USER_UPDATED events
+  // skip the normal checkAuthState routing — the reset screen owns routing until the user
+  // submits a new password (or cancels). Cleared by the reset screen's onComplete/onCancel.
+  var recoveryPendingRef=useRef(false);
 
   function handleAuthSuccess(payload){
     var sessionUser=payload&&payload.sessionUser?payload.sessionUser:null;
@@ -5098,13 +7345,122 @@ function AppInner(){
       var sessionUser=session.user;
       setUser(sessionUser);
 
-      var userLookup=await supabase
-        .from('users')
-        .select('*, families(*)')
-        .or('auth_user_id.eq.'+sessionUser.id+',id.eq.'+sessionUser.id)
-        .maybeSingle();
-      if(userLookup.error)throw userLookup.error;
-      var userDoc=userLookup.data;
+      // Drain pending invite-join (deferred from joinAndLink) BEFORE the user lookup so
+      // partial completions from a prior session self-heal: the writes are idempotent and
+      // re-running them ensures users / family_members / family_invites stay consistent
+      // even if a previous attempt died after only some writes succeeded.
+      // Wrapped in its own try/catch so transient drain errors don't bounce user to auth.
+      try{
+        var pendingRaw=await AsyncStorage.getItem('pendingInviteJoin');
+        if(pendingRaw){
+          var parsed=JSON.parse(pendingRaw);
+          // Diag (c) — drain entered. Logs both UIDs every time so a mismatch is captured
+          // even when the existing 'auth uid mismatch' branch then skips the upsert.
+          await diagLog('drain entered. authUid='+sessionUser.id+' parsedUid='+parsed.auth_user_id+' email='+sessionUser.email+' uidMatch='+(parsed.auth_user_id===sessionUser.id));
+          var ageMs=Date.now()-new Date(parsed.created_at||0).getTime();
+          if(ageMs>24*60*60*1000){
+            console.log('[INVITE JOIN] stale pending state (>24h), clearing');
+            await AsyncStorage.removeItem('pendingInviteJoin');
+          }else if(parsed.auth_user_id!==sessionUser.id){
+            console.log('[INVITE JOIN] auth uid mismatch (got '+sessionUser.id+', expected '+parsed.auth_user_id+'), clearing');
+            await AsyncStorage.removeItem('pendingInviteJoin');
+          }else{
+            var inviteCheck=await supabase.from('family_invites').select('id,status,used_by').eq('id',parsed.invite_id).maybeSingle();
+            if(inviteCheck.error)throw inviteCheck.error;
+            var freshInv=inviteCheck.data;
+            if(!freshInv){
+              console.log('[INVITE JOIN] invite no longer exists; rolling back');
+              await AsyncStorage.removeItem('pendingInviteJoin');
+              await supabase.auth.signOut();
+              Alert.alert('Invite no longer valid','This invite was cancelled. Ask family admin for a new code.');
+              setLoading(false);
+              return;
+            }
+            var alreadyAcceptedByUs=freshInv.status==='accepted'&&freshInv.used_by===sessionUser.id;
+            var takenByOther=(freshInv.status==='accepted'&&freshInv.used_by&&freshInv.used_by!==sessionUser.id)||freshInv.status==='cancelled'||freshInv.status==='expired';
+            if(takenByOther){
+              console.log('[INVITE JOIN] invite no longer available; rolling back');
+              await AsyncStorage.removeItem('pendingInviteJoin');
+              await supabase.auth.signOut();
+              Alert.alert('Invite no longer valid','This invite was used by another person. Ask family admin for a new code.');
+              setLoading(false);
+              return;
+            }
+
+            console.log('[INVITE JOIN] completing deferred writes for',sessionUser.email);
+            var inviteUserUpsert=await supabase.from('users').upsert({
+              [DB_COLUMNS.USERS.ID]:sessionUser.id,
+              [DB_COLUMNS.USERS.AUTH_USER_ID]:sessionUser.id,
+              [DB_COLUMNS.USERS.USER_TYPE]:'member',
+              [DB_COLUMNS.USERS.EMAIL]:parsed.email||sessionUser.email,
+              [DB_COLUMNS.USERS.NAME]:parsed.invited_member_name||((sessionUser.email||'').split('@')[0])||'Member',
+              family_id:parsed.family_id,
+              [DB_COLUMNS.USERS.QUESTIONNAIRE_COMPLETED]:false,
+              [DB_COLUMNS.USERS.QUESTIONNAIRE_DATA]:{invite_code:parsed.invite_code,invited_member_name:parsed.invited_member_name,invited_member_role:parsed.invited_member_role},
+            }).select().single();
+            if(inviteUserUpsert.error)throw inviteUserUpsert.error;
+
+            // family_members has no unique constraint on (family_id,user_id) — explicit
+            // pre-check avoids duplicate rows on retry after partial completion.
+            var existingMember=await supabase.from('family_members').select('id').eq('family_id',parsed.family_id).eq('user_id',sessionUser.id).maybeSingle();
+            if(existingMember.error)throw existingMember.error;
+            if(!existingMember.data){
+              var fmInsert=await supabase.from('family_members').insert({
+                family_id:parsed.family_id,
+                user_id:sessionUser.id,
+                role:(parsed.invited_member_role||'parent').toLowerCase(),
+                access_role:parsed.invited_access_role||'member',
+                invited_by:parsed.invited_by||null,
+              });
+              if(fmInsert.error)throw fmInsert.error;
+            }else{
+              console.log('[INVITE JOIN] family_members row already exists, skipping insert');
+            }
+
+            if(!alreadyAcceptedByUs){
+              var inviteUpd=await supabase.from('family_invites').update({status:'accepted',used_by:sessionUser.id}).eq('id',parsed.invite_id);
+              if(inviteUpd.error)throw inviteUpd.error;
+            }
+
+            await AsyncStorage.removeItem('pendingInviteJoin');
+            console.log('[INVITE JOIN] deferred writes complete; user lookup will pick up the new row');
+          }
+        }
+      }catch(drainErr){
+        console.log('[INVITE JOIN DRAIN ERROR]',drainErr);
+        // Fall through — user lookup will reflect whatever DB state we managed to write.
+        // Drain errors don't block normal flow; AsyncStorage left intact for retry on next session.
+      }
+
+      // Resilient user lookup: retry up to 3× with backoff before giving up.
+      // Cold-boot transient network/RLS hiccups were dropping users to the auth screen even with a valid session.
+      var userLookup=null;
+      for(var attempt=0;attempt<3;attempt++){
+        try{
+          userLookup=await supabase
+            .from('users')
+            .select('*, families!fk_users_family(*)')
+            .or('auth_user_id.eq.'+sessionUser.id+',id.eq.'+sessionUser.id)
+            .maybeSingle();
+          if(!userLookup.error)break;
+          console.log('[AUTH STATE] user lookup attempt '+(attempt+1)+' failed:',userLookup.error&&userLookup.error.message);
+        }catch(lookupErr){
+          console.log('[AUTH STATE] user lookup attempt '+(attempt+1)+' threw:',lookupErr&&lookupErr.message);
+          userLookup={error:lookupErr};
+        }
+        if(attempt<2)await new Promise(function(r){setTimeout(r,400*(attempt+1));});
+      }
+      if(userLookup&&userLookup.error){
+        // Session is valid but the user-record fetch keeps failing — most likely a transient network issue
+        // on cold boot. Stay signed in with a minimal user object and let the realtime listeners + manual
+        // refresh re-fetch when the connection recovers. Do NOT kick to auth (preserves the session).
+        console.log('[AUTH STATE] Session present but user lookup failed after retries; staying signed in. Error:',userLookup.error&&userLookup.error.message);
+        setCurrentUser({id:sessionUser.id,email:sessionUser.email});
+        setCurrentScreen('main_app');
+        setLoading(false);
+        return;
+      }
+      var userDoc=userLookup&&userLookup.data;
 
       if(!userDoc){
         console.log('[AUTH STATE] No public.users row found. Creating for auth user:',sessionUser.id);
@@ -5150,6 +7506,20 @@ function AppInner(){
       setLoading(false);
     }catch(e){
       console.log('[CHECK AUTH STATE ERROR]',e);
+      // Defensive: if a session is still in storage, don't kick the user to auth on a transient
+      // post-getSession failure. Prefer staying signed in over forcing re-login on every cold boot.
+      try{
+        var fallbackSess=await supabase.auth.getSession();
+        if(fallbackSess&&fallbackSess.data&&fallbackSess.data.session){
+          var fbUser=fallbackSess.data.session.user;
+          console.log('[CHECK AUTH STATE] Recoverable error but session valid — staying signed in.');
+          setUser(fbUser);
+          setCurrentUser({id:fbUser.id,email:fbUser.email});
+          setCurrentScreen('main_app');
+          setLoading(false);
+          return;
+        }
+      }catch(_){}
       setCurrentScreen('auth');
       setLoading(false);
     }
@@ -5164,9 +7534,17 @@ function AppInner(){
     checkAuthState();
     var authListener=supabase.auth.onAuthStateChange(function(event,session){
       console.log('[AUTH LISTENER] event:',event,'hasSession:',!!session);
+      // STEP 5: PASSWORD_RECOVERY fires when App.js's deep-link handler exchanges a recovery code.
+      // Set the ref BEFORE setCurrentScreen so subsequent SIGNED_IN/USER_UPDATED short-circuit below.
+      if(event==='PASSWORD_RECOVERY'){
+        recoveryPendingRef.current=true;
+        setCurrentScreen('reset_password');
+        setLoading(false);
+        return;
+      }
       if(event==='SIGNED_OUT'){
         setFamilyId(null);setFamilyName('');setCurrentUserName('');setUserCreatedAt(null);setOnboarded(false);
-        setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);
+        setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
         setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
         setScores([]);setStreaks([]);setIsAdmin(false);setShowSettings(false);setShowQuestionnaire(false);setQuickAction(null);
         setTodayNudge(null);setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setNotificationEnabled(true);setWaterTrackingEnabled(false);
@@ -5175,9 +7553,38 @@ function AppInner(){
       if(event==='SIGNED_IN' && session && session.user && session.user.id){
         repairCreatorRoles(session.user.id).catch(function(err){console.log('[ROLE REPAIR SIGNIN ERROR]',err);});
       }
-      checkAuthState();
+      // STEP 5: while recovery is pending, the reset screen owns routing — skip checkAuthState
+      // for SIGNED_IN/INITIAL_SESSION/USER_UPDATED. SIGNED_OUT still goes through (cancels reset).
+      if(recoveryPendingRef.current && (event==='SIGNED_IN'||event==='INITIAL_SESSION'||event==='USER_UPDATED')){
+        return;
+      }
+      // Don't re-run checkAuthState on TOKEN_REFRESHED — it's a no-op for routing and causes
+      // unnecessary user lookups. Only re-check on actual sign-in/sign-out / initial events.
+      if(event==='SIGNED_IN'||event==='SIGNED_OUT'||event==='INITIAL_SESSION'||event==='USER_UPDATED'){
+        checkAuthState();
+      }
     });
-    return function(){if(authListener&&authListener.data&&authListener.data.subscription)authListener.data.subscription.unsubscribe();};
+
+    // PHASE 6 FIX: keep refresh-token alive while app is in foreground.
+    // Without this, the access token expires after ~1hr and the next launch fails getSession().
+    // Per Supabase docs (https://supabase.com/docs/guides/getting-started/quickstarts/expo-react-native),
+    // this must be registered once on the supabase.auth instance.
+    var appStateListener=AppState.addEventListener('change',function(state){
+      if(state==='active'){
+        if(supabase.auth.startAutoRefresh)supabase.auth.startAutoRefresh();
+      }else{
+        if(supabase.auth.stopAutoRefresh)supabase.auth.stopAutoRefresh();
+      }
+    });
+    // Kick off auto-refresh immediately if we're already foregrounded
+    if(AppState.currentState==='active'&&supabase.auth.startAutoRefresh){
+      supabase.auth.startAutoRefresh();
+    }
+
+    return function(){
+      if(authListener&&authListener.data&&authListener.data.subscription)authListener.data.subscription.unsubscribe();
+      if(appStateListener&&appStateListener.remove)appStateListener.remove();
+    };
   },[]);
 
   async function repairCreatorRoles(targetUserId,targetFamilyId){
@@ -5217,7 +7624,7 @@ function AppInner(){
   useEffect(function(){
     if(!user){
       setFamilyId(null);setFamilyName('');setCurrentUserName('');setUserCreatedAt(null);setOnboarded(false);
-      setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);
+      setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
       setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
       setScores([]);setStreaks([]);setIsAdmin(false);setQuickAction(null);
       setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setShowQuestionnaire(false);
@@ -5242,30 +7649,40 @@ function AppInner(){
           setOnboarded(questionnaireDone);
           setNotificationEnabled(userDoc.notification_enabled!==false);
           setWaterTrackingEnabled(userDoc.water_tracking_enabled===true);
+          // PHASE 6: read water target from users row (defaults to 2.5L if null)
+          var loadedTarget=Number(userDoc.water_target_litres);
+          if(!isNaN(loadedTarget)&&loadedTarget>0)setWaterTargetLitresState(loadedTarget);
+          // Screen target — read from users row (defaults to 2h if null)
+          var loadedScreenTarget=Number(userDoc.screen_target_hours);
+          if(!isNaN(loadedScreenTarget)&&loadedScreenTarget>0)setScreenTargetHrsState(loadedScreenTarget);
+          // Screen-time auto-intake flag — column users.screen_time_auto_enabled may not exist yet; defaults false on miss
+          if(typeof userDoc.screen_time_auto_enabled!=='undefined'&&userDoc.screen_time_auto_enabled!==null)setScreenTimeAutoEnabledState(!!userDoc.screen_time_auto_enabled);
           setUserProfile(userDoc);
           if(userDoc.family_id){
             await repairCreatorRoles(user.id,userDoc.family_id);
             var{data:famRow,error:famErr}=await supabase.from('families').select('created_by').eq('id',userDoc.family_id).maybeSingle();
             if(famErr)throw famErr;
             var adminByCreator=!!(famRow && famRow.created_by===user.id);
-            var{data:memberRow}=await supabase.from('family_members').select('role').eq('family_id',userDoc.family_id).eq('user_id',user.id).maybeSingle();
-            var adminByRole=memberRow&&memberRow.role==='admin';
+            var{data:memberRow}=await supabase.from('family_members').select('role,access_role').eq('family_id',userDoc.family_id).eq('user_id',user.id).maybeSingle();
+            var adminByRole=memberRow&&(memberRow.role==='admin'||memberRow.access_role==='co_admin'||memberRow.access_role==='admin');
             setIsAdmin(!!(adminByCreator||adminByRole));
+            setCurrentUserAccessRole((memberRow&&memberRow.access_role)||(memberRow&&memberRow.role==='admin'?'co_admin':'member'));
           } else {
             setIsAdmin(false);
+            setCurrentUserAccessRole(null);
           }
         } else {
           setCurrentUserName(getDisplayName(null,user&&user.email));
           setUserCreatedAt(user.created_at||new Date().toISOString());
           setUserProfile(null);
-          setOnboarded(false);setFamilyId(null);setIsAdmin(false);
+          setOnboarded(false);setFamilyId(null);setIsAdmin(false);setCurrentUserAccessRole(null);
         }
       }catch(e){
         showFriendlyError('Could not load your profile',e);
         setCurrentUserName(getDisplayName(null,user&&user.email));
         setUserCreatedAt(user.created_at||new Date().toISOString());
         setUserProfile(null);
-        setOnboarded(false);setFamilyId(null);setIsAdmin(false);
+        setOnboarded(false);setFamilyId(null);setIsAdmin(false);setCurrentUserAccessRole(null);
       }
     })();
   },[user]);
@@ -5273,7 +7690,7 @@ function AppInner(){
   async function loadFamilyMembers(fid){
     var family=fid||familyId;
     if(!family){setMembers([]);return[];}
-    var r=await supabase
+    var memRes=await supabase
       .from('family_members')
       .select(`
         *,
@@ -5281,9 +7698,9 @@ function AppInner(){
         families(family_name)
       `)
       .eq('family_id',family);
-    if(r.error)throw r.error;
+    if(memRes.error)throw memRes.error;
 
-    var rows=(r.data||[]).map(function(m,index){
+    var realRows=(memRes.data||[]).map(function(m,index){
       var userRow=m.users||{};
       var displayName=normalizeText(userRow.name)||('Member '+(index+1));
       return {
@@ -5298,9 +7715,42 @@ function AppInner(){
         inviteExpiresAt:null,
         joinedAt:m.joined_at||null,
         email:userRow.email||null,
+        _virtual:false,
       };
     });
 
+    var invRes=await supabase
+      .from('family_invites')
+      .select('id,invite_code,invited_member_name,invited_member_role,invited_access_role,status,used_by,created_at')
+      .eq('family_id',family)
+      .eq('status','pending');
+    if(invRes.error){
+      console.log('[LOAD INVITES ERROR]',invRes.error);
+    }
+    var pendingInvites=(invRes&&invRes.data||[]).filter(function(inv){
+      if(!inv.used_by)return true;
+      return !realRows.some(function(rm){return rm.userId===inv.used_by;});
+    });
+
+    var virtualRows=pendingInvites.map(function(inv,idx){
+      return {
+        id:'invite_'+inv.id,
+        inviteId:inv.id,
+        name:normalizeText(inv.invited_member_name)||'Member',
+        role:inv.invited_member_role||'parent',
+        accessRole:inv.invited_access_role==='co_admin'?'co_admin':'member',
+        slot:realRows.length+idx,
+        order:realRows.length+idx,
+        userId:null,
+        inviteCode:inv.invite_code||null,
+        inviteExpiresAt:null,
+        joinedAt:null,
+        email:null,
+        _virtual:true,
+      };
+    });
+
+    var rows=realRows.concat(virtualRows);
     setMembers(rows);
     return rows;
   }
@@ -5344,6 +7794,51 @@ function AppInner(){
     var rows=normWellness(r.data||[]);
     setWellness(rows);
     return rows;
+  }
+  // Phase B1: activities load
+  async function refreshActivities(fid){
+    if(!(fid||familyId))return[];
+    var family=(fid||familyId);
+    var r=await supabase.from('activities').select('*').eq('family_id',family).order('date',{ascending:false}).order('created_at',{ascending:false});
+    if(r.error){console.log('[ACTIVITIES FETCH ERROR]',r.error);return[];}
+    var rows=(r.data||[]).map(function(a){return Object.assign({},a,{memberId:a.member_id,memberName:a.member_name});});
+    setActivities(rows);
+    return rows;
+  }
+  function upsertActivityLocal(row){
+    if(!row||!row.id)return;
+    var norm=Object.assign({},row,{memberId:row.member_id,memberName:row.member_name});
+    setActivities(function(prev){return upsertById(prev,norm).sort(function(a,b){return String(b.date).localeCompare(String(a.date));});});
+  }
+  function removeActivityLocal(id){setActivities(function(prev){return(prev||[]).filter(function(a){return a.id!==id;});});}
+  // Phase B6: scoring rule. recordScore('activity_logged', 10) capped at 30/day per member.
+  // PER SPEC: do NOT call bumpStreak('activity'). Activity does not contribute to streak.
+  async function addActivity(payload){
+    try{
+      var insRes=await supabase.from('activities').insert(payload).select().single();
+      if(insRes.error)throw insRes.error;
+      upsertActivityLocal(insRes.data);
+      // Score with daily cap of 30 (3 entries × 10 pts). Count today's prior entries for this member.
+      var todayISO=isoDate(new Date());
+      var todayCount=(activities||[]).filter(function(a){return a.member_id===payload.member_id&&a.date===todayISO;}).length;
+      if(todayCount<3){await recordScore(payload.family_id,payload.member_id,'activity_logged',10);}
+      return insRes.data;
+    }catch(e){console.log('[ADD ACTIVITY ERROR]',e);throw e;}
+  }
+  async function updateActivity(id,payload){
+    try{
+      var updRes=await supabase.from('activities').update(payload).eq('id',id).select().single();
+      if(updRes.error)throw updRes.error;
+      upsertActivityLocal(updRes.data);
+      return updRes.data;
+    }catch(e){console.log('[UPDATE ACTIVITY ERROR]',e);throw e;}
+  }
+  async function deleteActivity(id){
+    try{
+      var delRes=await supabase.from('activities').delete().eq('id',id);
+      if(delRes.error)throw delRes.error;
+      removeActivityLocal(id);
+    }catch(e){console.log('[DELETE ACTIVITY ERROR]',e);throw e;}
   }
 
   async function refreshTransactionComments(fid){
@@ -5479,6 +7974,7 @@ function AppInner(){
           refreshMeals(familyId),
           refreshGoals(familyId),
           refreshWellness(familyId),
+          refreshActivities(familyId),
           refreshRecurringTransactions(familyId),
           refreshTransactionComments(familyId),
           refreshSharedGoals(familyId),
@@ -5510,10 +8006,12 @@ function AppInner(){
     checkAndCreateRecurringTransactions(familyId).catch(function(e){console.log('[RECURRING AUTO CHECK ERROR]',e);});
     var ch=supabase.channel('fam_'+familyId)
       .on('postgres_changes',{event:'*',schema:'public',table:'family_members',filter:'family_id=eq.'+familyId},function(){refreshMembers(familyId).catch(function(e){console.log('[REALTIME MEMBERS ERROR]',e);});})
+      .on('postgres_changes',{event:'*',schema:'public',table:'family_invites',filter:'family_id=eq.'+familyId},function(){refreshMembers(familyId).catch(function(e){console.log('[REALTIME INVITES ERROR]',e);});})
       .on('postgres_changes',{event:'*',schema:'public',table:'transactions',filter:'family_id=eq.'+familyId},function(){refreshTransactions(familyId).catch(function(e){console.log('[REALTIME TX ERROR]',e);});})
       .on('postgres_changes',{event:'*',schema:'public',table:'meals',filter:'family_id=eq.'+familyId},function(){refreshMeals(familyId).catch(function(e){console.log('[REALTIME MEALS ERROR]',e);});})
       .on('postgres_changes',{event:'*',schema:'public',table:'goals',filter:'family_id=eq.'+familyId},function(){refreshGoals(familyId).catch(function(e){console.log('[REALTIME GOALS ERROR]',e);});})
       .on('postgres_changes',{event:'*',schema:'public',table:'wellness',filter:'family_id=eq.'+familyId},function(){refreshWellness(familyId).catch(function(e){console.log('[REALTIME WELLNESS ERROR]',e);});})
+      .on('postgres_changes',{event:'*',schema:'public',table:'activities',filter:'family_id=eq.'+familyId},function(){refreshActivities(familyId).catch(function(e){console.log('[REALTIME ACTIVITIES ERROR]',e);});})
       .on('postgres_changes',{event:'*',schema:'public',table:'family_scores',filter:'family_id=eq.'+familyId},function(){supabase.from('family_scores').select('*').eq('family_id',familyId).order('date',{ascending:false}).limit(500).then(function(r){if(!r.error)setScores(r.data||[]);});})
       .on('postgres_changes',{event:'*',schema:'public',table:'streaks',filter:'family_id=eq.'+familyId},function(){supabase.from('streaks').select('*').eq('family_id',familyId).then(function(r){if(!r.error)setStreaks(r.data||[]);});})
       .on('postgres_changes',{event:'*',schema:'public',table:'recurring_transactions',filter:'family_id=eq.'+familyId},function(){refreshRecurringTransactions(familyId).catch(function(e){console.log('[REALTIME RECURRING ERROR]',e);});})
@@ -5537,6 +8035,21 @@ function AppInner(){
         onWantJoin={function(code){if(code)setInviteCode(code);setCurrentScreen('invite_join');}}
         onAuthSuccess={handleAuthSuccess}
         onAuthRefreshRequested={handleAuthRefreshRequested}
+      />
+    </NavigationContainer></SafeAreaProvider></GestureHandlerRootView>;
+  }
+
+  if(currentScreen==='reset_password'){
+    return<GestureHandlerRootView style={{flex:1}}><SafeAreaProvider><NavigationContainer ref={navRef}><StatusBar barStyle={theme.statusBar} backgroundColor={theme.background}/>
+      <ResetPasswordScreen
+        onComplete={function(){
+          recoveryPendingRef.current=false;
+          checkAuthState();
+        }}
+        onCancel={async function(){
+          recoveryPendingRef.current=false;
+          try{await supabase.auth.signOut();}catch(e){console.log('[RESET CANCEL signOut]',e);}
+        }}
       />
     </NavigationContainer></SafeAreaProvider></GestureHandlerRootView>;
   }
@@ -5597,10 +8110,28 @@ function AppInner(){
     );
   }
 
+  // Phase 2.3 step 1: lifted from WellnessScreen so Home (2.1.B) and the
+  // Protein Today hero (2.3.A) read the same array. Shape matches the
+  // FamilyMemberRing atom's member prop: {member, current, target, targets}.
+  var proteinTodayISO=isoDate(new Date());
+  var proteinTodayMeals=(meals||[]).filter(function(m){return isoDate(m.date)===proteinTodayISO;});
+  var proteinByMemberId={};
+  proteinTodayMeals.forEach(function(m){
+    var key=m.memberId||m.member_id||('name_'+(m.memberName||m.member_name||''));
+    proteinByMemberId[key]=(proteinByMemberId[key]||0)+(Number(m.protein)||0);
+  });
+  var familyProteinToday=(members||[]).map(function(m){
+    var profile=(memberProfiles&&m.userId)?memberProfiles[m.userId]:null;
+    var targets=calculateProteinTargets(profile&&profile.weightKg?profile.weightKg:null);
+    var proteinKey=m.id||('name_'+m.name);
+    var consumed=proteinByMemberId[proteinKey]||proteinByMemberId['name_'+m.name]||0;
+    return{member:m,target:targets.active,targets:targets,current:consumed};
+  });
+
   return(<GestureHandlerRootView style={{flex:1}}><SafeAreaProvider><AppContext.Provider value={{
     familyId:familyId,familyName:familyName,setFamilyName:setFamilyName,members:members,
     transactions:transactions,meals:meals,goals:goals,wellness:wellness,
-    scores:scores,streaks:streaks,isAdmin:isAdmin,
+    scores:scores,streaks:streaks,isAdmin:isAdmin,currentUserAccessRole:currentUserAccessRole,
     userId:user.id,currentUserName:currentUserName,userCreatedAt:userCreatedAt,
     todayNudge:todayNudge,
     nudgeHistory:nudgeHistory,
@@ -5612,10 +8143,18 @@ function AppInner(){
     customCategories:customCategories,
     userProfile:userProfile,
     memberProfiles:memberProfiles,
+    familyProteinToday:familyProteinToday,
     notificationEnabled:notificationEnabled,
     setNotificationEnabled:setNotificationEnabled,
     waterTrackingEnabled:waterTrackingEnabled,
     setWaterTrackingEnabled:setWaterTrackingEnabled,
+    waterTargetLitres:waterTargetLitres,
+    setWaterTargetLitres:setWaterTargetLitres,
+    screenTargetHrs:screenTargetHrs,
+    setScreenTargetHrs:setScreenTargetHrs,
+    screenTimeAutoEnabled:screenTimeAutoEnabled,
+    setScreenTimeAutoEnabled:setScreenTimeAutoEnabled,
+    requestScreenTimePermission:requestScreenTimePermission,
     theme:getThemeColors(),
     quickAction:quickAction,
     setQuickAction:setQuickAction,
@@ -5638,6 +8177,7 @@ function AppInner(){
     refreshMeals:refreshMeals,
     refreshGoals:refreshGoals,
     refreshWellness:refreshWellness,
+    activities:activities,refreshActivities:refreshActivities,addActivity:addActivity,updateActivity:updateActivity,deleteActivity:deleteActivity,
     upsertTransactionLocal:upsertTransactionLocal,
     removeTransactionLocal:removeTransactionLocal,
     upsertMealLocal:upsertMealLocal,
@@ -5656,7 +8196,7 @@ function AppInner(){
 
 // ═══════════════════════════════════════════════════════════════
 // ROOT — wraps AppInner with ThemeProvider so theme tokens are available
-// to every screen, modal, and the FloatingTabBar.
+// to every screen, modal, and the TabBar.
 // ═══════════════════════════════════════════════════════════════
 export default function App(){
   return React.createElement(ThemeProvider,null,React.createElement(AppInner,null));
@@ -5671,7 +8211,7 @@ export {
   FinanceScreen,
   WellnessScreen,
   FamilyScreen,
-  InsightsScreen,
+  ReflectScreen,
   SettingsScreen,
   MainTabs,
 };
@@ -5683,217 +8223,234 @@ export {
 // (e.g. backgroundColor:theme.background) will get correct dark-mode colors.
 // ═══════════════════════════════════════════════════════════════
 var z=StyleSheet.create({
-  scr:{flex:1,backgroundColor:'#FAF8F5'},fScr:{flex:1,backgroundColor:'#FAF8F5'},fl:{flex:1},
-  pad:{paddingHorizontal:20,paddingBottom:120},row:{flexDirection:'row',alignItems:'center'},cen:{alignItems:'center',justifyContent:'center'},
+  // ─────────────────────────────────────────────────────────────
+  // FamilyOS Design Guide v2.0 — applied via tokens + font families
+  // Colors here are LIGHT theme values; theme-aware screens override
+  // via inline style={{...,color:theme.text}} so dark mode just works.
+  // ─────────────────────────────────────────────────────────────
 
-  // Auth — split layout handled inline with theme tokens
+  // ── Layout ──────────────────────────────────────────────────
+  scr:{flex:1,backgroundColor:'#FAF8F5'},
+  fScr:{flex:1,backgroundColor:'#FAF8F5'},
+  fl:{flex:1},
+  pad:{paddingHorizontal:16,paddingBottom:120}, // guide: --sp-lg = 16px screen padding
+  row:{flexDirection:'row',alignItems:'center'},
+  cen:{alignItems:'center',justifyContent:'center'},
+
+  // ── Auth ────────────────────────────────────────────────────
   authScr:{flex:1,backgroundColor:'#FAF8F5'},
-  authTitle:{fontSize:32,fontWeight:'600',color:'#1A1208',marginBottom:8,textAlign:'center',letterSpacing:-0.5},
-  authSub:{fontSize:14,fontWeight:'400',color:'#6B5E52',marginBottom:32,textAlign:'center'},
-  linkTx:{fontSize:14,fontWeight:'600',color:'#1C6B50'},
+  // Hero title is the one place we use DM Serif Display (per guide: marketing moments / page titles)
+  authTitle:{fontFamily:FF.serif,fontSize:36,fontWeight:'400',color:'#1A1208',marginBottom:8,textAlign:'center',letterSpacing:-1,lineHeight:42},
+  authSub:{fontFamily:FF.sans,fontSize:14,fontWeight:'400',color:'#6B5E52',marginBottom:32,textAlign:'center'},
+  linkTx:{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:'#1C6B50'},
 
-  // Questionnaire
+  // ── Questionnaire ───────────────────────────────────────────
   qScr:{flex:1,backgroundColor:'#FAF8F5'},
   qCenter:{flex:1,justifyContent:'center',alignItems:'center',paddingHorizontal:32},
   qPad:{paddingHorizontal:24,paddingTop:40,paddingBottom:60},
-  qStickyProgWrap:{position:'absolute',top:0,left:0,right:0,zIndex:999,backgroundColor:'#FAF8F5',paddingHorizontal:24,paddingTop:14,paddingBottom:8,borderBottomWidth:1,borderBottomColor:'#EDE8E2'},
-  qOpener:{fontSize:11,fontWeight:'500',color:'#A89D95',textAlign:'center',marginBottom:40,letterSpacing:0.4,textTransform:'uppercase'},
-  qText:{fontSize:18,fontWeight:'500',color:'#1A1208',lineHeight:26,marginBottom:24},
-  qNote:{fontSize:12,fontWeight:'400',color:'#A89D95',marginBottom:16,lineHeight:18},
-  qTransition:{fontSize:20,fontWeight:'400',color:'#1A1208',textAlign:'center',lineHeight:32,fontStyle:'italic'},
-  qFinalTitle:{fontSize:28,fontWeight:'600',color:'#1A1208',textAlign:'center',marginBottom:16,letterSpacing:-0.5},
-  qFinalBody:{fontSize:18,fontWeight:'400',color:'#6B5E52',textAlign:'center',lineHeight:28,fontStyle:'italic'},
-  qInput:{height:48,borderWidth:1,borderColor:'#EDE8E2',borderRadius:12,paddingHorizontal:14,paddingVertical:10,fontSize:16,color:'#1A1208',backgroundColor:'#FFFFFF',marginBottom:8},
-  qExample:{fontSize:12,fontWeight:'400',color:'#A89D95',marginTop:4,lineHeight:18,fontStyle:'italic'},
-  qKeepGoing:{fontSize:12,fontWeight:'500',color:'#C4773B',marginTop:4},
-  qTransitionCard:{backgroundColor:'#FFFFFF',borderWidth:1,borderColor:'#EDE8E2',borderRadius:16,padding:20,marginBottom:16},
-  qTransitionLine:{fontSize:20,fontWeight:'400',color:'#1A1208',textAlign:'center',lineHeight:30,fontFamily:Platform.OS==='ios'?'Georgia':'serif'},
-  qQuestionText:{fontSize:15,fontWeight:'600',color:'#1A1208',lineHeight:22,marginBottom:8,marginTop:4},
+  qStickyProgWrap:{position:'absolute',top:0,left:0,right:0,zIndex:999,backgroundColor:'#FAF8F5',paddingHorizontal:24,paddingTop:14,paddingBottom:8,borderBottomWidth:0.5,borderBottomColor:'#EDE8E2'},
+  qOpener:{fontFamily:FF.sansSemi,fontSize:10,fontWeight:'700',color:'#A89D95',textAlign:'center',marginBottom:40,letterSpacing:0.8,textTransform:'uppercase'},
+  qText:{fontFamily:FF.sansMed,fontSize:17,fontWeight:'500',color:'#1A1208',lineHeight:26,marginBottom:24,letterSpacing:-0.3},
+  qNote:{fontFamily:FF.sans,fontSize:12,fontWeight:'400',color:'#A89D95',marginBottom:16,lineHeight:18},
+  qTransition:{fontFamily:FF.serifItalic,fontSize:22,fontWeight:'400',color:'#1A1208',textAlign:'center',lineHeight:32,fontStyle:'italic'},
+  qFinalTitle:{fontFamily:FF.serif,fontSize:32,fontWeight:'400',color:'#1A1208',textAlign:'center',marginBottom:16,letterSpacing:-1},
+  qFinalBody:{fontFamily:FF.sansItalic,fontSize:16,fontWeight:'400',color:'#6B5E52',textAlign:'center',lineHeight:24,fontStyle:'italic'},
+  qInput:{fontFamily:FF.sans,height:48,borderWidth:0.5,borderColor:'#EDE8E2',borderRadius:12,paddingHorizontal:14,paddingVertical:10,fontSize:15,color:'#1A1208',backgroundColor:'#FFFFFF',marginBottom:8},
+  qExample:{fontFamily:FF.sansItalic,fontSize:12,fontWeight:'400',color:'#A89D95',marginTop:4,lineHeight:18,fontStyle:'italic'},
+  qKeepGoing:{fontFamily:FF.sansMed,fontSize:12,fontWeight:'500',color:'#C4773B',marginTop:4},
+  qTransitionCard:{backgroundColor:'#FFFFFF',borderWidth:0.5,borderColor:'#EDE8E2',borderRadius:20,padding:24,marginBottom:16},
+  qTransitionLine:{fontFamily:FF.serif,fontSize:22,fontWeight:'400',color:'#1A1208',textAlign:'center',lineHeight:32,letterSpacing:-0.5},
+  qQuestionText:{fontFamily:FF.sansSemi,fontSize:15,fontWeight:'600',color:'#1A1208',lineHeight:22,marginBottom:8,marginTop:4,letterSpacing:-0.2},
   qProgDot:{flex:1,height:4,borderRadius:2,backgroundColor:'#EDE8E2'},
   qProgDotOn:{backgroundColor:'#1C6B50'},
-  qSliderValue:{fontSize:32,fontWeight:'600',color:'#1A1208',marginBottom:8,textAlign:'center',letterSpacing:-0.5},
-  qSliderChip:{minWidth:40,height:40,borderRadius:20,borderWidth:1,borderColor:'#EDE8E2',alignItems:'center',justifyContent:'center',paddingHorizontal:8,backgroundColor:'#FFFFFF'},
+  qSliderValue:{fontFamily:FF.sansBold,fontSize:32,fontWeight:'700',color:'#1A1208',marginBottom:8,textAlign:'center',letterSpacing:-1},
+  qSliderChip:{minWidth:40,height:40,borderRadius:20,borderWidth:0.5,borderColor:'#EDE8E2',alignItems:'center',justifyContent:'center',paddingHorizontal:8,backgroundColor:'#FFFFFF'},
   qSliderChipSel:{backgroundColor:'#1C6B50',borderColor:'#1C6B50'},
-  qSliderChipTx:{fontSize:13,color:'#6B5E52',fontWeight:'500'},
-  qSliderChipTxSel:{color:'#FFFFFF',fontWeight:'600'},
-  qOption:{borderWidth:1,borderColor:'#EDE8E2',borderRadius:14,paddingVertical:14,paddingHorizontal:16,marginBottom:10,backgroundColor:'#FFFFFF'},
+  qSliderChipTx:{fontFamily:FF.sansMed,fontSize:13,color:'#6B5E52',fontWeight:'500'},
+  qSliderChipTxSel:{fontFamily:FF.sansSemi,color:'#FFFFFF',fontWeight:'600'},
+  qOption:{borderWidth:0.5,borderColor:'#EDE8E2',borderRadius:14,paddingVertical:14,paddingHorizontal:16,marginBottom:10,backgroundColor:'#FFFFFF'},
   qOptionSel:{backgroundColor:'#E4F2EC',borderColor:'#1C6B50'},
-  qOptionTx:{fontSize:15,fontWeight:'500',color:'#1A1208'},
-  qOptionSelTx:{color:'#1C6B50',fontWeight:'600'},
-  qBtn:{backgroundColor:'#1C6B50',borderRadius:14,paddingVertical:14,alignItems:'center',marginTop:24},
+  qOptionTx:{fontFamily:FF.sansMed,fontSize:15,fontWeight:'500',color:'#1A1208'},
+  qOptionSelTx:{fontFamily:FF.sansSemi,color:'#1C6B50',fontWeight:'600'},
+  qBtn:{backgroundColor:'#1C6B50',borderRadius:12,paddingVertical:14,alignItems:'center',marginTop:24},
   qBtnDisabled:{backgroundColor:'#EDE8E2'},
-  qSliderVal:{fontSize:36,fontWeight:'600',color:'#1A1208',textAlign:'center',marginBottom:16,letterSpacing:-0.5},
+  qSliderVal:{fontFamily:FF.sansBold,fontSize:36,fontWeight:'700',color:'#1A1208',textAlign:'center',marginBottom:16,letterSpacing:-1.2},
   qSliderRow:{flexDirection:'row',justifyContent:'space-between',marginBottom:12},
   qSliderDot:{width:32,height:32,borderRadius:16,backgroundColor:'#F3EFE9',alignItems:'center',justifyContent:'center'},
   qSliderDotSel:{backgroundColor:'#1C6B50'},
-  qSliderDotTx:{fontSize:12,fontWeight:'600',color:'#6B5E52'},
-  qSliderDotSelTx:{color:'#FFFFFF'},
+  qSliderDotTx:{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:'#6B5E52'},
+  qSliderDotSelTx:{fontFamily:FF.sansSemi,color:'#FFFFFF'},
 
-  // Typography
-  h1:{fontSize:28,fontWeight:'700',color:'#1A1208',marginBottom:4,letterSpacing:-0.5},
-  sec:{fontSize:13,fontWeight:'600',color:'#6B5E52',marginTop:24,marginBottom:12,letterSpacing:0.3,textTransform:'uppercase'},
-  caps:{fontSize:11,fontWeight:'600',color:'#A89D95',letterSpacing:0.8,textTransform:'uppercase'},
-  sub:{fontSize:13,fontWeight:'400',color:'#6B5E52'},
-  cap:{fontSize:11,fontWeight:'400',color:'#A89D95'},
-  body:{fontSize:14,fontWeight:'400',color:'#1A1208'},
-  heroN:{fontSize:36,fontWeight:'700',letterSpacing:-1,marginBottom:4,color:'#1A1208'},
-  fv:{fontSize:14,fontWeight:'600',color:'#1A1208'},
-  txM:{fontSize:14,fontWeight:'600',color:'#1A1208'},
+  // ── Typography (guide type scale, section 02) ─────────────
+  // Hero number → 42px / 700 / -1.5px
+  heroN:{fontFamily:FF.sansBold,fontSize:42,fontWeight:'700',letterSpacing:-1.5,marginBottom:4,color:'#1A1208',lineHeight:46},
+  // H1 → 26px / 700 / -0.8px
+  h1:{fontFamily:FF.sansBold,fontSize:26,fontWeight:'700',color:'#1A1208',marginBottom:4,letterSpacing:-0.8,lineHeight:32},
+  // H2 → 20px / 700 / -0.5px (Sec component now uses this)
+  sec:{fontFamily:FF.sansBold,fontSize:20,fontWeight:'700',color:'#1A1208',marginTop:24,marginBottom:12,letterSpacing:-0.5},
+  // H3 → 17px / 600 / -0.3px
+  sub:{fontFamily:FF.sansSemi,fontSize:17,fontWeight:'600',color:'#1A1208',letterSpacing:-0.3},
+  // Body → 15px / 400
+  body:{fontFamily:FF.sans,fontSize:15,fontWeight:'400',color:'#1A1208'},
+  // Body Med → 14px / 500
+  fv:{fontFamily:FF.sansMed,fontSize:14,fontWeight:'500',color:'#1A1208'},
+  // Tx merchant — body med
+  txM:{fontFamily:FF.sansSemi,fontSize:15,fontWeight:'600',color:'#1A1208'},
+  // Caption → 11px / 400
+  cap:{fontFamily:FF.sans,fontSize:11,fontWeight:'400',color:'#A89D95'},
+  // Label (ALL CAPS) → 10px / 700 / 0.8px / muted
+  caps:{fontFamily:FF.sansBold,fontSize:10,fontWeight:'700',color:'#A89D95',letterSpacing:0.8,textTransform:'uppercase'},
 
-  // Cards & inputs
-  card:{backgroundColor:'#FFFFFF',borderRadius:16,borderWidth:1,borderColor:'#EDE8E2',padding:16,marginBottom:10},
-  inp:{height:48,borderWidth:1,borderColor:'#EDE8E2',borderRadius:12,paddingHorizontal:14,paddingVertical:10,fontSize:16,color:'#1A1208',backgroundColor:'#FFFFFF'},
+  // ── Cards & inputs ───────────────────────────────────────
+  card:{backgroundColor:'#FFFFFF',borderRadius:20,borderWidth:0.5,borderColor:'#EDE8E2',padding:18,marginBottom:10}, // guide: card uses radius-xl, 0.5px border
+  inp:{fontFamily:FF.sans,height:48,borderWidth:0.5,borderColor:'#EDE8E2',borderRadius:12,paddingHorizontal:14,paddingVertical:10,fontSize:15,color:'#1A1208',backgroundColor:'#FFFFFF'},
   dateBtn:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},
-  dateBtnTx:{fontSize:16,color:'#1A1208'},
+  dateBtnTx:{fontFamily:FF.sans,fontSize:15,color:'#1A1208'},
   placeholderTx:{color:'#A89D95'},
-  pickRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:12,paddingHorizontal:14,borderRadius:12,borderWidth:1,borderColor:'#EDE8E2',marginBottom:8,backgroundColor:'#FFFFFF'},
+  pickRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:12,paddingHorizontal:14,borderRadius:12,borderWidth:0.5,borderColor:'#EDE8E2',marginBottom:8,backgroundColor:'#FFFFFF'},
   pickRowSel:{backgroundColor:'#E4F2EC',borderColor:'#1C6B50'},
-  inpLabel:{fontSize:12,fontWeight:'600',color:'#6B5E52',marginBottom:6,letterSpacing:0.2},
+  inpLabel:{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:'#6B5E52',marginBottom:6,letterSpacing:0.2},
 
-  // Chips
-  chip:{borderRadius:100,borderWidth:1,borderColor:'#EDE8E2',paddingVertical:8,paddingHorizontal:14,backgroundColor:'#FFFFFF'},
-  chipTx:{fontSize:12,fontWeight:'500',color:'#6B5E52'},
+  // ── Chips ────────────────────────────────────────────────
+  chip:{borderRadius:9999,borderWidth:0.5,borderColor:'#EDE8E2',paddingVertical:6,paddingHorizontal:14,backgroundColor:'#FFFFFF'},
+  chipTx:{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:'#6B5E52'},
   chipSel:{backgroundColor:'#E4F2EC',borderColor:'#1C6B50'},
-  chipSelTx:{color:'#1C6B50',fontWeight:'600'},
+  chipSelTx:{fontFamily:FF.sansSemi,color:'#1C6B50',fontWeight:'600'},
 
-  // Plan / setup cards
-  planCard:{backgroundColor:'#FFFFFF',borderRadius:16,borderWidth:1,borderColor:'#EDE8E2',padding:16,marginBottom:12},
+  // ── Plan / setup cards ───────────────────────────────────
+  planCard:{backgroundColor:'#FFFFFF',borderRadius:20,borderWidth:0.5,borderColor:'#EDE8E2',padding:18,marginBottom:12},
   planSel:{borderColor:'#1C6B50',backgroundColor:'#E4F2EC'},
-  planTitle:{fontSize:20,fontWeight:'600',color:'#1A1208',marginBottom:4,letterSpacing:-0.3},
-  planSub:{fontSize:14,fontWeight:'400',color:'#6B5E52',marginBottom:2},
-  rmTx:{fontSize:12,fontWeight:'600',color:'#C94040',marginTop:8},
+  planTitle:{fontFamily:FF.sansSemi,fontSize:17,fontWeight:'600',color:'#1A1208',marginBottom:4,letterSpacing:-0.3},
+  planSub:{fontFamily:FF.sans,fontSize:14,fontWeight:'400',color:'#6B5E52',marginBottom:2},
+  rmTx:{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:'#C94040',marginTop:8},
 
-  // Header
+  // ── Header ───────────────────────────────────────────────
   hdr:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingTop:8,paddingBottom:16},
   avS:{width:28,height:28,borderRadius:14,alignItems:'center',justifyContent:'center',borderWidth:2,borderColor:'#FAF8F5'},
-  avSTx:{fontSize:11,fontWeight:'600'},
-  famNm:{fontSize:18,fontWeight:'700',color:'#1A1208',letterSpacing:-0.3},
-  hdrIco:{fontSize:14,fontWeight:'600',color:'#6B5E52'},
+  avSTx:{fontFamily:FF.sansSemi,fontSize:11,fontWeight:'600'},
+  famNm:{fontFamily:FF.sansBold,fontSize:20,fontWeight:'700',color:'#1A1208',letterSpacing:-0.5},
+  hdrIco:{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:'#6B5E52'},
 
-  // Dividers
-  vDiv:{width:1,backgroundColor:'rgba(255,255,255,0.18)',alignSelf:'stretch',marginHorizontal:14},
-  hDiv:{height:1,backgroundColor:'#EDE8E2',marginVertical:10},
+  // ── Dividers ─────────────────────────────────────────────
+  vDiv:{width:0.5,backgroundColor:'rgba(255,255,255,0.18)',alignSelf:'stretch',marginHorizontal:14},
+  hDiv:{height:0.5,backgroundColor:'#EDE8E2',marginVertical:10},
 
-  // Stats strip
+  // ── Stats strip ──────────────────────────────────────────
   strip:{flexDirection:'row',gap:8,marginBottom:4,marginTop:10},
-  tile:{flex:1,backgroundColor:'#F3EFE9',borderRadius:12,paddingVertical:12,paddingHorizontal:10},
-  tileLbl:{fontSize:11,fontWeight:'500',color:'#6B5E52',marginBottom:4},
-  tileVal:{fontSize:14,fontWeight:'600',color:'#1A1208'},
+  tile:{flex:1,backgroundColor:'#F3EFE9',borderRadius:16,paddingVertical:14,paddingHorizontal:12},
+  tileLbl:{fontFamily:FF.sansSemi,fontSize:10,fontWeight:'700',color:'#6B5E52',marginBottom:6,letterSpacing:0.6,textTransform:'uppercase'},
+  tileVal:{fontFamily:FF.sansBold,fontSize:18,fontWeight:'700',color:'#1A1208',letterSpacing:-0.4},
 
-  // Buttons
-  bPri:{backgroundColor:'#1C6B50',borderRadius:12,paddingVertical:14,paddingHorizontal:18,alignItems:'center'},
-  bPriT:{fontSize:14,fontWeight:'600',color:'#FFFFFF',letterSpacing:0.2},
-  bSec:{borderRadius:12,borderWidth:1,borderColor:'#1C6B50',paddingVertical:13,paddingHorizontal:18,alignItems:'center',backgroundColor:'transparent'},
-  bSecT:{fontSize:14,fontWeight:'600',color:'#1C6B50'},
+  // ── Buttons ──────────────────────────────────────────────
+  // Legacy z.bPri / z.bSec / z.bGhost button styles deleted (audit fix #6, 2026-05-04).
+  // All callsites converted to design-system <PrimaryButton> / <SecondaryButton> atoms.
 
-  // Pills
-  pill:{borderRadius:100,paddingVertical:4,paddingHorizontal:10},
-  pillTx:{fontSize:11,fontWeight:'600'},
+  // ── Pills ────────────────────────────────────────────────
+  pill:{borderRadius:9999,paddingVertical:6,paddingHorizontal:14,borderWidth:0.5,borderColor:'transparent'},
+  pillTx:{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600'},
 
-  // Status cards
+  // ── Status / OK / nudge cards ───────────────────────────
   ok:{backgroundColor:'#E4F2EC',borderRadius:12,paddingVertical:14,alignItems:'center'},
-  okTx:{fontSize:14,fontWeight:'600',color:'#1C6B50'},
-
-  // Nudge / accent cards
+  okTx:{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:'#1C6B50'},
   nudge:{borderLeftWidth:3,borderLeftColor:'#C4773B',backgroundColor:'#FDF0E4',borderRadius:12,padding:14,marginTop:12},
-  nudgeTx:{fontSize:14,fontWeight:'500',color:'#1A1208',lineHeight:20},
+  nudgeTx:{fontFamily:FF.sansMed,fontSize:14,fontWeight:'500',color:'#1A1208',lineHeight:21},
   insight:{borderLeftWidth:3,borderLeftColor:'#1C6B50',backgroundColor:'#E4F2EC',borderRadius:12,padding:14,marginTop:16},
-  insightTx:{fontSize:14,fontWeight:'500',color:'#1C6B50',lineHeight:20},
+  insightTx:{fontFamily:FF.sansMed,fontSize:14,fontWeight:'500',color:'#1C6B50',lineHeight:21},
 
-  // Bars / charts
+  // ── Bars / charts ────────────────────────────────────────
   barRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',height:96,marginBottom:12},
   barC:{flex:1,alignItems:'center',justifyContent:'flex-end'},
   bar:{width:18,backgroundColor:'#1C6B50',borderRadius:6,marginBottom:6},
-  barL:{fontSize:11,fontWeight:'500',color:'#A89D95'},
-  note:{fontSize:12,fontWeight:'500',color:'#6B5E52',lineHeight:18},
+  barL:{fontFamily:FF.sansMed,fontSize:11,fontWeight:'500',color:'#A89D95'},
+  note:{fontFamily:FF.sansMed,fontSize:12,fontWeight:'500',color:'#6B5E52',lineHeight:18},
 
-  // Activity / list rows
-  actR:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:12,borderBottomWidth:1,borderBottomColor:'#EDE8E2'},
-  actTx:{fontSize:14,fontWeight:'400',color:'#1A1208',flex:1},
+  // ── Activity / list rows ────────────────────────────────
+  actR:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:12,borderBottomWidth:0.5,borderBottomColor:'#EDE8E2'},
+  actTx:{fontFamily:FF.sans,fontSize:14,fontWeight:'400',color:'#1A1208',flex:1},
 
-  // Percent badge
-  pctB:{borderRadius:100,paddingVertical:3,paddingHorizontal:9},
-  pctT:{fontSize:11,fontWeight:'600'},
+  // ── Percent badge ────────────────────────────────────────
+  pctB:{borderRadius:9999,paddingVertical:3,paddingHorizontal:9},
+  pctT:{fontFamily:FF.sansBold,fontSize:11,fontWeight:'700'},
 
-  // Tx row
-  txRow:{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:12,borderBottomWidth:1,borderBottomColor:'#EDE8E2'},
+  // ── Tx row ───────────────────────────────────────────────
+  txRow:{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:12,borderBottomWidth:0.5,borderBottomColor:'#EDE8E2'},
 
-  // Progress
-  pTrk:{backgroundColor:'#F3EFE9',borderRadius:6,overflow:'hidden'},
-  pFl:{height:'100%',borderRadius:6},
+  // ── Progress (guide: progress-track is 6px, surfaceEl bg, primary fill) ─
+  pTrk:{height:6,backgroundColor:'#F3EFE9',borderRadius:3,overflow:'hidden'},
+  pFl:{height:'100%',borderRadius:3,backgroundColor:'#1C6B50'},
 
-  // Macros
-  macro:{fontSize:11,fontWeight:'500',color:'#6B5E52',backgroundColor:'#F3EFE9',borderRadius:8,paddingVertical:4,paddingHorizontal:10,marginRight:6},
+  // ── Macros ───────────────────────────────────────────────
+  macro:{fontFamily:FF.sansMed,fontSize:11,fontWeight:'500',color:'#6B5E52',backgroundColor:'#F3EFE9',borderRadius:8,paddingVertical:4,paddingHorizontal:10,marginRight:6},
 
-  // Family score
-  fScLbl:{fontSize:12,fontWeight:'500',color:'#C4773B',marginBottom:4,letterSpacing:0.3,textTransform:'uppercase'},
-  fScNum:{fontSize:40,fontWeight:'700',color:'#1A1208',letterSpacing:-1},
-  fScSub:{fontSize:12,fontWeight:'500',color:'#1C6B50',marginTop:4},
+  // ── Family score ─────────────────────────────────────────
+  fScLbl:{fontFamily:FF.sansBold,fontSize:10,fontWeight:'700',color:'#C4773B',marginBottom:6,letterSpacing:0.8,textTransform:'uppercase'},
+  fScNum:{fontFamily:FF.sansBold,fontSize:42,fontWeight:'700',color:'#1A1208',letterSpacing:-1.5,lineHeight:46},
+  fScSub:{fontFamily:FF.sansMed,fontSize:12,fontWeight:'500',color:'#1C6B50',marginTop:4},
 
-  // Family member cards
-  chCard:{width:150,borderRadius:18,padding:16,alignItems:'center'},
+  // ── Family member cards ──────────────────────────────────
+  chCard:{width:150,borderRadius:20,padding:16,alignItems:'center'},
   chAv:{width:48,height:48,borderRadius:24,backgroundColor:'rgba(255,255,255,0.25)',alignItems:'center',justifyContent:'center',marginBottom:8},
-  chAvT:{fontSize:18,fontWeight:'700'},
-  chNm:{fontSize:14,fontWeight:'600',color:'#FFFFFF',letterSpacing:0.3},
-  chRole:{fontSize:11,fontWeight:'500',color:'rgba(255,255,255,0.75)',marginBottom:8},
-  chPts:{fontSize:22,fontWeight:'700',color:'#FFFFFF'},
-  chStrk:{fontSize:11,fontWeight:'500',color:'rgba(255,255,255,0.75)',marginBottom:4},
+  chAvT:{fontFamily:FF.sansBold,fontSize:18,fontWeight:'700'},
+  chNm:{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:'#FFFFFF',letterSpacing:-0.2},
+  chRole:{fontFamily:FF.sans,fontSize:11,fontWeight:'400',color:'rgba(255,255,255,0.75)',marginBottom:8},
+  chPts:{fontFamily:FF.sansBold,fontSize:24,fontWeight:'700',color:'#FFFFFF',letterSpacing:-0.5},
+  chStrk:{fontFamily:FF.sans,fontSize:11,fontWeight:'400',color:'rgba(255,255,255,0.75)',marginBottom:4},
   chPTrk:{height:5,backgroundColor:'rgba(255,255,255,0.2)',borderRadius:3,overflow:'hidden'},
   chPFl:{height:'100%',backgroundColor:'#FFFFFF',borderRadius:3},
-  chDly:{fontSize:10,fontWeight:'500',color:'rgba(255,255,255,0.75)',textAlign:'right',marginTop:2},
+  chDly:{fontFamily:FF.sans,fontSize:10,fontWeight:'400',color:'rgba(255,255,255,0.75)',textAlign:'right',marginTop:2},
   chInvite:{marginTop:10,backgroundColor:'rgba(255,255,255,0.25)',borderRadius:8,paddingVertical:7,paddingHorizontal:10,alignSelf:'stretch',alignItems:'center'},
-  chInviteTx:{fontSize:11,fontWeight:'600',color:'#FFFFFF',letterSpacing:0.3},
+  chInviteTx:{fontFamily:FF.sansSemi,fontSize:11,fontWeight:'600',color:'#FFFFFF',letterSpacing:0.3},
 
-  // Modals
+  // ── Modals ───────────────────────────────────────────────
   modalWrap:{flex:1,justifyContent:'flex-end',backgroundColor:'rgba(0,0,0,0.4)'},
-  modal:{backgroundColor:'#FFFFFF',borderTopLeftRadius:24,borderTopRightRadius:24,padding:20,maxHeight:'85%'},
+  modal:{backgroundColor:'#FFFFFF',borderTopLeftRadius:28,borderTopRightRadius:28,padding:20,maxHeight:'85%'}, // guide: radius-xxl
 
-  // Tab bar (legacy - replaced by FloatingTabBar)
-  tBar:{height:64,backgroundColor:'#FFFFFF',borderTopWidth:1,borderTopColor:'#EDE8E2',paddingBottom:8,paddingTop:6,elevation:0,shadowOpacity:0},
+  // ── Tab bar (legacy style — superseded by TabBar atom) ───────
+  tBar:{height:64,backgroundColor:'#FFFFFF',borderTopWidth:0.5,borderTopColor:'#EDE8E2',paddingBottom:8,paddingTop:6,elevation:0,shadowOpacity:0},
 
-  // Edit/action buttons
+  // ── Edit/action buttons ─────────────────────────────────
   editBtn:{width:32,height:32,alignItems:'center',justifyContent:'center',marginRight:6},
   editTx:{fontSize:16,color:'#A89D95'},
 
-  // Stepper
-  stepBtn:{width:48,height:48,borderRadius:12,borderWidth:1,borderColor:'#EDE8E2',backgroundColor:'#F3EFE9',alignItems:'center',justifyContent:'center'},
-  stepTx:{fontSize:22,fontWeight:'600',color:'#1C6B50'},
+  // ── Stepper ──────────────────────────────────────────────
+  stepBtn:{width:48,height:48,borderRadius:12,borderWidth:0.5,borderColor:'#EDE8E2',backgroundColor:'#F3EFE9',alignItems:'center',justifyContent:'center'},
+  stepTx:{fontFamily:FF.sansBold,fontSize:22,fontWeight:'700',color:'#1C6B50'},
 
-  // Checkbox
+  // ── Checkbox ─────────────────────────────────────────────
   checkbox:{width:18,height:18,borderRadius:5,borderWidth:1.5,borderColor:'#C4773B',marginRight:10,backgroundColor:'#FFFFFF'},
 
-  // Errors
+  // ── Errors ───────────────────────────────────────────────
   inpErr:{borderColor:'#C94040',borderWidth:1.5},
-  errTx:{fontSize:11,color:'#C94040',marginTop:2,marginBottom:4,fontWeight:'500'},
+  errTx:{fontFamily:FF.sansMed,fontSize:11,color:'#C94040',marginTop:2,marginBottom:4,fontWeight:'500'},
 
-  // Filters
-  filterChip:{backgroundColor:'#FDF0E4',borderRadius:100,paddingVertical:5,paddingHorizontal:10},
-  filterChipTx:{fontSize:11,color:'#C4773B',fontWeight:'600'},
+  // ── Filters ──────────────────────────────────────────────
+  filterChip:{backgroundColor:'#FDF0E4',borderRadius:9999,paddingVertical:5,paddingHorizontal:10},
+  filterChipTx:{fontFamily:FF.sansSemi,fontSize:11,color:'#C4773B',fontWeight:'600'},
 
-  // Calendar
-  calCell:{width:'14.285%',aspectRatio:1,borderRadius:10,marginBottom:6,alignItems:'center',justifyContent:'center',borderWidth:1},
-  calCellTx:{fontSize:13,color:'#1A1208',fontWeight:'500'},
+  // ── Calendar ─────────────────────────────────────────────
+  calCell:{width:'14.285%',aspectRatio:1,borderRadius:10,marginBottom:6,alignItems:'center',justifyContent:'center',borderWidth:0.5},
+  calCellTx:{fontFamily:FF.sansMed,fontSize:13,color:'#1A1208',fontWeight:'500'},
   calDot:{width:5,height:5,borderRadius:3,marginTop:4},
 
-  // Comments
-  commentBubble:{padding:12,borderRadius:14,marginBottom:8,borderWidth:1,borderColor:'#EDE8E2'},
+  // ── Comments ─────────────────────────────────────────────
+  commentBubble:{padding:12,borderRadius:14,marginBottom:8,borderWidth:0.5,borderColor:'#EDE8E2'},
   commentMine:{backgroundColor:'#E4F2EC',alignSelf:'flex-end',maxWidth:'90%'},
   commentOther:{backgroundColor:'#F3EFE9',alignSelf:'flex-start',maxWidth:'90%'},
   commentCountBadge:{position:'absolute',right:-2,top:-3,backgroundColor:'#1C6B50',borderRadius:9,paddingHorizontal:5,minWidth:18,alignItems:'center'},
-  commentCountTx:{fontSize:10,color:'#FFFFFF',fontWeight:'700'},
+  commentCountTx:{fontFamily:FF.sansBold,fontSize:10,color:'#FFFFFF',fontWeight:'700'},
 
-  // Profile
-  profileAvatar:{width:72,height:72,borderRadius:36,backgroundColor:'#E4F2EC',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#EDE8E2'},
+  // ── Profile ──────────────────────────────────────────────
+  profileAvatar:{width:72,height:72,borderRadius:36,backgroundColor:'#E4F2EC',alignItems:'center',justifyContent:'center',borderWidth:0.5,borderColor:'#EDE8E2'},
   profileAvatarImg:{width:72,height:72,borderRadius:36},
-  photoPreview:{width:96,height:96,borderRadius:12,marginBottom:10,borderWidth:1,borderColor:'#EDE8E2'},
-  profileAvatarTx:{fontSize:26,fontWeight:'700',color:'#1C6B50'},
+  photoPreview:{width:96,height:96,borderRadius:12,marginBottom:10,borderWidth:0.5,borderColor:'#EDE8E2'},
+  profileAvatarTx:{fontFamily:FF.sansBold,fontSize:26,fontWeight:'700',color:'#1C6B50',letterSpacing:-0.5},
 
-  // Goal family badge
+  // ── Goal family badge ────────────────────────────────────
   goalFamilyBadge:{backgroundColor:'#E4F2EC',borderRadius:8,paddingVertical:3,paddingHorizontal:8,marginLeft:8},
-  goalFamilyBadgeTx:{fontSize:10,fontWeight:'600',color:'#1C6B50',letterSpacing:0.3},
+  goalFamilyBadgeTx:{fontFamily:FF.sansSemi,fontSize:10,fontWeight:'600',color:'#1C6B50',letterSpacing:0.3},
 
-  // Admin badge — shown on the Family member chip
+  // ── Admin badge ──────────────────────────────────────────
   adminBadge:{backgroundColor:'rgba(255,255,255,0.22)',borderRadius:8,paddingVertical:2,paddingHorizontal:6,marginLeft:6},
-  adminBadgeTx:{fontSize:10,fontWeight:'700',color:'#FFFFFF',letterSpacing:0.3},
+  adminBadgeTx:{fontFamily:FF.sansBold,fontSize:10,fontWeight:'700',color:'#FFFFFF',letterSpacing:0.3},
 });
 

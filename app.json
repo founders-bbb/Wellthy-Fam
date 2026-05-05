@@ -1,26 +1,35 @@
 {
   "expo": {
-    "name": "FamilyApp",
-    "slug": "FamilyApp",
+    "name": "Wellthy Fam",
+    "slug": "wellthyfam",
     "version": "1.0.0",
+    "scheme": "wellthyfam",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "app.wellthyfam.ios"
     },
     "android": {
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "app.wellthyfam.android"
     },
     "plugins": [
       "@react-native-community/datetimepicker",
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow FamilyApp to access your photos for profile pictures.",
-          "cameraPermission": "Allow FamilyApp to use your camera for profile pictures."
+          "photosPermission": "Allow Wellthy Fam to access your photos for profile pictures.",
+          "cameraPermission": "Allow Wellthy Fam to use your camera for profile pictures."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "58dd749d-e5bd-46ec-8952-90d3fb0931e0"
+      }
+    },
+    "owner": "foundersbbb"
   }
 }
