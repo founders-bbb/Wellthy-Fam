@@ -68,7 +68,7 @@ const CLAUDE_MAX_TOKENS = 8000
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-const VALID_CATEGORIES = new Set(['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Income'])
+const VALID_CATEGORIES = new Set(['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Income','Cash','Transfer'])
 
 const SYSTEM_PROMPT = `You extract transactions from Indian bank account statements and credit card statements. Return ONLY a single JSON object, no prose, no markdown fences.
 
@@ -88,7 +88,7 @@ Output schema:
       "amount": <positive number>,
       "transaction_type": "debit" | "credit",
       "merchant_normalized": "<short merchant name in upper case, e.g. AMAZON, SWIGGY, ZOMATO, UBER, ELECTRICITY BOARD>",
-      "category_suggested": "Daily Essentials" | "House Bills" | "Travel" | "Health" | "Lifestyle" | "Savings" | "Income",
+      "category_suggested": "Daily Essentials" | "House Bills" | "Travel" | "Health" | "Lifestyle" | "Savings" | "Income" | "Cash" | "Transfer",
       "confidence_score": <0.0 to 1.0>
     },
     ...
@@ -102,6 +102,23 @@ CATEGORIZATION RULES (expense categories — pick exactly one):
 - Health: pharmacy, hospital, doctor, lab tests, gym, insurance premium (health), supplements
 - Lifestyle: restaurants, food delivery (Swiggy/Zomato), shopping (Amazon/Flipkart non-essentials), entertainment, cinema, alcohol, salon
 - Savings: investments, mutual fund SIPs, FD, recurring deposits, transfers labeled as savings
+
+CASH AND TRANSFER HANDLING (CRITICAL):
+
+These two categories must be used for transactions that are NOT real spending:
+
+- Cash: ATM withdrawals — narrations like "ATM WITHDRAWAL", "ATM WDL", "CASH WD", "ATM CASH", or any narration with "ATM" that includes a withdrawal amount. confidence_score=0.95. These extract money for off-statement use; they are NOT a categorized expense.
+
+- Transfer: Personal payments to identified individuals. Narrations with person names — typically Indian first names or surnames in ALL CAPS, sometimes prefixed with UPI/IMPS/NEFT followed by a person's name. Examples: "UPI/SHANTHAMMA/...", "NEFT-RPAVITHRA-...", "IMPS to CHAITHALI P". confidence_score=0.7. These are personal transfers (rent to landlord, money to family, splitting bills) — NOT retail spending.
+
+  Self-transfers between own accounts: narrations with "SELF", "OWN", "TRANSFER TO OWN", or where the recipient resembles the user's bank details. category=Transfer, confidence_score=0.9.
+
+REFUND HANDLING:
+Refunds appear as CREDIT lines but are NOT income. Narrations starting with "REFUND", "REVERSAL", "REV-", or small credits that look like they mirror a prior debit (same merchant name pattern). For these:
+- Set transaction_type="credit"
+- Set category to whatever the original purchase category likely was (e.g. POWERLOOK APPAREL refund → Lifestyle, not Income)
+- confidence_score=0.5 (genuinely ambiguous)
+- DO NOT default refunds to Income just because they're credits.
 
 INCOME ASSIGNMENT (CRITICAL — read carefully):
 - Bank account statement: a CREDIT line (deposit, salary, refund, transfer-in) → category="Income", transaction_type="credit". A DEBIT line → categorize normally and transaction_type="debit".

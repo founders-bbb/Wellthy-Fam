@@ -77,10 +77,15 @@ var CATS = {
   Lifestyle:         {bg:'#EDECFB',text:'#3A2A8A'},
   Savings:           {bg:'#E4F2EC',text:'#085041'},
   Income:            {bg:'#E4F2EC',text:'#085041'},
+  Cash:              {bg:'#F0EBDC',text:'#5A4A2A'},
+  Transfer:          {bg:'#DCE6EC',text:'#2A4A5A'},
   Uncat:             {bg:'#F2F2EE',text:'#555555'},
 };
-var CAT_LIST = ['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings'];
-var CAT_COLORS = {'Daily Essentials':'#085041','House Bills':'#1A4A8A',Travel:'#7A4A10',Health:'#7A1A3A',Lifestyle:'#3A2A8A',Savings:'#085041'};
+var CAT_LIST = ['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Cash','Transfer'];
+var CAT_COLORS = {'Daily Essentials':'#085041','House Bills':'#1A4A8A',Travel:'#7A4A10',Health:'#7A1A3A',Lifestyle:'#3A2A8A',Savings:'#085041',Cash:'#5A4A2A',Transfer:'#2A4A5A'};
+// Spending = real outflow. Income/Cash/Transfer are excluded from "spend" totals
+// (cash is extracted not consumed; transfers are personal payments, not retail).
+function isSpendingCategory(c){return c!=='Income'&&c!=='Cash'&&c!=='Transfer';}
 var ROLES = ['Earning Member','Homemaker','Student','Child','Elder'];
 var CARD_BG = ['#D85A30','#993556','#085041','#534AB7','#534AB7'];
 var PROFILE_GENDER_OPTIONS=[
@@ -595,7 +600,15 @@ function buildActivityMessage(activity){
     if(data.action==='updated')return actor+' updated '+(data.meal_time||'meal')+' log';
     return actor+' logged '+(data.meal_time||'meal');
   }
-  if(activity.activity_type==='wellness')return actor+' logged '+(data.log_type==='screen_time'?'screen time':'water');
+  if(activity.activity_type==='wellness'){
+    if(data.log_type==='sleep'){
+      var sh=Number(data.sleep_hours);
+      var sleepStr=isFinite(sh)&&sh>0?(' '+(sh===Math.floor(sh)?sh+'h':sh.toFixed(1)+'h')+' of sleep'):' sleep';
+      return actor+' logged'+sleepStr;
+    }
+    if(data.log_type==='screen_time')return actor+' logged screen time';
+    return actor+' logged water';
+  }
   if(activity.activity_type==='activity_logged'){
     var typeName=String(data.activity_type||'activity').toLowerCase();
     var dur=Number(data.duration_minutes)||0;
@@ -1148,33 +1161,57 @@ function FamilyMemberRing({member,variant,ringDiameter,ringStroke,onPress,aboveL
 // Vertical bar — inverse semantics of FamilyMemberRing (fill grows toward a CAP, not toward a goal).
 // Used by Time on Screens hero where the daily target is a ceiling, not a target.
 // Same prop shape as FamilyMemberRing so callsites swap with a one-line change.
+// FamilyMemberBar — vertical fill-bar with initials overlay. Three visual states:
+//   (1) NOT LOGGED — member.current is null/undefined. Dashed track, no fill,
+//       initials still readable. The bar is "absent" but the slot is reserved
+//       so the row layout doesn't shift. aboveLabel typically reads "— / Xh".
+//   (2) UNDER OR AT TARGET — proportional white fill (variant: solid empty
+//       when current===0, solid partial when 0 < current ≤ target).
+//   (3) OVER TARGET — bar fills 100% and switches to theme.warning. A small
+//       "▲" sits at the top of the bar to signal overflow non-judgmentally.
+//
+// Caller passes `current` as null/undefined to opt into the not-logged state.
+// Pass 0 explicitly for "logged zero" (track shows, no fill).
 function FamilyMemberBar({member,ringDiameter,ringStroke,onPress,aboveLabel}){
   var theme=useThemeColors();
   var d=ringDiameter||56;
   var initSize=d>=52?13:(d>=48?12:11);
-  var current=Number(member.current)||0;
+  var rawCurrent=member.current;
+  var notLogged=(rawCurrent===null||typeof rawCurrent==='undefined');
+  var current=notLogged?0:Number(rawCurrent)||0;
   var target=Math.max(Number(member.target)||1,1);
   var pct=Math.min(100,(current/target)*100);
-  var overLimit=current>target;
+  var overLimit=!notLogged&&current>target;
   var trackColor='rgba(255,255,255,0.18)';
   var fillColor=overLimit?theme.warning:'#fff';
   var barWidth=Math.max(20,Math.round(d*0.45));
   var initialsZone=18; // top zone reserved so the initials stay readable as fill rises
   var maxFillH=d-initialsZone;
-  var fillH=(pct/100)*maxFillH;
-  var a11yLabel=(member.name||'')+': '+current+' of '+target+' hours, '+Math.round(pct)+' percent of cap'+(overLimit?' (over)':'');
+  var fillH=notLogged?0:(overLimit?maxFillH:(pct/100)*maxFillH);
+  var a11yLabel=notLogged
+    ?((member.name||'')+': not logged, target '+target+' hours')
+    :((member.name||'')+': '+current+' of '+target+' hours, '+Math.round(pct)+' percent of cap'+(overLimit?' (over)':''));
   var aboveBlock=aboveLabel?<View style={{marginBottom:4,maxWidth:d+8,alignItems:'center'}}>{aboveLabel}</View>:null;
+  // Track style switches to dashed-outline + transparent bg when not logged.
+  // RN supports borderStyle:'dashed' on Android 6+ and iOS — has been stable for years.
+  var trackStyle=notLogged
+    ?{width:barWidth,height:d,borderRadius:6,backgroundColor:'transparent',borderWidth:1.5,borderColor:'rgba(255,255,255,0.55)',borderStyle:'dashed',overflow:'hidden',justifyContent:'flex-end'}
+    :{width:barWidth,height:d,borderRadius:6,backgroundColor:trackColor,overflow:'hidden',justifyContent:'flex-end'};
   var barViz=<View style={{width:d,height:d,alignItems:'center'}}>
-    <View style={{width:barWidth,height:d,borderRadius:6,backgroundColor:trackColor,overflow:'hidden',justifyContent:'flex-end'}}>
-      <View style={{height:fillH,backgroundColor:fillColor}}/>
+    <View style={trackStyle}>
+      {!notLogged?<View style={{height:fillH,backgroundColor:fillColor}}/>:null}
     </View>
+    {/* Overflow indicator: small chevron at the top edge of the bar when over target. */}
+    {overLimit?<View style={{position:'absolute',top:0,left:0,right:0,alignItems:'center'}}>
+      <Text style={{fontFamily:FF.sansBold,fontSize:9,color:'#fff',marginTop:1}}>▲</Text>
+    </View>:null}
     <View style={{position:'absolute',top:3,left:0,right:0,alignItems:'center'}}>
-      <Text style={{fontFamily:FF.sansBold,fontSize:initSize,color:'#fff',letterSpacing:-0.2}}>{member.initials||'?'}</Text>
+      <Text style={{fontFamily:FF.sansBold,fontSize:initSize,color:notLogged?'rgba(255,255,255,0.55)':'#fff',letterSpacing:-0.2}}>{member.initials||'?'}</Text>
     </View>
   </View>;
   var nameLabel=<Text numberOfLines={1} ellipsizeMode="tail" style={{
     fontFamily:FF.sansSemi,fontSize:11,
-    color:'rgba(255,255,255,0.78)',
+    color:notLogged?'rgba(255,255,255,0.55)':'rgba(255,255,255,0.78)',
     marginTop:6,maxWidth:d+8,textAlign:'center',
   }}>{member.name||'?'}</Text>;
   if(onPress){
@@ -3335,6 +3372,8 @@ function QuickLogSheet({visible,onClose}){
     {key:'Health',          icon:'❤️'},
     {key:'Lifestyle',       icon:'🛍️'},
     {key:'Savings',         icon:'💰'},
+    {key:'Cash',            icon:'💵'},
+    {key:'Transfer',        icon:'🔁'},
   ];
 
   useEffect(function(){
@@ -3537,7 +3576,7 @@ var STATEMENT_PARSE_PHRASES = [
   'Categorizing…',
   'Almost there…',
 ];
-var STATEMENT_CATEGORY_OPTIONS = ['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Income'];
+var STATEMENT_CATEGORY_OPTIONS = ['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Income','Cash','Transfer'];
 
 function StatementUploadModal({visible,onClose,onOpenReview}){
   var theme=useThemeColors();
@@ -3837,6 +3876,7 @@ function StatementUploadModal({visible,onClose,onOpenReview}){
 // ─────────────────────────────────────────────────────────────────────────────
 function StatementReviewModal({visible,statementImportId,onClose,onImported}){
   var theme=useThemeColors();
+  var ins=useSafeAreaInsets();
   var{familyId,userId,members,refreshTransactions,logActivity,currentUserName}=useApp();
   var[loading,setLoading]=useState(true);
   var[importRow,setImportRow]=useState(null);
@@ -3915,6 +3955,19 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
       });
       return next;
     });
+  }
+  function confirmAllPending(){
+    setActions(function(prev){
+      var next=Object.assign({},prev);
+      stagedTxs.forEach(function(r){
+        var was=next[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Daily Essentials'};
+        if(was.action!=='discarded'){
+          next[r.id]={action:'confirmed',category_confirmed:r.category_suggested||'Daily Essentials'};
+        }
+      });
+      return next;
+    });
+    haptic('light');
   }
   function toggleDiscard(id){
     var was=actions[id];
@@ -4031,9 +4084,12 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
 
   if(!visible)return null;
   return <Modal visible={!!visible} transparent animationType="slide" onRequestClose={onClose}>
-    <View style={{flex:1,backgroundColor:theme.bg}}>
-      {/* Sticky header */}
-      <View style={{paddingTop:Platform.OS==='ios'?52:24,paddingBottom:12,paddingHorizontal:16,backgroundColor:theme.bg,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
+    <View style={{flex:1,backgroundColor:theme.bg,paddingTop:ins.top}}>
+      {/* Sticky header — paddingTop:ins.top above keeps it clear of the status bar
+          (was hardcoded 24 on Android, which is too short on phones with notches/punch
+          holes — caused the Done text to sit under the OS chrome and absorb taps,
+          which presented as the "Done button does nothing" bug). */}
+      <View style={{paddingTop:8,paddingBottom:12,paddingHorizontal:16,backgroundColor:theme.bg,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
           <TouchableOpacity onPress={onClose} disabled={submitting}><Text style={{fontFamily:fontW(500),fontSize:16,color:theme.primary}}>Cancel</Text></TouchableOpacity>
           <View style={{flex:1,alignItems:'center'}}>
@@ -4057,6 +4113,15 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
         <ActivityIndicator size="large" color={theme.primary}/>
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginTop:14}}>Loading transactions…</Text>
       </View>:<ScrollView style={{flex:1}} contentContainerStyle={{padding:16,paddingBottom:32}}>
+        {/* "Confirm everything as suggested" — power-user shortcut. Confirms every still-pending
+            row using its category_suggested. Discarded rows are preserved (user explicitly skipped). */}
+        {stagedTxs.length>0?<TouchableOpacity onPress={confirmAllPending} activeOpacity={0.7} style={{
+          backgroundColor:theme.surface,borderRadius:12,padding:14,marginBottom:14,
+          borderWidth:1,borderColor:theme.primaryLight,
+        }}>
+          <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:14,color:theme.primary,textAlign:'center'}}>Confirm everything as suggested</Text>
+          <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.textSecondary,marginTop:4,textAlign:'center'}}>You can still edit any transaction afterward.</Text>
+        </TouchableOpacity>:null}
         {grouped.length===0?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,textAlign:'center',marginTop:32}}>No pending transactions in this import.</Text>:null}
         {grouped.map(function(g){
           var allHigh=g.minConf>=0.85;
@@ -4066,10 +4131,14 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
             <TouchableOpacity activeOpacity={0.85} onPress={function(){
               haptic('light');
               if(!isExpanded){
-                // Tapping a collapsed group: expand AND mark all rows in it confirmed.
+                // Tapping a collapsed group: expand AND auto-confirm every row in it
+                // (regardless of confidence — was previously gated on allHigh, which
+                // left medium/low-confidence groups stuck in 'pending' after a tap).
                 setExpandedCats(function(prev){return Object.assign({},prev,{[g.category]:true});});
-                if(allHigh)confirmAllInCategory(g.category);
+                confirmAllInCategory(g.category);
               } else {
+                // Already expanded — tapping again just collapses. Does NOT un-confirm
+                // rows (would be destructive — user has already reviewed them).
                 setExpandedCats(function(prev){var next=Object.assign({},prev);delete next[g.category];return next;});
               }
             }} style={{
@@ -5219,7 +5288,11 @@ function LogWaterModal({visible,onClose,initialDate}){
       var prevLitres=Number(prev.water||0);
       var addLitres=glassesToLitres(waterNum);
       var newWaterTotal=Number((prevLitres+addLitres).toFixed(2));
-      var payload={family_id:familyId,member_id:mid,member_name:mN?mN.name:'',water:newWaterTotal,screen_hrs:prev.screen_hrs||0,date:today,updated_at:new Date().toISOString()};
+      // Payload includes ONLY water-related fields. Don't cross-fill screen_hrs/sleep_hours
+      // — leaving them out preserves NULL on new rows (= "not logged") and existing values
+      // on update. The not-logged-vs-zero distinction depends on this. See migration:
+      // supabase/migrations/wellness_logged_distinction.sql.
+      var payload={family_id:familyId,member_id:mid,member_name:mN?mN.name:'',water:newWaterTotal,date:today,updated_at:new Date().toISOString()};
       var{data,error}=await supabase.from('wellness').upsert(payload,{onConflict:'family_id,member_id,date'}).select().single();
       console.log('[WATER UPSERT]',{payload:payload,data:data,error:error});
       if(error)throw error;
@@ -5255,8 +5328,12 @@ function LogWaterModal({visible,onClose,initialDate}){
 
 function LogScreenTimeModal({visible,onClose,initialDate}){
   var theme=useThemeColors();
-  var{familyId,members,userId,isAdmin,wellness,refreshWellness,upsertWellnessLocal,logActivity,currentUserName,screenTargetHrs}=useApp();var[mid,setMid]=useState('');var[hrs,setHrs]=useState('');var[mins,setMins]=useState('');var[loading,setLoading]=useState(false);var[selectedDate,setSelectedDate]=useState(new Date());
-  useEffect(function(){if(visible){setMid('');setHrs('');setMins('');setSelectedDate(initialDate?toDate(initialDate):new Date());}},[visible,initialDate]);
+  var{familyId,members,userId,isAdmin,wellness,refreshWellness,upsertWellnessLocal,logActivity,currentUserName,screenTargetHrs}=useApp();var[mid,setMid]=useState('');var[hrs,setHrs]=useState('');var[mins,setMins]=useState('');var[loading,setLoading]=useState(false);
+  // Default date is YESTERDAY — screen time is end-of-day data, you can't know
+  // today's full total until today is over. Caller can pass initialDate to override.
+  function defaultLogDate(){var d=new Date();d.setDate(d.getDate()-1);return d;}
+  var[selectedDate,setSelectedDate]=useState(defaultLogDate());
+  useEffect(function(){if(visible){setMid('');setHrs('');setMins('');setSelectedDate(initialDate?toDate(initialDate):defaultLogDate());}},[visible,initialDate]);
   async function save(){
     if(!mid){Alert.alert('Validation error','Please select a member.');return;}
     if(!canModifyMemberData(isAdmin,members,userId,mid)){Alert.alert('Not allowed','You can only log your own data.');return;}
@@ -5276,7 +5353,9 @@ function LogScreenTimeModal({visible,onClose,initialDate}){
       var rounded=Math.round(total*10)/10;
       var newScreenTotal=Math.round((Number(prev.screen_hrs||0)+rounded)*10)/10;
       if(newScreenTotal>LIMITS.wellness.screenMaxHours){Alert.alert('Validation error','Total screen time for the day cannot exceed '+LIMITS.wellness.screenMaxHours+' hours.');setLoading(false);return;}
-      var payload={family_id:familyId,member_id:mid,member_name:mN?mN.name:'',water:prev.water||0,screen_hrs:newScreenTotal,date:today,updated_at:new Date().toISOString()};
+      // Payload sets only screen_hrs. Dropped the water cross-fill — see comment in
+      // LogWaterModal save above + the wellness_logged_distinction.sql migration.
+      var payload={family_id:familyId,member_id:mid,member_name:mN?mN.name:'',screen_hrs:newScreenTotal,date:today,updated_at:new Date().toISOString()};
       var{data,error}=await supabase.from('wellness').upsert(payload,{onConflict:'family_id,member_id,date'}).select().single();
       console.log('[SCREEN UPSERT]',{payload:payload,data:data,error:error});
       if(error)throw error;
@@ -5286,7 +5365,7 @@ function LogScreenTimeModal({visible,onClose,initialDate}){
       await bumpStreak(familyId,mid,'screen');
       if(logActivity){await logActivity('wellness',{user_name:currentUserName||'Someone',log_type:'screen_time',member_name:mN?mN.name:'',screen_added:rounded,screen_total:Number((data&&data.screen_hrs)||0)},data&&data.id,familyId);}
       haptic('medium');
-      setMid('');setHrs('');setMins('');setSelectedDate(initialDate?toDate(initialDate):new Date());onClose();
+      setMid('');setHrs('');setMins('');setSelectedDate(initialDate?toDate(initialDate):defaultLogDate());onClose();
     }catch(e){console.log('[SCREEN SAVE ERROR]',e);showFriendlyError('Could not save screen time',e);}
     setLoading(false);
   }
@@ -5304,6 +5383,93 @@ function LogScreenTimeModal({visible,onClose,initialDate}){
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
       <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
       <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save screen time'}</PrimaryButton></View>
+    </View>
+  </ModalSheet>);
+}
+
+// LogSleepModal — Part C of the Wellness retrospective build.
+// Defaults date to yesterday because logging happens this morning for last night's sleep.
+// UPSERT-by-(family_id, member_id, date) means tapping save twice is idempotent / overwrites.
+// Number input is single-field hours, with +/- 0.5h steppers and quick-pick chips. NO score,
+// NO streak, NO comparison messaging — by deliberate spec.
+function LogSleepModal({visible,onClose,initialDate}){
+  var theme=useThemeColors();
+  var{familyId,members,userId,isAdmin,wellness,refreshWellness,upsertWellnessLocal,logActivity,currentUserName,userProfile}=useApp();
+  var[mid,setMid]=useState('');
+  var[hrs,setHrs]=useState(7);
+  var[loading,setLoading]=useState(false);
+  function defaultLogDate(){var d=new Date();d.setDate(d.getDate()-1);return d;}
+  var[selectedDate,setSelectedDate]=useState(defaultLogDate());
+
+  useEffect(function(){
+    if(!visible)return;
+    setLoading(false);
+    setSelectedDate(initialDate?toDate(initialDate):defaultLogDate());
+    // Default to current user's member row, or empty if can't infer.
+    var meMember=(members||[]).find(function(m){return m.userId===userId;});
+    var defaultMid=meMember?meMember.id:'';
+    setMid(defaultMid);
+    // Pre-fill hours from this user's last logged sleep, else their q20 target, else 7.
+    var lastForMid=defaultMid?(wellness||[]).filter(function(w){return (w.memberId||w.member_id)===defaultMid&&w.sleep_hours!=null;}).sort(function(a,b){return String(b.date).localeCompare(String(a.date));})[0]:null;
+    if(lastForMid&&lastForMid.sleep_hours!=null){setHrs(Number(lastForMid.sleep_hours));}
+    else if(userProfile&&userProfile.questionnaire_data&&Number(userProfile.questionnaire_data.q20_sleep_hours)>0){setHrs(Number(userProfile.questionnaire_data.q20_sleep_hours));}
+    else{setHrs(7);}
+  },[visible,initialDate]);
+
+  function bump(delta){setHrs(function(h){var n=Math.round((Number(h||0)+delta)*2)/2;if(n<0)n=0;if(n>24)n=24;return n;});haptic('light');}
+
+  async function save(){
+    if(!mid){Alert.alert('Validation error','Please select a member.');return;}
+    if(!canModifyMemberData(isAdmin,members,userId,mid)){Alert.alert('Not allowed','You can only log your own data.');return;}
+    var n=Number(hrs);
+    if(!isFinite(n)||n<0||n>24){Alert.alert('Validation error','Sleep hours must be between 0 and 24.');return;}
+    if(isFutureDate(selectedDate)){Alert.alert('Validation error','Date cannot be in the future.');return;}
+    setLoading(true);
+    try{
+      var dateStr=isoDate(selectedDate);
+      var mN=members.find(function(m2){return m2.id===mid;});
+      // Sleep payload sets sleep_hours only — same hygiene as LogScreenTimeModal.
+      var payload={family_id:familyId,member_id:mid,member_name:mN?mN.name:'',sleep_hours:Math.round(n*10)/10,date:dateStr,updated_at:new Date().toISOString()};
+      var{data,error}=await supabase.from('wellness').upsert(payload,{onConflict:'family_id,member_id,date'}).select().single();
+      console.log('[SLEEP UPSERT]',{payload:payload,data:data,error:error});
+      if(error)throw error;
+      upsertWellnessLocal(normWellness([data])[0]);
+      await refreshWellness();
+      if(logActivity){await logActivity('wellness',{user_name:currentUserName||'Someone',log_type:'sleep',member_name:mN?mN.name:'',sleep_hours:n},data&&data.id,familyId);}
+      haptic('medium');
+      onClose();
+    }catch(e){console.log('[SLEEP SAVE ERROR]',e);showFriendlyError('Could not save sleep',e);}
+    setLoading(false);
+  }
+
+  var QUICK_HOURS=[5,6,7,8,9,10];
+  return(<ModalSheet visible={visible} title="How did you sleep?" onClose={onClose}>
+    <Caps style={{marginBottom:6}}>Last night, in hours.</Caps>
+    {(members||[]).length>1?<>
+      <Caps style={{marginTop:8,marginBottom:8}}>Who?</Caps>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:14}}>
+        {members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
+      </View>
+    </>:null}
+    <View style={{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:14,marginVertical:20}}>
+      <TouchableOpacity onPress={function(){bump(-0.5);}} disabled={loading} style={{width:48,height:48,borderRadius:24,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center',borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
+        <Text style={{fontFamily:FF.sansBold,fontSize:24,color:theme.text}}>−</Text>
+      </TouchableOpacity>
+      <View style={{minWidth:120,alignItems:'center'}}>
+        <Text style={{fontFamily:FF.sansBold,fontSize:48,color:theme.text,letterSpacing:-1}}>{(Number(hrs)===Math.floor(Number(hrs))?Number(hrs)+'.0':Number(hrs).toFixed(1))}</Text>
+        <Caps color={theme.muted}>hours</Caps>
+      </View>
+      <TouchableOpacity onPress={function(){bump(0.5);}} disabled={loading} style={{width:48,height:48,borderRadius:24,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center',borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
+        <Text style={{fontFamily:FF.sansBold,fontSize:24,color:theme.text}}>+</Text>
+      </TouchableOpacity>
+    </View>
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:14,justifyContent:'center'}}>
+      {QUICK_HOURS.map(function(q){var sel=Number(hrs)===q;return <TouchableOpacity key={'qs_'+q} onPress={function(){setHrs(q);haptic('light');}} style={[z.chip,sel&&z.chipSel]}><Text style={[z.chipTx,sel&&z.chipSelTx]}>{q}h</Text></TouchableOpacity>;})}
+    </View>
+    <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
+    <View style={{flexDirection:'row',gap:10,marginTop:8}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save sleep'}</PrimaryButton></View>
     </View>
   </ModalSheet>);
 }
@@ -5432,11 +5598,28 @@ function LogActivityModal({visible,onClose,initialDate,editActivity}){
 // ═══════════════════════════════════════════════════════════════
 // HOME SCREEN
 // ═══════════════════════════════════════════════════════════════
+// isInSilentHours — true if HH:MM "now" falls inside the [start, end] window. Handles
+// midnight-wrapping windows (start > end means "from start tonight to end tomorrow").
+function isInSilentHours(now,start,end){
+  if(!start||!end)return false;
+  var sp=String(start).split(':'),ep=String(end).split(':');
+  var startMin=(Number(sp[0])||0)*60+(Number(sp[1])||0);
+  var endMin=(Number(ep[0])||0)*60+(Number(ep[1])||0);
+  var nowMin=now.getHours()*60+now.getMinutes();
+  if(startMin===endMin)return false;
+  if(startMin<endMin)return nowMin>=startMin&&nowMin<=endMin;
+  return nowMin>=startMin||nowMin<=endMin; // wraps midnight
+}
+
 function HomeScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,members,transactions,meals,goals,wellness,todayNudge,openSettings,setQuickAction,userCreatedAt,userId,refreshTransactions,upsertTransactionLocal,dismissNudge,dismissedNudgeIds,waterTrackingEnabled,waterTargetLitres,refreshMeals,refreshWellness,refreshActivityFeed,refreshNudges,familyProteinToday,screenTargetHrs}=useApp();
+  var{familyId,familyName,members,transactions,meals,goals,wellness,todayNudge,openSettings,setQuickAction,userCreatedAt,userId,refreshTransactions,upsertTransactionLocal,dismissNudge,dismissedNudgeIds,waterTrackingEnabled,waterTargetLitres,refreshMeals,refreshWellness,refreshActivityFeed,refreshNudges,familyProteinToday,screenTargetHrs,silentHoursEnabled,silentHoursStart,silentHoursEnd}=useApp();
+  // Session-only override — "Show full app anyway" lets the user bypass silent mode for
+  // this app session. Resets on next launch (deliberate non-persistence — silent should
+  // be the default unless explicitly opted out for this sitting).
+  var[showFullAppOverride,setShowFullAppOverride]=useState(false);
   var perms=useFamilyPermissions();
   var[memberFilterId,setMemberFilterId]=useState(null);
   var[showTx,setShowTx]=useState(false);
@@ -5699,6 +5882,30 @@ function HomeScreen(){
     {key:'screen',q:'Stayed under '+(Number(screenTargetHrs)||2)+'h on screens?',state:myWellnessToday&&todayScreen>0?(todayScreen<=(Number(screenTargetHrs)||2)?'yes':'no'):'unknown',info:{title:'Screen time target',body:"Marked Yes when today's screen time is logged and stays at or under "+(Number(screenTargetHrs)||2)+" hours."}},
     {key:'meals',q:'Logged all 3 meals?',state:allMealsLogged?'yes':(Object.keys(myMealTypesToday).length>0?'no':'unknown'),info:{title:'Meals target',body:'Marked Yes when all 3 meals — breakfast, lunch, and dinner — are logged for today.'}},
   ];
+
+  // ── Silent Hours guard ────────────────────────────────────────────────────
+  // When inside the user's quiet window (and they haven't tapped "Show full app
+  // anyway" this session), replace Home with a deliberately reduced screen.
+  // Logging stays available — the moon screen IS the feature, not a wall.
+  var inSilent=silentHoursEnabled&&isInSilentHours(new Date(),silentHoursStart,silentHoursEnd);
+  if(inSilent&&!showFullAppOverride){
+    return <View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+      <AddTxModal visible={showTx||!!editTx} onClose={function(){setShowTx(false);setEditTx(null);}} editTx={editTx}/>
+      <QuickLogSheet visible={showQuickLog} onClose={function(){setShowQuickLog(false);}}/>
+      <View style={{flex:1,alignItems:'center',justifyContent:'center',paddingHorizontal:32}}>
+        <Text style={{fontSize:48,color:theme.textSecondary,marginBottom:24}} accessibilityLabel="Moon">🌙</Text>
+        <Text style={{fontFamily:fontW(500),fontWeight:'500',fontSize:18,color:theme.text,textAlign:'center',marginBottom:10}}>We'll see you in the morning.</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,textAlign:'center',lineHeight:19,marginBottom:32}}>If something happened today you want to remember, the log buttons are still here.</Text>
+        <View style={{flexDirection:'row',gap:12,alignSelf:'stretch'}}>
+          <View style={{flex:1}}><SecondaryButton full onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'open_meal',mealType:'dinner',nonce:Date.now()});navigation.navigate('Wellness');}}>Log meal</SecondaryButton></View>
+          <View style={{flex:1}}><SecondaryButton full onPress={function(){haptic('light');setShowQuickLog(true);}}>Log transaction</SecondaryButton></View>
+        </View>
+      </View>
+      <TouchableOpacity onPress={function(){setShowFullAppOverride(true);}} style={{paddingVertical:14,alignItems:'center'}}>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary}}>Show full app anyway</Text>
+      </TouchableOpacity>
+    </View>;
+  }
 
   return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.bg}]}>
     <AddTxModal visible={showTx||!!editTx} onClose={function(){setShowTx(false);setEditTx(null);}} editTx={editTx}/>
@@ -6100,15 +6307,17 @@ function FinanceScreen(){
   function isInViewMonth(d){var dt=toDate(d);return dt.getMonth()===viewMonth.getMonth()&&dt.getFullYear()===viewMonth.getFullYear();}
   var categoryFilterOptions=CAT_LIST.slice();
   // Top-card scope (Saved this month / Earned / Spent) — always whole-family, per spec.
+  // Cash + Transfer are excluded from spend totals: cash is extracted not consumed,
+  // transfers are personal payments. They remain visible in the transaction list.
   var monthTxs=transactions.filter(function(t){return isInViewMonth(t.date);});
   var income=monthTxs.filter(function(t){return t.category==='Income';}).reduce(function(s,t){return s+t.amount;},0);
-  var expenses=monthTxs.filter(function(t){return t.category!=='Income';}).reduce(function(s,t){return s+t.amount;},0);
+  var expenses=monthTxs.filter(function(t){return isSpendingCategory(t.category);}).reduce(function(s,t){return s+t.amount;},0);
   var savings=income-expenses;var savePct=income>0?Math.round((savings/income)*100):0;
   // Chip-reactive scope for "Where it went", "Recent", "These usually happen", search results.
   var scopedTxs=memberFilterId?transactions.filter(function(t){return (t.memberId||t.member_id)===memberFilterId;}):transactions;
   var scopedMonthTxs=scopedTxs.filter(function(t){return isInViewMonth(t.date);});
-  var scopedExpenses=scopedMonthTxs.filter(function(t){return t.category!=='Income';}).reduce(function(s,t){return s+t.amount;},0);
-  var catData={};categoryFilterOptions.forEach(function(c){catData[c]=0;});scopedMonthTxs.filter(function(t){return t.category!=='Income';}).forEach(function(t){catData[t.category]=(catData[t.category]||0)+t.amount;});
+  var scopedExpenses=scopedMonthTxs.filter(function(t){return isSpendingCategory(t.category);}).reduce(function(s,t){return s+t.amount;},0);
+  var catData={};categoryFilterOptions.forEach(function(c){catData[c]=0;});scopedMonthTxs.filter(function(t){return isSpendingCategory(t.category);}).forEach(function(t){catData[t.category]=(catData[t.category]||0)+t.amount;});
   var filteredMonthTxs=applyFilters(scopedMonthTxs).filter(function(t){
     // Phase 6 statement-source pill: 'manual' shows only rows without statement_import_id;
     // 'statement' shows only imported rows; 'all' is unfiltered.
@@ -6384,6 +6593,9 @@ function FinanceScreen(){
       </View>
       {filteredMonthTxs.slice(0,5).map(function(t){
         var isInc=t.category==='Income';
+        var isCash=t.category==='Cash';
+        var isXfer=t.category==='Transfer';
+        var isNonSpend=isCash||isXfer;
         var memberObj=(members||[]).find(function(m){return m.id===t.memberId;});
         var slotIdx=memberObj?(members||[]).indexOf(memberObj):0;
         var slot=SLOTS[slotIdx%5]||SLOTS[0];
@@ -6393,6 +6605,9 @@ function FinanceScreen(){
           <View style={{flex:1,minWidth:0}}>
             <View style={{flexDirection:'row',alignItems:'baseline',gap:6,flexWrap:'wrap'}}>
               <Text numberOfLines={1} style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text,flexShrink:1}}>{t.merchant}</Text>
+              {/* Non-spend tag: signals the row exists for completeness but isn't part of "spending". */}
+              {isCash?<Text style={{fontFamily:FF.sans,fontSize:10,fontStyle:'italic',color:theme.textSecondary}}>(cash)</Text>:null}
+              {isXfer?<Text style={{fontFamily:FF.sans,fontSize:10,fontStyle:'italic',color:theme.textSecondary}}>(transfer)</Text>:null}
               {t.statement_import_id?<Text style={{fontFamily:FF.sans,fontSize:10,fontStyle:'italic',color:theme.textSecondary}}>from statement</Text>:null}
             </View>
             <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:4}}>
@@ -6400,7 +6615,7 @@ function FinanceScreen(){
               <Caps color={theme.muted}>{displayDate(t.date)}</Caps>
             </View>
           </View>
-          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,letterSpacing:-0.2,color:isInc?theme.primary:theme.text}}>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,letterSpacing:-0.2,color:isInc?theme.primary:(isNonSpend?theme.textSecondary:theme.text)}}>
             {isInc?'+':'−'}₹{fmt(Math.abs(t.amount))}
           </Text>
         </View>;
@@ -6491,6 +6706,7 @@ function WellnessScreen(){
   var[editMeal,setEditMeal]=useState(null); // B2
   var[showWater,setShowWater]=useState(false); // B3
   var[showScreen,setShowScreen]=useState(false); // B3
+  var[showSleep,setShowSleep]=useState(false); // Part C: sleep logging modal
   var[showActivity,setShowActivity]=useState(false); // Phase B3
   var[editActivity,setEditActivity]=useState(null); // Phase B3
   var[activityDate,setActivityDate]=useState(new Date()); // Phase B3
@@ -6503,7 +6719,10 @@ function WellnessScreen(){
   var[initialMealType,setInitialMealType]=useState('lunch');
   var[mealDate,setMealDate]=useState(new Date());
   var[waterDate,setWaterDate]=useState(new Date());
-  var[screenDate,setScreenDate]=useState(new Date());
+  // Screen time + sleep are end-of-day metrics: default modal date to yesterday.
+  function _yest(){var d=new Date();d.setDate(d.getDate()-1);return d;}
+  var[screenDate,setScreenDate]=useState(_yest());
+  var[sleepDate,setSleepDate]=useState(_yest());
   var[memberFilterId,setMemberFilterId]=useState(null); // W1: filter by member
   var[editScreenTarget,setEditScreenTarget]=useState(false); // B4: pencil-edit modal toggle
   var[memberDetail,setMemberDetail]=useState(null); // W4/W6 sheet
@@ -6579,6 +6798,24 @@ function WellnessScreen(){
   }
   var today=isoDate(new Date());var todayMeals=meals.filter(function(m){return isoDate(m.date)===today;});
   var todayW=wellness.filter(function(w){return w.date===today;});
+  // Yesterday window — drives the screen-time and sleep cards (end-of-day metrics).
+  // isoDate is local-tz; subtract one calendar day. wellness.date is a date column with
+  // no TZ, so the yesterday-string we build here matches the column directly.
+  var yesterdayDate=new Date();yesterdayDate.setDate(yesterdayDate.getDate()-1);
+  var yesterdayISO=isoDate(yesterdayDate);
+  var yesterdayW=wellness.filter(function(w){return w.date===yesterdayISO;});
+  // Sleep target per member: q20_sleep_hours from current user's questionnaire if
+  // available (1–12h range); else 7h (adult default). family_members has no dob
+  // column and role doesn't encode age, so non-current-user members all get 7h.
+  // The user can adjust by tapping "+ Sleep" and saving — the bar reflects the
+  // most-recent value as soon as a sleep row exists.
+  function sleepTargetFor(member){
+    if(member&&member.userId===userId){
+      var q20=Number(userProfile&&userProfile.questionnaire_data&&userProfile.questionnaire_data.q20_sleep_hours);
+      if(q20>=1&&q20<=12)return q20;
+    }
+    return 7;
+  }
   // Phase 2.3 step 1: per-member protein lifted to AppContext as familyProteinToday.
   var currentUserMember=(members||[]).find(function(m){return m.userId===userId;})||null;
   var currentUserMemberProfile=(currentUserMember&&memberProfiles)?memberProfiles[currentUserMember.userId]:null;
@@ -6595,6 +6832,7 @@ function WellnessScreen(){
     <DayDetailModal visible={showDayDetail} date={dayDetailDate} onClose={function(){setShowDayDetail(false);}} onChangeDate={setDayDetailDate} onEditMeal={function(m){setShowDayDetail(false);setEditMeal(m);setMealDate(toDate(m.date));}} onAddMeal={function(d){setShowDayDetail(false);setMealDate(d);setShowMeal(true);}} onAddWater={function(d){setShowDayDetail(false);setWaterDate(d);setShowWater(true);}} onAddScreen={function(d){setShowDayDetail(false);setScreenDate(d);setShowScreen(true);}} onAddTransaction={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_tx',initialDate:isoDate(d),nonce:Date.now()});}}/>
     <LogWaterModal visible={showWater} onClose={function(){setShowWater(false);}} initialDate={waterDate}/>
     <LogScreenTimeModal visible={showScreen} onClose={function(){setShowScreen(false);}} initialDate={screenDate}/>
+    <LogSleepModal visible={showSleep} onClose={function(){setShowSleep(false);}} initialDate={sleepDate}/>
     <LogActivityModal visible={showActivity||!!editActivity} onClose={function(){setShowActivity(false);setEditActivity(null);}} initialDate={activityDate} editActivity={editActivity}/>
     <ModalSheet visible={editScreenTarget} title="Your screen-time target" onClose={function(){setEditScreenTarget(false);}}>
       <Text style={{fontFamily:FF.sans,fontSize:14,lineHeight:21,color:theme.textSecondary,marginBottom:18}}>Set your daily screen-time limit. Used by the Time on Screens hero, the "Stayed under Xh" check on Home, and your ring fill.</Text>
@@ -6726,10 +6964,16 @@ function WellnessScreen(){
     <View style={{position:'relative',marginTop:12}}>
       <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowScreen(true);}}>
         <Block bg={theme.accent} style={{padding:22}}>
-          <Caps color="rgba(255,255,255,0.7)">Time on screens today</Caps>
+          {/* Label changed to YESTERDAY — screen time is end-of-day; you can't know
+              today's full total until today is over. Card reads from yesterdayW. */}
+          <Caps color="rgba(255,255,255,0.7)">Time on screens yesterday</Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54,marginTop:10,height:54}}>{(function(){
-            var sum=todayW.reduce(function(s,w){return s+Number(w.screenHrs||w.screen_hrs||0);},0);
-            if(sum===0)return '—';
+            // "Logged" rows have screen_hrs IS NOT NULL after the wellness_logged_distinction
+            // migration. NULL = not logged. Sum only over logged rows.
+            var loggedRows=yesterdayW.filter(function(w){var v=w.screenHrs;if(typeof v==='undefined')v=w.screen_hrs;return v!==null&&typeof v!=='undefined';});
+            if(loggedRows.length===0)return 'Not logged yet';
+            var sum=loggedRows.reduce(function(s,w){var v=w.screenHrs;if(typeof v==='undefined')v=w.screen_hrs;return s+Number(v||0);},0);
+            if(sum===0)return '0h';
             var hh=Math.floor(sum);
             var mm=Math.round((sum-hh)*60);
             return mm===0?hh+'h':hh+'h '+(mm<10?'0':'')+mm+'m';
@@ -6748,25 +6992,38 @@ function WellnessScreen(){
           var memberCount=(members||[]).length;
           if(memberCount===0)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</Caps>;
           var screenTarget=Number(screenTargetHrs)||2;
-          var familyScreenToday=(members||[]).map(function(m){
-            var wellRow=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});
-            var current=wellRow?Number(wellRow.screenHrs||wellRow.screen_hrs||0):0;
+          var familyScreenYesterday=(members||[]).map(function(m){
+            var wellRow=yesterdayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||yesterdayW.find(function(w){return w.memberName===m.name;});
+            // current is null when row missing OR row.screen_hrs is NULL — both = "not logged".
+            var raw=wellRow?(typeof wellRow.screenHrs!=='undefined'?wellRow.screenHrs:wellRow.screen_hrs):null;
+            var current=(raw===null||typeof raw==='undefined')?null:Number(raw);
             return{member:m,target:screenTarget,current:current};
           });
-          var allZero=familyScreenToday.every(function(x){return x.current===0;});
-          if(allZero)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Today's screen time will appear as it's logged</Caps>;
+          var allMissing=familyScreenYesterday.every(function(x){return x.current===null;});
+          if(allMissing)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Yesterday's screen time not logged yet — tap to add</Caps>;
           var ringDiameter=memberCount<=4?56:(memberCount===5?52:(memberCount===6?48:44));
           var ringStroke=memberCount<=5?4:3.5;
           var useScroll=memberCount>=7;
-          var rings=familyScreenToday.map(function(item){
+          var rings=familyScreenYesterday.map(function(item){
             var nameWords=(item.member.name||'').split(' ').filter(Boolean);
             var initials=nameWords.map(function(p){return p.charAt(0);}).slice(0,2).join('').toUpperCase()||'?';
             var firstName=nameWords[0]||'?';
-            var hoursStr=item.current===0?'0h':(item.current===Math.floor(item.current)?Math.floor(item.current)+'h':item.current.toFixed(1)+'h');
-            var aboveLabel=<Text style={{fontSize:12,color:'#fff',textAlign:'center'}}>
-              <Text style={{fontFamily:FF.sansBold,color:'#fff'}}>{hoursStr}</Text>
-              <Text style={{fontFamily:FF.sans,color:'rgba(255,255,255,0.7)'}}>{' / '+item.target+'h'}</Text>
-            </Text>;
+            // Label: "— / Xh" when not logged, else "Yh / Xh" with optional "+Zh over" suffix.
+            var aboveLabel;
+            if(item.current===null){
+              aboveLabel=<Text style={{fontSize:12,color:'rgba(255,255,255,0.55)',textAlign:'center'}}>
+                <Text style={{fontFamily:FF.sansBold}}>—</Text>
+                <Text style={{fontFamily:FF.sans}}>{' / '+item.target+'h'}</Text>
+              </Text>;
+            }else{
+              var hoursStr=item.current===0?'0h':(item.current===Math.floor(item.current)?Math.floor(item.current)+'h':item.current.toFixed(1)+'h');
+              var over=item.current-item.target;
+              aboveLabel=<Text style={{fontSize:12,color:'#fff',textAlign:'center'}}>
+                <Text style={{fontFamily:FF.sansBold,color:'#fff'}}>{hoursStr}</Text>
+                <Text style={{fontFamily:FF.sans,color:'rgba(255,255,255,0.7)'}}>{' / '+item.target+'h'}</Text>
+                {over>0?<Text style={{fontFamily:FF.sans,color:'rgba(255,255,255,0.85)'}}>{' (+'+(over===Math.floor(over)?Math.floor(over):over.toFixed(1))+'h)'}</Text>:null}
+              </Text>;
+            }
             return <FamilyMemberBar
               key={item.member.id||firstName}
               member={{initials:initials,name:firstName,current:item.current,target:item.target}}
@@ -6803,7 +7060,90 @@ function WellnessScreen(){
         </Pressable>
         <InfoIcon
           title="How time on screens works"
-          body={"Each bar is one family member's screen time today. The bar fills toward your "+(Number(screenTargetHrs)||2)+"-hour cap — white while within, amber when over. Tap the pencil to change the cap."}
+          body={"Each bar is one family member's screen time yesterday. The bar fills toward your "+(Number(screenTargetHrs)||2)+"-hour cap — white while within, amber when over, dashed when not yet logged. Tap the pencil to change the cap."}
+          color="rgba(255,255,255,0.7)"
+        />
+      </View>
+    </View>
+
+    {/* ── Sleep card ────────────────────────────────────────────────────────
+        Mirrors the corrected Time on Screens card. Reads the same yesterdayW.
+        Background is a muted slate (calm, distinct from amber screen-time and
+        olive protein cards). No streaks, no scores, no comparisons. */}
+    <View style={{position:'relative',marginTop:12}}>
+      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowSleep(true);}}>
+        <Block bg="#3F5269" style={{padding:22}}>
+          <Caps color="rgba(255,255,255,0.7)">Time asleep last night</Caps>
+          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54,marginTop:10,height:54}}>{(function(){
+            var loggedRows=yesterdayW.filter(function(w){return w.sleep_hours!==null&&typeof w.sleep_hours!=='undefined';});
+            if(loggedRows.length===0)return 'Not logged yet';
+            var sum=loggedRows.reduce(function(s,w){return s+Number(w.sleep_hours||0);},0);
+            if(sum===0)return '0h';
+            var hh=Math.floor(sum);
+            var mm=Math.round((sum-hh)*60);
+            return mm===0?hh+'h':hh+'h '+(mm<10?'0':'')+mm+'m';
+          })()}</Text>
+          <View style={{height:96,marginTop:22}}/>
+          <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:18}}>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{members.length} member{members.length===1?'':'s'}</Text>
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>Tap to log sleep</Text>
+          </View>
+        </Block>
+      </TouchableOpacity>
+      <View style={{position:'absolute',left:22,right:22,top:124,height:96,justifyContent:'center'}} pointerEvents="box-none">
+        {(function(){
+          var memberCount=(members||[]).length;
+          if(memberCount===0)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</Caps>;
+          var familySleep=(members||[]).map(function(m){
+            var wellRow=yesterdayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||yesterdayW.find(function(w){return w.memberName===m.name;});
+            var raw=wellRow?wellRow.sleep_hours:null;
+            var current=(raw===null||typeof raw==='undefined')?null:Number(raw);
+            return{member:m,target:sleepTargetFor(m),current:current};
+          });
+          var allMissing=familySleep.every(function(x){return x.current===null;});
+          if(allMissing)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Last night's sleep not logged yet — tap to add</Caps>;
+          var ringDiameter=memberCount<=4?56:(memberCount===5?52:(memberCount===6?48:44));
+          var useScroll=memberCount>=7;
+          var rings=familySleep.map(function(item){
+            var nameWords=(item.member.name||'').split(' ').filter(Boolean);
+            var initials=nameWords.map(function(p){return p.charAt(0);}).slice(0,2).join('').toUpperCase()||'?';
+            var firstName=nameWords[0]||'?';
+            var aboveLabel;
+            if(item.current===null){
+              aboveLabel=<Text style={{fontSize:12,color:'rgba(255,255,255,0.55)',textAlign:'center'}}>
+                <Text style={{fontFamily:FF.sansBold}}>—</Text>
+                <Text style={{fontFamily:FF.sans}}>{' / '+item.target+'h'}</Text>
+              </Text>;
+            }else{
+              var hoursStr=item.current===0?'0h':(item.current===Math.floor(item.current)?Math.floor(item.current)+'h':item.current.toFixed(1)+'h');
+              aboveLabel=<Text style={{fontSize:12,color:'#fff',textAlign:'center'}}>
+                <Text style={{fontFamily:FF.sansBold,color:'#fff'}}>{hoursStr}</Text>
+                <Text style={{fontFamily:FF.sans,color:'rgba(255,255,255,0.7)'}}>{' / '+item.target+'h'}</Text>
+              </Text>;
+            }
+            return <FamilyMemberBar
+              key={'sleep_'+(item.member.id||firstName)}
+              member={{initials:initials,name:firstName,current:item.current,target:item.target}}
+              ringDiameter={ringDiameter}
+              aboveLabel={aboveLabel}
+              onPress={function(){haptic('light');setMemberDetail(item.member);}}
+            />;
+          });
+          if(useScroll){
+            return <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,alignItems:'center',paddingHorizontal:4}}>
+              {rings}
+            </ScrollView>;
+          }
+          var justifyMode=memberCount===1?'center':(memberCount===2?'space-evenly':'space-around');
+          return <View style={{flexDirection:'row',alignItems:'center',justifyContent:justifyMode,paddingHorizontal:4}}>
+            {rings}
+          </View>;
+        })()}
+      </View>
+      <View style={{position:'absolute',top:16,right:16,flexDirection:'row',gap:14,alignItems:'center'}}>
+        <InfoIcon
+          title="How sleep tracking works"
+          body="Each bar is one family member's sleep last night. Default target is 7 hours (your questionnaire answer overrides for you). White fill while within target, amber if you slept way more or less than usual, dashed when not yet logged. No streaks, no comparisons — just a quiet record."
           color="rgba(255,255,255,0.7)"
         />
       </View>
@@ -6836,11 +7176,14 @@ function WellnessScreen(){
       <Text style={[z.cap,{color:theme.primary,fontWeight:'600'}]}>Showing {(members.find(function(m){return m.id===memberFilterId;})||{}).name||'one member'} only · long-press an avatar for their detail</Text>
     </View>}
 
-    {/* Phase 2.3.D + B3: + Meal / + Screen / + Activity action buttons. Activity uses primaryLight bg per spec L78 (distinct from filled olive Meal + outlined Screen). */}
-    <View style={[z.row,{gap:8,marginTop:4}]}>
-      <View style={{flex:1}}><PrimaryButton full onPress={function(){haptic('light');setShowMeal(true);}}>+ Meal</PrimaryButton></View>
-      <View style={{flex:1}}><SecondaryButton full onPress={function(){haptic('light');setShowScreen(true);}}>+ Screen</SecondaryButton></View>
-      <View style={{flex:1}}><TouchableOpacity activeOpacity={0.8} onPress={function(){haptic('light');setShowActivity(true);}} style={{height:48,borderRadius:12,paddingHorizontal:14,alignItems:'center',justifyContent:'center',backgroundColor:theme.primaryLight}}><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:theme.primary,letterSpacing:0.1}}>+ Activity</Text></TouchableOpacity></View>
+    {/* Action buttons: Meal / Screen / Sleep / Activity. Wraps to second row on
+        narrow screens via flexWrap — keeps all four discoverable per spec C.5
+        (no scrollable row, since that hides options). */}
+    <View style={[z.row,{gap:8,marginTop:4,flexWrap:'wrap',rowGap:8}]}>
+      <View style={{flexBasis:'48%',flexGrow:1}}><PrimaryButton full onPress={function(){haptic('light');setShowMeal(true);}}>+ Meal</PrimaryButton></View>
+      <View style={{flexBasis:'48%',flexGrow:1}}><SecondaryButton full onPress={function(){haptic('light');setShowScreen(true);}}>+ Screen</SecondaryButton></View>
+      <View style={{flexBasis:'48%',flexGrow:1}}><SecondaryButton full onPress={function(){haptic('light');setShowSleep(true);}}>+ Sleep</SecondaryButton></View>
+      <View style={{flexBasis:'48%',flexGrow:1}}><TouchableOpacity activeOpacity={0.8} onPress={function(){haptic('light');setShowActivity(true);}} style={{height:48,borderRadius:12,paddingHorizontal:14,alignItems:'center',justifyContent:'center',backgroundColor:theme.primaryLight}}><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:theme.primary,letterSpacing:0.1}}>+ Activity</Text></TouchableOpacity></View>
     </View>
 
     {/* Phase 2.3.E: Body goals — moved alongside action buttons per spec. */}
@@ -7885,8 +8228,12 @@ function MemberDetailModal({visible,onClose,member,onJumpProtein,onJumpScreens,o
   var todayMeals=(meals||[]).filter(function(m){return m.memberId===member.id&&isoDate(m.date)===today;});
   var profile=(memberProfiles&&member.userId)?memberProfiles[member.userId]:null;
   var targets=calculateProteinTargets(profile&&profile.weightKg?profile.weightKg:null);
-  var weekScreens=(wellness||[]).filter(function(w){return w.memberId===member.id&&toDate(w.date)>=monday;});
+  // Screen time + sleep: filter to rows where the metric is non-null (post-migration,
+  // NULL = "not logged"; explicit 0 still counts as a log).
+  var weekScreens=(wellness||[]).filter(function(w){var v=typeof w.screenHrs!=='undefined'?w.screenHrs:w.screen_hrs;return w.memberId===member.id&&toDate(w.date)>=monday&&v!==null&&typeof v!=='undefined';});
   var weekScreenHrs=weekScreens.reduce(function(s,w){return s+Number(w.screenHrs||w.screen_hrs||0);},0);
+  var weekSleeps=(wellness||[]).filter(function(w){return w.memberId===member.id&&toDate(w.date)>=monday&&w.sleep_hours!==null&&typeof w.sleep_hours!=='undefined';});
+  var weekSleepHrs=weekSleeps.reduce(function(s,w){return s+Number(w.sleep_hours||0);},0);
   var memScores=(scores||[]).filter(function(s){return s.member_id===member.id&&toDate(s.date)>=monday;});
   var weekPts=memScores.reduce(function(s,r){return s+(r.points_earned||0);},0);
   var memStreaks=(streaks||[]).filter(function(s){return s.member_id===member.id;});
@@ -7946,6 +8293,7 @@ function MemberDetailModal({visible,onClose,member,onJumpProtein,onJumpScreens,o
       {label:'Score breakdown',detail:'Where '+weekPts+' points came from',onPress:function(){onJumpScoreBreakdown&&onJumpScoreBreakdown(member);}},
       {label:'Protein detail',detail:'Today: '+todayMeals.reduce(function(s,m){return s+Number(m.protein||0);},0)+'g · Target '+targets.active+'g',onPress:function(){onJumpProtein&&onJumpProtein(member);}},
       {label:'Screen time detail',detail:weekScreens.length+' day'+(weekScreens.length===1?'':'s')+' captured · '+weekScreenHrs.toFixed(1)+' hrs total',onPress:function(){onJumpScreens&&onJumpScreens(member);}},
+      {label:'Sleep detail',detail:weekSleeps.length>0?(weekSleeps.length+' night'+(weekSleeps.length===1?'':'s')+' captured · avg '+(weekSleepHrs/weekSleeps.length).toFixed(1)+' h'):'No nights logged this week'},
     ].map(function(item,idx){
       return <TouchableOpacity key={idx} activeOpacity={0.7} onPress={item.onPress} style={{
         backgroundColor:theme.surface,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:14,
@@ -8129,7 +8477,8 @@ function SettingsScreen({onClose}){
   var themeCtx=useThemeCtx();
   var themeMode=themeCtx&&themeCtx.themeMode?themeCtx.themeMode:'light';
   var setThemeMode=themeCtx&&themeCtx.setThemeMode?themeCtx.setThemeMode:function(){};
-  var{familyId,familyName,setFamilyName,members,isAdmin,userId,currentUserName,userProfile,refreshMembers,openQuestionnaire,notificationEnabled,setNotificationEnabled,waterTrackingEnabled,setWaterTrackingEnabled,refreshActivityFeed}=useApp();
+  var{familyId,familyName,setFamilyName,members,isAdmin,userId,currentUserName,userProfile,refreshMembers,openQuestionnaire,notificationEnabled,setNotificationEnabled,waterTrackingEnabled,setWaterTrackingEnabled,refreshActivityFeed,silentHoursEnabled,setSilentHoursEnabled,silentHoursStart,setSilentHoursStart,silentHoursEnd,setSilentHoursEnd}=useApp();
+  var[silentPicker,setSilentPicker]=useState(null); // 'start' | 'end' | null
   var[inviteSheet,setInviteSheet]=useState(null);
   var[removeConfirm,setRemoveConfirm]=useState(null);
   var[showProfile,setShowProfile]=useState(false);
@@ -8310,6 +8659,53 @@ function SettingsScreen({onClose}){
         </View>
       </Block>
 
+      {/* Silent Hours — calm Home screen between configured times. Defaults 22:00–08:00.
+          Three columns persist: silent_hours_enabled (bool), silent_hours_start, silent_hours_end (time).
+          The HomeScreen reads these via useApp(). */}
+      <Block style={{padding:14,marginBottom:6}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+          <View style={{flex:1,paddingRight:10}}>
+            <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>Silent hours</Text>
+            <Caps color={theme.muted} style={{marginTop:2}}>{silentHoursEnabled?(silentHoursStart+' – '+silentHoursEnd):'Off'}</Caps>
+          </View>
+          <Switch value={silentHoursEnabled} onValueChange={async function(next){
+            setSilentHoursEnabled&&setSilentHoursEnabled(next);
+            try{await supabase.from('users').update({silent_hours_enabled:next}).eq('id',userId);}catch(e){}
+          }}/>
+        </View>
+        {silentHoursEnabled?<View style={{marginTop:12,flexDirection:'row',gap:10}}>
+          <TouchableOpacity onPress={function(){setSilentPicker('start');}} style={{flex:1,backgroundColor:theme.surfaceElevated,borderRadius:10,paddingVertical:10,paddingHorizontal:12,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
+            <Caps color={theme.muted}>Start</Caps>
+            <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:16,color:theme.text,marginTop:2}}>{silentHoursStart}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={function(){setSilentPicker('end');}} style={{flex:1,backgroundColor:theme.surfaceElevated,borderRadius:10,paddingVertical:10,paddingHorizontal:12,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
+            <Caps color={theme.muted}>End</Caps>
+            <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:16,color:theme.text,marginTop:2}}>{silentHoursEnd}</Text>
+          </TouchableOpacity>
+        </View>:null}
+        <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted,marginTop:10,lineHeight:16}}>We'll go quiet during these hours. No nudges, just a calm home screen. You can still log anything you want.</Text>
+        {silentPicker&&Platform.OS!=='web'?(function(){
+          var hm=(silentPicker==='start'?silentHoursStart:silentHoursEnd).split(':');
+          var initial=new Date();initial.setHours(Number(hm[0])||0,Number(hm[1])||0,0,0);
+          return <DateTimePicker
+            value={initial}
+            mode="time"
+            is24Hour={true}
+            display={Platform.OS==='ios'?'spinner':'default'}
+            onChange={async function(event,d){
+              setSilentPicker(null);
+              if(event&&event.type==='dismissed')return;
+              if(!d)return;
+              var h=String(d.getHours()).padStart(2,'0');
+              var m=String(d.getMinutes()).padStart(2,'0');
+              var hhmm=h+':'+m;
+              if(silentPicker==='start'){setSilentHoursStart&&setSilentHoursStart(hhmm);try{await supabase.from('users').update({silent_hours_start:hhmm}).eq('id',userId);}catch(e){}}
+              else{setSilentHoursEnd&&setSilentHoursEnd(hhmm);try{await supabase.from('users').update({silent_hours_end:hhmm}).eq('id',userId);}catch(e){}}
+            }}
+          />;
+        })():null}
+      </Block>
+
       {/* Your data */}
       <Caps style={{marginTop:20,marginBottom:8}}>Your data</Caps>
       {listRow('Pull latest from cloud',null,async function(){
@@ -8479,6 +8875,11 @@ function AppInner(){
   var[recurringTransactions,setRecurringTransactions]=useState([]);
   var[notificationEnabled,setNotificationEnabled]=useState(true);
   var[waterTrackingEnabled,setWaterTrackingEnabled]=useState(false);
+  // Silent Hours: HH:MM strings stored on users.silent_hours_{enabled,start,end}.
+  // Default 22:00–08:00. Drives the calm Home screen between those times.
+  var[silentHoursEnabled,setSilentHoursEnabled]=useState(true);
+  var[silentHoursStart,setSilentHoursStart]=useState('22:00');
+  var[silentHoursEnd,setSilentHoursEnd]=useState('08:00');
   // PHASE 6: water target — persisted on users.water_target_litres
   var[waterTargetLitres,setWaterTargetLitresState]=useState(2.5);
   // Wrap setter so calls also persist to DB
@@ -9070,7 +9471,7 @@ function AppInner(){
         setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
         setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
         setScores([]);setStreaks([]);setIsAdmin(false);setShowSettings(false);setShowQuestionnaire(false);setQuickAction(null);
-        setTodayNudge(null);setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setNotificationEnabled(true);setWaterTrackingEnabled(false);
+        setTodayNudge(null);setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setNotificationEnabled(true);setWaterTrackingEnabled(false);setSilentHoursEnabled(true);setSilentHoursStart('22:00');setSilentHoursEnd('08:00');
         setCurrentUser(null);
       }
       if(event==='SIGNED_IN' && session && session.user && session.user.id){
@@ -9172,6 +9573,10 @@ function AppInner(){
           setOnboarded(questionnaireDone);
           setNotificationEnabled(userDoc.notification_enabled!==false);
           setWaterTrackingEnabled(userDoc.water_tracking_enabled===true);
+          // Silent hours — DB stores time WITHOUT TZ (HH:MM:SS). Coerce to HH:MM for our pickers.
+          if(typeof userDoc.silent_hours_enabled==='boolean')setSilentHoursEnabled(userDoc.silent_hours_enabled);
+          if(userDoc.silent_hours_start)setSilentHoursStart(String(userDoc.silent_hours_start).slice(0,5));
+          if(userDoc.silent_hours_end)setSilentHoursEnd(String(userDoc.silent_hours_end).slice(0,5));
           // PHASE 6: read water target from users row (defaults to 2.5L if null)
           var loadedTarget=Number(userDoc.water_target_litres);
           if(!isNaN(loadedTarget)&&loadedTarget>0)setWaterTargetLitresState(loadedTarget);
@@ -9688,6 +10093,12 @@ function AppInner(){
     setNotificationEnabled:setNotificationEnabled,
     waterTrackingEnabled:waterTrackingEnabled,
     setWaterTrackingEnabled:setWaterTrackingEnabled,
+    silentHoursEnabled:silentHoursEnabled,
+    setSilentHoursEnabled:setSilentHoursEnabled,
+    silentHoursStart:silentHoursStart,
+    setSilentHoursStart:setSilentHoursStart,
+    silentHoursEnd:silentHoursEnd,
+    setSilentHoursEnd:setSilentHoursEnd,
     waterTargetLitres:waterTargetLitres,
     setWaterTargetLitres:setWaterTargetLitres,
     screenTargetHrs:screenTargetHrs,

@@ -57,7 +57,7 @@ const corsHeaders = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-const VALID_CATEGORIES = new Set(['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Income'])
+const VALID_CATEGORIES = new Set(['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Income','Cash','Transfer'])
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
