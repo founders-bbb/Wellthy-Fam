@@ -19,7 +19,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { PieChart, BarChart, LineChart } from 'react-native-chart-kit';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { supabase, EDGE_MEAL, EDGE_NUDGE, SUPABASE_ANON_KEY } from './utils/supabaseClient';
+import { supabase, EDGE_MEAL, EDGE_NUDGE, EDGE_UPDATE_PORTION, EDGE_PARSE_STATEMENT, EDGE_FINALIZE_STATEMENT, SUPABASE_ANON_KEY } from './utils/supabaseClient';
+import * as DocumentPicker from 'expo-document-picker';
 import { DB_COLUMNS } from './utils/constants';
 
 // ─────────────────────────────────────────────────────────────────
@@ -235,7 +236,7 @@ function normWellness(rows){return(rows||[]).map(function(w){return Object.assig
 
 var LIMITS={
   finance:{amountMin:0.01,amountMax:1000000,descMax:100},
-  meal:{descMax:200,allowedTypes:['breakfast','lunch','dinner']},
+  meal:{descMax:200,allowedTypes:['breakfast','lunch','snack','dinner']},
   wellness:{waterMin:1,waterMax:20,screenMaxHours:24,waterTargetMinL:0.5,waterTargetMaxL:6,screenTargetMinH:1,screenTargetMaxH:12},
   goals:{nameMax:50},
 };
@@ -615,6 +616,7 @@ function buildActivityMessage(activity){
     return actor+' updated shared goal';
   }
   if(activity.activity_type==='comment')return actor+' commented on '+(data.transaction_name||'a transaction');
+  if(activity.activity_type==='statement_import')return actor+' imported '+(data.imported_count||0)+' transactions from '+(data.bank_name||'a statement');
   if(activity.activity_type==='shared_goal_contribution')return actor+' contributed ₹'+fmt(data.amount||0)+' to '+(data.goal_name||'a goal');
   if(activity.activity_type==='family')return actor+' joined the family';
   return actor+' has a new update';
@@ -1186,6 +1188,50 @@ function FamilyMemberBar({member,ringDiameter,ringStroke,onPress,aboveLabel}){
     {aboveBlock}
     {barViz}
     {nameLabel}
+  </View>;
+}
+
+// MemberChipStrip — "Whole family" + one chip per member. Mirrors the Wellness tab's chip strip.
+// Used by Home, Finance, Reflect to drill into a single member's data while keeping top cards aggregate.
+// Pass `gate(memberId)` to veto a tap (e.g. tier='member' tries to view another member's finance):
+// return false to block (caller is responsible for showing the alert), true to allow.
+function MemberChipStrip({members,selectedId,onSelect,gate}){
+  var theme=useThemeColors();
+  if(!members||members.length===0)return null;
+  function tryPick(nextId){
+    if(gate&&!gate(nextId))return;
+    haptic('light');
+    onSelect(nextId);
+  }
+  return <View style={{marginBottom:12,marginHorizontal:-20}}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:20,gap:10}}>
+      <TouchableOpacity onPress={function(){tryPick(null);}} style={{alignItems:'center',width:72}} accessibilityLabel="Show whole family">
+        <View style={{
+          width:54,height:54,borderRadius:27,
+          backgroundColor:!selectedId?theme.primary:theme.surfaceElevated,
+          alignItems:'center',justifyContent:'center',marginBottom:6,
+          borderWidth:2,borderColor:!selectedId?theme.primary:theme.background,
+        }}>
+          <Text style={{fontSize:14,fontWeight:'700',color:!selectedId?'#FFFFFF':theme.text}}>All</Text>
+        </View>
+        <Text style={{fontSize:11,fontWeight:'600',color:theme.text}} numberOfLines={1}>Whole family</Text>
+      </TouchableOpacity>
+      {members.map(function(m,i){
+        var slot=SLOTS[i%5];
+        var sel=selectedId===m.id;
+        return <TouchableOpacity key={'mchip_'+m.id} onPress={function(){tryPick(sel?null:m.id);}} style={{alignItems:'center',width:72}} accessibilityLabel={m.name} accessibilityState={{selected:sel}}>
+          <View style={{
+            width:54,height:54,borderRadius:27,
+            backgroundColor:slot.bg,
+            alignItems:'center',justifyContent:'center',marginBottom:6,
+            borderWidth:sel?3:2,borderColor:sel?theme.primary:theme.background,
+          }}>
+            <Text style={{fontSize:18,fontWeight:'700',color:slot.text}}>{(m.name||'?')[0]}</Text>
+          </View>
+          <Text style={{fontSize:11,fontWeight:'600',color:sel?theme.primary:theme.text}} numberOfLines={1}>{m.name}</Text>
+        </TouchableOpacity>;
+      })}
+    </ScrollView>
   </View>;
 }
 
@@ -3267,56 +3313,1024 @@ function AddTxModal({visible,onClose,editTx,initialDate}){
   </ModalSheet>);
 }
 
-// ── UPGRADED: AI-powered meal logging — user types naturally, Claude calculates nutrition ──
+// ── QUICK LOG SHEET — sub-5-second transaction entry. Lives alongside AddTxModal.
+// AddTxModal stays the canonical full-entry path (description, recurring, dates, photo, member).
+// QuickLog is the in-the-moment path: amount → category → save. No description, no recurring,
+// no member picker (defaults to 'joint'). Today's date only. Matches AddTxModal's insert payload
+// exactly minus the merchant/description text, so existing income filters (category==='Income'),
+// activity feed, scoring, and local upsert all keep working unchanged.
+function QuickLogSheet({visible,onClose}){
+  var theme=useThemeColors();
+  var{familyId,userId,members,refreshTransactions,upsertTransactionLocal,logActivity,currentUserName}=useApp();
+  var[amount,setAmount]=useState('');
+  var[cat,setCat]=useState('');
+  var[isIncome,setIsIncome]=useState(false);
+  var[note,setNote]=useState('');
+  var[saving,setSaving]=useState(false);
+
+  var QL_CATS=[
+    {key:'Daily Essentials',icon:'🛒'},
+    {key:'House Bills',     icon:'🏠'},
+    {key:'Travel',          icon:'✈️'},
+    {key:'Health',          icon:'❤️'},
+    {key:'Lifestyle',       icon:'🛍️'},
+    {key:'Savings',         icon:'💰'},
+  ];
+
+  useEffect(function(){
+    if(visible){setAmount('');setCat('');setIsIncome(false);setNote('');setSaving(false);}
+  },[visible]);
+
+  useEffect(function(){
+    if(!visible)return;
+    var sub=BackHandler.addEventListener('hardwareBackPress',function(){onClose();return true;});
+    return function(){sub.remove();};
+  },[visible,onClose]);
+
+  function appendDigit(d){
+    if(amount.length>=7)return;
+    var next=amount===''?d:amount+d;
+    haptic('light');
+    setAmount(next);
+  }
+  function backspace(){
+    if(!amount)return;
+    haptic('light');
+    setAmount(amount.slice(0,-1));
+  }
+
+  var amountNum=parseInt(amount||'0',10);
+  var canSave=amountNum>0 && !!cat && !saving;
+
+  async function save(){
+    if(!canSave)return;
+    setSaving(true);
+    haptic('medium');
+    try{
+      // Match AddTxModal: income transactions are encoded via category='Income' (not a separate
+      // type column), because the rest of the app filters income with t.category==='Income'.
+      var selectedCategory=isIncome?'Income':cat;
+      // Quick Log attributes to the person tapping the FAB. Joint stays the AddTxModal path
+      // for shared expenses. Falls back to joint only if the current user isn't a member row
+      // (e.g. an admin who hasn't been added to family_members).
+      var meMember=(members||[]).find(function(m){return m.userId===userId;});
+      var memberId=meMember?meMember.id:'joint';
+      var memberName=meMember?meMember.name:'Joint';
+      var cleanNote=normalizeText(note);
+      var payload={
+        family_id:familyId,
+        merchant:cleanNote,
+        amount:amountNum,
+        category:selectedCategory,
+        member_id:memberId,
+        member_name:memberName,
+        confirmed:true,
+        source:'Manual',
+        date:isoDate(new Date()),
+        is_family_spending:false,
+        recurring_transaction_id:null,
+        photo_path:null,
+      };
+      var insertRes=await supabase.from('transactions').insert(payload).select().single();
+      if(insertRes.error&&String(insertRes.error.message||'').toLowerCase().includes('photo_path')){
+        var fallbackInsert=Object.assign({},payload);delete fallbackInsert.photo_path;
+        insertRes=await supabase.from('transactions').insert(fallbackInsert).select().single();
+      }
+      if(insertRes.error)throw insertRes.error;
+      var savedRow=insertRes.data;
+      upsertTransactionLocal(normTransactions([insertRes.data])[0]);
+      if(!isIncome){await recordScore(familyId,memberId,'manual_tx',5);}
+      haptic('success');
+      if(refreshTransactions)await refreshTransactions();
+      if(logActivity){
+        await logActivity('transaction',{
+          user_name:currentUserName||'Someone',
+          action:'created',
+          amount:amountNum,
+          category:selectedCategory,
+          merchant:cleanNote,
+          transaction_type:isIncome?'income':'expense',
+        },savedRow&&savedRow.id,familyId);
+      }
+      onClose();
+    }catch(e){
+      console.log('[QUICK LOG SAVE ERROR]',e);
+      haptic('error');
+      showFriendlyError('Could not save transaction',e);
+    }finally{
+      setSaving(false);
+    }
+  }
+
+  function Key({label,onPress,disabled,bg,fg}){
+    return <TouchableOpacity activeOpacity={0.6} disabled={disabled} onPress={onPress} style={{
+      flex:1,height:56,borderRadius:12,
+      alignItems:'center',justifyContent:'center',
+      backgroundColor:bg||'transparent',
+      opacity:disabled?0.5:1,
+    }}>
+      <Text style={{fontFamily:fontW(500),fontWeight:'500',fontSize:24,color:fg||theme.text}}>{label}</Text>
+    </TouchableOpacity>;
+  }
+
+  return <Modal visible={!!visible} transparent animationType="slide" onRequestClose={onClose}>
+    <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1,backgroundColor:'rgba(0,0,0,0.4)',justifyContent:'flex-end'}}>
+      <Pressable style={{flex:1,minHeight:80}} onPress={onClose} accessibilityLabel="Close quick log"/>
+      <View style={{
+        backgroundColor:theme.bg,
+        borderTopLeftRadius:28,borderTopRightRadius:28,
+        paddingHorizontal:20,paddingTop:8,paddingBottom:24,
+      }}>
+        <View style={{width:36,height:4,borderRadius:2,backgroundColor:theme.border,alignSelf:'center',marginTop:8,marginBottom:8}}/>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+          <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:20,color:theme.text}}>Quick log</Text>
+          <TouchableOpacity onPress={onClose} accessibilityLabel="Cancel quick log">
+            <Text style={{fontFamily:fontW(500),fontWeight:'500',fontSize:16,color:theme.primary}}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={{
+          fontFamily:fontW(600),fontWeight:'600',fontSize:48,color:theme.text,
+          textAlign:'center',marginTop:8,marginBottom:10,letterSpacing:-1,
+        }}>{'₹'+(amount?Number(amount).toLocaleString('en-IN'):'0')}</Text>
+        <TextInput
+          value={note} onChangeText={setNote}
+          placeholder="What was it? (optional)" placeholderTextColor={theme.muted}
+          maxLength={LIMITS.finance.descMax}
+          returnKeyType="done"
+          style={{
+            fontFamily:FF.sans,fontSize:14,color:theme.text,
+            backgroundColor:theme.surface,
+            borderWidth:1,borderColor:theme.border,
+            borderRadius:12,paddingHorizontal:14,paddingVertical:10,
+            marginBottom:14,
+          }}
+        />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:2,paddingVertical:2,gap:8}} style={{marginBottom:14}}>
+          {QL_CATS.map(function(c){
+            var sel=cat===c.key;
+            return <TouchableOpacity key={c.key} activeOpacity={0.7} onPress={function(){haptic('light');setCat(sel?'':c.key);}} style={{
+              width:100,height:80,borderRadius:12,
+              borderWidth:sel?2:1,
+              borderColor:sel?theme.primary:theme.border,
+              backgroundColor:sel?theme.primaryLight:'transparent',
+              alignItems:'center',justifyContent:'center',padding:6,
+            }} accessibilityLabel={c.key} accessibilityState={{selected:sel}}>
+              <Text style={{fontSize:24,marginBottom:4}}>{c.icon}</Text>
+              <Text numberOfLines={1} style={{fontFamily:FF.sans,fontSize:12,color:theme.text,textAlign:'center'}}>{c.key}</Text>
+            </TouchableOpacity>;
+          })}
+        </ScrollView>
+        <View style={{flexDirection:'row',gap:8,marginBottom:14}}>
+          <TouchableOpacity activeOpacity={0.8} onPress={function(){haptic('light');setIsIncome(false);}} style={{
+            flex:1,height:40,borderRadius:9999,
+            alignItems:'center',justifyContent:'center',
+            backgroundColor:!isIncome?theme.primary:'transparent',
+            borderWidth:!isIncome?0:1,borderColor:theme.border,
+          }}><Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:14,color:!isIncome?'#fff':theme.textSecondary}}>Expense</Text></TouchableOpacity>
+          <TouchableOpacity activeOpacity={0.8} onPress={function(){haptic('light');setIsIncome(true);}} style={{
+            flex:1,height:40,borderRadius:9999,
+            alignItems:'center',justifyContent:'center',
+            backgroundColor:isIncome?theme.primary:'transparent',
+            borderWidth:isIncome?0:1,borderColor:theme.border,
+          }}><Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:14,color:isIncome?'#fff':theme.textSecondary}}>Income</Text></TouchableOpacity>
+        </View>
+        {[['1','2','3'],['4','5','6'],['7','8','9'],['⌫','0','✓']].map(function(row,ri){
+          return <View key={ri} style={{flexDirection:'row',gap:8,marginBottom:8}}>
+            {row.map(function(k,ki){
+              if(k==='⌫')return <Key key={ki} label="⌫" onPress={backspace}/>;
+              if(k==='✓')return <Key key={ki} label="✓" disabled={!canSave} onPress={save} bg={theme.primary} fg="#fff"/>;
+              return <Key key={ki} label={k} onPress={function(){appendDigit(k);}}/>;
+            })}
+          </View>;
+        })}
+      </View>
+    </KeyboardAvoidingView>
+  </Modal>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 6 STATEMENT UPLOAD — Phase B (UI)
+// Backend: parse-statement / finalize-statement-import / cleanup-expired-statements
+// edge functions deployed; storage bucket bank-statements exists; statement_imports,
+// statement_transactions, merchant_categories tables live; transactions has the four
+// new statement-origin columns (statement_import_id, raw_narration, merchant_normalized,
+// confidence_score) and source='Statement' for imported rows.
+//
+// Two modals + a small onboarding screen:
+//   1. StatementUploadModal — picker + upload + parse (5 stages)
+//   2. StatementReviewModal — confidence-grouped review screen with finalize
+//   3. StatementUploadOnboardingPrompt — Step 5 in the primary-user onboarding flow
+//
+// KNOWN LIMITATION (v1): no de-duplication if the user uploads the same statement
+// twice — duplicates surface in the review screen and the user can discard them
+// manually. PDF formatting differs even between months for the same bank, making
+// reliable dedupe genuinely hard. Revisit in v2.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 5MB-ish upper-bound on what we'll trust to parse. Storage bucket allows up to
+// 10MB per Phase A; we let the bucket enforce that limit and message it on failure.
+var STATEMENT_MAX_BYTES = 10 * 1024 * 1024;
+var STATEMENT_PARSE_PHRASES = [
+  'Uploading your statement…',
+  'Reading the pages…',
+  'Finding transactions…',
+  'Categorizing…',
+  'Almost there…',
+];
+var STATEMENT_CATEGORY_OPTIONS = ['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Income'];
+
+function StatementUploadModal({visible,onClose,onOpenReview}){
+  var theme=useThemeColors();
+  var{familyId,userId,currentUserName}=useApp();
+
+  var[stage,setStage]=useState('intro'); // intro | password | parsing | success | error
+  var[pickedFile,setPickedFile]=useState(null);
+  var[pdfPassword,setPdfPassword]=useState('');
+  var[passwordAttempts,setPasswordAttempts]=useState(0);
+  var[statementImportId,setStatementImportId]=useState(null);
+  var[parseSummary,setParseSummary]=useState(null);
+  var[error,setError]=useState(null); // {reason, message}
+  var[phraseIdx,setPhraseIdx]=useState(0);
+
+  // Reset all transient state every time the modal opens. Don't reset on close —
+  // the parent unmounts us anyway.
+  useEffect(function(){
+    if(visible){
+      setStage('intro');setPickedFile(null);setPdfPassword('');setPasswordAttempts(0);
+      setStatementImportId(null);setParseSummary(null);setError(null);setPhraseIdx(0);
+    }
+  },[visible]);
+
+  // Rotate the parsing phrase every 4s while in 'parsing' stage. Don't pretend to
+  // know progress — just cycle.
+  useEffect(function(){
+    if(stage!=='parsing')return;
+    var t=setInterval(function(){setPhraseIdx(function(i){return (i+1)%STATEMENT_PARSE_PHRASES.length;});},4000);
+    return function(){clearInterval(t);};
+  },[stage]);
+
+  // Android hardware back: dismiss when not actively parsing (parsing should
+  // complete or error before bailing).
+  useEffect(function(){
+    if(!visible)return;
+    var sub=BackHandler.addEventListener('hardwareBackPress',function(){
+      if(stage==='parsing')return true; // swallow during parse
+      onClose();
+      return true;
+    });
+    return function(){sub.remove();};
+  },[visible,stage,onClose]);
+
+  async function pickPDF(){
+    try{
+      var result=await DocumentPicker.getDocumentAsync({
+        type:'application/pdf',
+        copyToCacheDirectory:true,
+        multiple:false,
+      });
+      if(result.canceled){return;}
+      var asset=(result.assets&&result.assets[0])||null;
+      if(!asset){return;}
+      // Validate size + mime up-front so we don't insert a row for a doomed upload.
+      if(asset.size&&asset.size>STATEMENT_MAX_BYTES){
+        Alert.alert('PDF too large','PDF too large (over 10MB). Try the most recent month\'s statement instead.');
+        return;
+      }
+      var mt=asset.mimeType||asset.type;
+      if(mt&&mt!=='application/pdf'){
+        Alert.alert('Not a PDF','That doesn\'t look like a PDF. Try downloading the statement again from your bank\'s app.');
+        return;
+      }
+      setPickedFile(asset);
+      // Skip password stage on first attempt — only show it if parse-statement
+      // returns wrong_password.
+      runParse(asset,null);
+    }catch(e){
+      console.log('[STATEMENT PICK ERROR]',e);
+      showFriendlyError('Could not pick a PDF',e);
+    }
+  }
+
+  // The full upload + parse pipeline. Reused from the password retry path.
+  async function runParse(file,passwordOrNull){
+    if(!familyId||!userId){
+      setError({reason:'no_session',message:'Could not find your account session. Try closing and reopening the app.'});
+      setStage('error');
+      return;
+    }
+    setStage('parsing');
+    setPhraseIdx(0);
+    setError(null);
+
+    var importId=statementImportId;
+    try{
+      // Step 1 — create the statement_imports row if we don't have one yet.
+      // On password retry we reuse the existing one (its status='failed' from the
+      // wrong_password attempt; flip it back to 'parsing').
+      if(!importId){
+        var insertRes=await supabase.from('statement_imports').insert({
+          family_id:familyId,
+          user_id:userId,
+          document_type:'bank_account', // tentative; parse-statement updates with the real type
+          status:'parsing',
+          source_file_path:null,
+        }).select('id').single();
+        if(insertRes.error)throw insertRes.error;
+        importId=insertRes.data.id;
+        setStatementImportId(importId);
+      } else {
+        // Reset back to 'parsing' for the retry — the previous attempt set 'failed'.
+        await supabase.from('statement_imports').update({
+          status:'parsing',failure_reason:null,
+        }).eq('id',importId);
+      }
+
+      // Step 2 — read the picked file as ArrayBuffer (NOT Blob — Blob path uploads
+      // 0 bytes on some Expo RN builds) and upload to bank-statements bucket.
+      var storagePath=userId+'/'+importId+'.pdf';
+      var fileResp;
+      try{fileResp=await fetch(file.uri);}catch(fetchErr){
+        await markRowFailed(importId,'upload_failed: '+(fetchErr&&fetchErr.message||'fetch failed'));
+        setError({reason:'upload_failed',message:'Couldn\'t reach our servers. Check your connection and try again.'});
+        setStage('error');
+        return;
+      }
+      var arrayBuffer=await fileResp.arrayBuffer();
+      var up=await supabase.storage.from('bank-statements').upload(storagePath,arrayBuffer,{
+        contentType:'application/pdf',upsert:true, // upsert so password retry overwrites the prior upload
+      });
+      if(up.error){
+        await markRowFailed(importId,'upload_failed: '+up.error.message);
+        setError({reason:'upload_failed',message:'Couldn\'t reach our servers. Check your connection and try again.'});
+        setStage('error');
+        return;
+      }
+      await supabase.from('statement_imports').update({source_file_path:storagePath}).eq('id',importId);
+
+      // Step 3 — call parse-statement with a 90s client-side AbortController (server
+      // has 60s, give 30s buffer for network + cold-start).
+      var ctrl=new AbortController();
+      var timer=setTimeout(function(){ctrl.abort();},90_000);
+      var resp;
+      try{
+        resp=await fetch(EDGE_PARSE_STATEMENT,{
+          method:'POST',
+          signal:ctrl.signal,
+          headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY},
+          body:JSON.stringify({
+            statement_import_id:importId,
+            user_id:userId,
+            family_id:familyId,
+            storage_path:storagePath,
+            pdf_password:passwordOrNull||null,
+          }),
+        });
+      }catch(netErr){
+        clearTimeout(timer);
+        var aborted=netErr&&netErr.name==='AbortError';
+        await markRowFailed(importId,aborted?'timeout':('network: '+(netErr&&netErr.message||'unknown')));
+        setError({reason:aborted?'timeout':'network',message:aborted
+          ?'This statement has a lot of transactions and took too long to read. Try a single month at a time.'
+          :'Couldn\'t reach our servers. Check your connection and try again.'});
+        setStage('error');
+        return;
+      }
+      clearTimeout(timer);
+      var data=await resp.json().catch(function(){return null;});
+
+      // Step 4 — branch on response.
+      if(resp.ok&&data&&data.success){
+        setParseSummary(data);
+        haptic('success');
+        setStage('success');
+        return;
+      }
+      if(resp.status===422&&data&&data.reason==='wrong_password'){
+        setPasswordAttempts(function(n){return n+1;});
+        if(passwordAttempts>=3){
+          // 4th failure (we've already incremented for prior attempts) — give up.
+          setError({reason:'wrong_password',message:'We tried a few times. Check the password format in your bank\'s email — often DOB in DDMMYYYY or PAN digits.'});
+          setStage('error');
+          return;
+        }
+        setStage('password');
+        return;
+      }
+      if(resp.status===422&&data){
+        var msg='We had trouble reading this statement.';
+        if(data.reason==='corrupted_pdf')msg='We couldn\'t read this PDF. Try downloading it fresh from your bank\'s app.';
+        else if(data.reason==='not_a_statement')msg='This doesn\'t look like a bank or credit card statement. We see no transactions.';
+        else if(data.reason==='unable_to_extract_text')msg='We had trouble reading this statement. It might be scanned (image-based). Try downloading the digital version from your bank\'s app.';
+        else if(data.reason==='already_processed')msg='This statement was already imported. Pick a different one.';
+        setError({reason:data.reason||'unknown',message:msg});
+        setStage('error');
+        return;
+      }
+      // 500 / unexpected
+      await markRowFailed(importId,'edge_failed: '+(data&&data.detail||resp.status));
+      setError({reason:'server',message:'Something went wrong on our side. Try again in a moment.'});
+      setStage('error');
+    }catch(e){
+      console.log('[STATEMENT PARSE ERROR]',e);
+      try{if(importId)await markRowFailed(importId,'exception: '+(e&&e.message||'unknown'));}catch(_){}
+      setError({reason:'server',message:'Something went wrong on our side. Try again in a moment.'});
+      setStage('error');
+    }
+  }
+
+  async function markRowFailed(id,reason){
+    try{
+      await supabase.from('statement_imports').update({status:'failed',failure_reason:String(reason).slice(0,500)}).eq('id',id);
+    }catch(e){console.log('[STATEMENT MARK FAILED ERROR]',e);}
+  }
+
+  function tryAnotherStatement(){
+    setStage('intro');
+    setPickedFile(null);
+    setPdfPassword('');
+    setPasswordAttempts(0);
+    setStatementImportId(null); // a fresh statement gets its own row
+    setParseSummary(null);
+    setError(null);
+  }
+
+  function titleForStage(){
+    if(stage==='password')return 'Statement is password-protected';
+    if(stage==='parsing')return 'Reading your statement';
+    if(stage==='success')return 'Statement read';
+    if(stage==='error')return 'We hit a snag';
+    return 'Catch up your last statement';
+  }
+
+  return <ModalSheet visible={visible} title={titleForStage()} onClose={stage==='parsing'?function(){}:onClose} scroll={stage!=='parsing'}>
+    {stage==='intro'?<View>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,lineHeight:20,marginBottom:16}}>Upload your bank or credit card PDF — we'll read it for you. Takes ~30 seconds.</Text>
+      <View style={{marginBottom:18}}>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginBottom:8,lineHeight:19}}>• We use it once and delete it within 24 hours.</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginBottom:8,lineHeight:19}}>• We'll show you everything we found — you confirm what's real.</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,lineHeight:19}}>• Works with most Indian banks and credit cards.</Text>
+      </View>
+      <View style={{marginBottom:10}}><PrimaryButton full onPress={pickPDF}>Pick PDF</PrimaryButton></View>
+      <SecondaryButton full onPress={onClose}>Cancel</SecondaryButton>
+    </View>:null}
+
+    {stage==='password'?<View>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,lineHeight:20,marginBottom:14}}>Most Indian banks lock their PDFs. Enter the password — we use it once and forget it.</Text>
+      <TextInput
+        value={pdfPassword} onChangeText={setPdfPassword}
+        placeholder="PDF password" placeholderTextColor={theme.muted}
+        secureTextEntry={true}
+        autoCapitalize="none" autoCorrect={false}
+        style={{
+          fontFamily:FF.sans,fontSize:15,color:theme.text,
+          backgroundColor:theme.surface,
+          borderWidth:1,borderColor:theme.border,
+          borderRadius:12,paddingHorizontal:14,paddingVertical:12,
+          marginBottom:8,
+        }}
+      />
+      <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,lineHeight:17,marginBottom:6}}>Often your DOB in DDMMYYYY format, or PAN digits. Check your bank's email for the exact format.</Text>
+      {passwordAttempts>0?<Text style={{fontFamily:FF.sans,fontSize:12,color:theme.danger,marginBottom:6}}>That password didn't work.</Text>:null}
+      <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted,marginBottom:14}}>{Math.max(0,4-passwordAttempts)} attempt{Math.max(0,4-passwordAttempts)===1?'':'s'} left.</Text>
+      <View style={{marginBottom:10}}><PrimaryButton full disabled={pdfPassword.trim().length<3} onPress={function(){if(pickedFile)runParse(pickedFile,pdfPassword.trim());}}>Unlock and parse</PrimaryButton></View>
+      <SecondaryButton full onPress={onClose}>Cancel</SecondaryButton>
+    </View>:null}
+
+    {stage==='parsing'?<View style={{paddingVertical:32,alignItems:'center'}}>
+      <ActivityIndicator size="large" color={theme.primary}/>
+      <Text style={{fontFamily:fontW(500),fontSize:15,color:theme.text,marginTop:18,textAlign:'center'}}>{STATEMENT_PARSE_PHRASES[phraseIdx]}</Text>
+      <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.muted,marginTop:8,textAlign:'center'}}>This usually takes 20–40 seconds.</Text>
+    </View>:null}
+
+    {stage==='success'&&parseSummary?<View>
+      <View style={{alignItems:'center',marginBottom:20,marginTop:6}}>
+        <View style={{width:64,height:64,borderRadius:32,backgroundColor:theme.primaryLight,alignItems:'center',justifyContent:'center',marginBottom:12}}>
+          <Text style={{fontSize:32,color:theme.primary}}>✓</Text>
+        </View>
+        <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:22,color:theme.text,textAlign:'center'}}>Found {parseSummary.transaction_count||0} transaction{(parseSummary.transaction_count||0)===1?'':'s'}</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,textAlign:'center',marginTop:6}}>{parseSummary.bank_name||'Your statement'}{parseSummary.period_start&&parseSummary.period_end?', '+parseSummary.period_start+' to '+parseSummary.period_end:''}</Text>
+      </View>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,lineHeight:20,marginBottom:18,textAlign:'center'}}>Take a moment to look through them — you control what gets added.</Text>
+      <View style={{marginBottom:10}}><PrimaryButton full onPress={function(){onOpenReview&&onOpenReview(statementImportId);}}>Review them now</PrimaryButton></View>
+      <SecondaryButton full onPress={onClose}>I'll do this later</SecondaryButton>
+    </View>:null}
+
+    {stage==='error'&&error?<View>
+      <View style={{alignItems:'center',marginBottom:18,marginTop:4}}>
+        <View style={{width:56,height:56,borderRadius:28,backgroundColor:theme.accentLight,alignItems:'center',justifyContent:'center',marginBottom:12}}>
+          <Text style={{fontSize:28,color:theme.accent}}>!</Text>
+        </View>
+        <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:18,color:theme.text,textAlign:'center'}}>{error.message}</Text>
+      </View>
+      <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,lineHeight:19,marginBottom:18,textAlign:'center'}}>Your statement has been deleted. Nothing was saved.</Text>
+      <View style={{marginBottom:10}}><PrimaryButton full onPress={tryAnotherStatement}>Try another statement</PrimaryButton></View>
+      <SecondaryButton full onPress={onClose}>Close</SecondaryButton>
+    </View>:null}
+  </ModalSheet>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StatementReviewModal — confidence-grouped review screen
+// Loads statement_transactions for a given statement_import_id, groups by category,
+// and lets the user collapse/expand, repick categories, discard rows, and finalize.
+// One activity feed entry per import (NOT per row — would flood the feed).
+// ─────────────────────────────────────────────────────────────────────────────
+function StatementReviewModal({visible,statementImportId,onClose,onImported}){
+  var theme=useThemeColors();
+  var{familyId,userId,members,refreshTransactions,logActivity,currentUserName}=useApp();
+  var[loading,setLoading]=useState(true);
+  var[importRow,setImportRow]=useState(null);
+  var[stagedTxs,setStagedTxs]=useState([]);
+  var[actions,setActions]=useState({}); // {[id]: {action:'pending'|'confirmed'|'discarded', category_confirmed}}
+  var[expandedCats,setExpandedCats]=useState({}); // {[category]: true}
+  var[pickerForId,setPickerForId]=useState(null); // tx id whose category picker is open
+  var[submitting,setSubmitting]=useState(false);
+  var[toast,setToast]=useState('');
+
+  // Load on open.
+  useEffect(function(){
+    if(!visible||!statementImportId){setLoading(true);setImportRow(null);setStagedTxs([]);setActions({});setExpandedCats({});return;}
+    (async function(){
+      setLoading(true);
+      try{
+        var imp=await supabase.from('statement_imports').select('id, document_type, bank_name, account_last4, period_start, period_end, total_credits, total_debits, parsed_transaction_count').eq('id',statementImportId).maybeSingle();
+        if(imp.error)throw imp.error;
+        setImportRow(imp.data||null);
+        var st=await supabase.from('statement_transactions').select('id, raw_narration, parsed_date, amount, transaction_type, merchant_normalized, category_suggested, confidence_score').eq('statement_import_id',statementImportId).eq('user_action','pending').order('parsed_date',{ascending:true});
+        if(st.error)throw st.error;
+        var rows=st.data||[];
+        setStagedTxs(rows);
+        // Initial actions: every row pending, category_confirmed=category_suggested.
+        var seed={};
+        rows.forEach(function(r){
+          seed[r.id]={action:'pending',category_confirmed:r.category_suggested||'Daily Essentials'};
+        });
+        setActions(seed);
+        // Compute initial expanded state per category: Income always expanded, plus
+        // any category that has a non-high-confidence row.
+        var byCat={};
+        rows.forEach(function(r){
+          var c=r.category_suggested||'Daily Essentials';
+          if(!byCat[c])byCat[c]={count:0,minConf:1};
+          byCat[c].count++;
+          var cs=Number(r.confidence_score||0);
+          if(cs<byCat[c].minConf)byCat[c].minConf=cs;
+        });
+        var initExp={};
+        Object.keys(byCat).forEach(function(c){
+          if(c==='Income')initExp[c]=true;
+          else if(byCat[c].minConf<0.85)initExp[c]=true;
+        });
+        setExpandedCats(initExp);
+      }catch(e){
+        console.log('[STATEMENT REVIEW LOAD ERROR]',e);
+        showFriendlyError('Could not load review',e);
+      }finally{setLoading(false);}
+    })();
+  },[visible,statementImportId]);
+
+  // Android back closes the modal (not a confirm dialog — see Edge Case #6: abandoning
+  // mid-review just discards local picks, nothing to "save").
+  useEffect(function(){
+    if(!visible)return;
+    var sub=BackHandler.addEventListener('hardwareBackPress',function(){onClose();return true;});
+    return function(){sub.remove();};
+  },[visible,onClose]);
+
+  // ── Action helpers ───────────────────────────────────────────────────────────
+  function setRowAction(id,patch){
+    setActions(function(prev){return Object.assign({},prev,{[id]:Object.assign({},prev[id]||{action:'pending',category_confirmed:'Daily Essentials'},patch)});});
+  }
+  function confirmAllInCategory(cat){
+    setActions(function(prev){
+      var next=Object.assign({},prev);
+      stagedTxs.forEach(function(r){
+        if((r.category_suggested||'Daily Essentials')===cat){
+          var was=next[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Daily Essentials'};
+          // Don't override discarded rows — user explicitly skipped.
+          if(was.action!=='discarded'){
+            next[r.id]={action:'confirmed',category_confirmed:r.category_suggested||'Daily Essentials'};
+          }
+        }
+      });
+      return next;
+    });
+  }
+  function toggleDiscard(id){
+    var was=actions[id];
+    if(was&&was.action==='discarded'){
+      // un-discard: revert to pending with original suggestion
+      var orig=stagedTxs.find(function(r){return r.id===id;});
+      setRowAction(id,{action:'pending',category_confirmed:(orig&&orig.category_suggested)||'Daily Essentials'});
+    } else {
+      setRowAction(id,{action:'discarded'});
+    }
+    haptic('medium');
+  }
+  function pickCategory(id,category){
+    setRowAction(id,{action:'confirmed',category_confirmed:category});
+    setPickerForId(null);
+    haptic('light');
+  }
+
+  // Group + sort for render. Income first, then expense categories by total amount desc.
+  var grouped=(function(){
+    var byCat={};
+    stagedTxs.forEach(function(r){
+      var c=r.category_suggested||'Daily Essentials';
+      if(!byCat[c])byCat[c]={category:c,rows:[],total:0,minConf:1,sumConf:0};
+      byCat[c].rows.push(r);
+      byCat[c].total+=Number(r.amount||0);
+      var cs=Number(r.confidence_score||0);
+      if(cs<byCat[c].minConf)byCat[c].minConf=cs;
+      byCat[c].sumConf+=cs;
+    });
+    var arr=Object.keys(byCat).map(function(k){var g=byCat[k];g.avgConf=g.sumConf/Math.max(g.rows.length,1);return g;});
+    arr.sort(function(a,b){
+      if(a.category==='Income'&&b.category!=='Income')return -1;
+      if(b.category==='Income'&&a.category!=='Income')return 1;
+      return b.total-a.total;
+    });
+    return arr;
+  })();
+
+  var confirmedCount=Object.keys(actions).reduce(function(n,id){return actions[id].action==='confirmed'?n+1:n;},0);
+  var discardedCount=Object.keys(actions).reduce(function(n,id){return actions[id].action==='discarded'?n+1:n;},0);
+  var pendingCount=stagedTxs.length-confirmedCount-discardedCount;
+  var doneEnabled=(confirmedCount+discardedCount)>=1&&!submitting;
+
+  async function onDone(){
+    if(!doneEnabled)return;
+    var meMember=(members||[]).find(function(m){return m.userId===userId;});
+    if(!meMember){
+      Alert.alert('Cannot finalize','Could not find your member record. Try reopening the app.');
+      return;
+    }
+    setSubmitting(true);
+    try{
+      var confirmedPayload=[];
+      var discardedIds=[];
+      stagedTxs.forEach(function(r){
+        var a=actions[r.id]||{action:'pending'};
+        if(a.action==='confirmed'){
+          confirmedPayload.push({statement_transaction_id:r.id,category_confirmed:a.category_confirmed});
+        } else {
+          // Pending and discarded both go in discarded — implicit-skip UX.
+          discardedIds.push(r.id);
+        }
+      });
+      var resp=await fetch(EDGE_FINALIZE_STATEMENT,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY},
+        body:JSON.stringify({
+          statement_import_id:statementImportId,
+          user_id:userId,
+          family_id:familyId,
+          member_id:meMember.id,
+          confirmed_transactions:confirmedPayload,
+          discarded_transaction_ids:discardedIds,
+        }),
+      });
+      var data=await resp.json().catch(function(){return null;});
+      if(!resp.ok||!data||!data.success){
+        haptic('error');
+        showFriendlyError('Could not import',new Error((data&&data.detail)||('status '+resp.status)));
+        setSubmitting(false);
+        return;
+      }
+      haptic('success');
+      // One activity feed entry for the whole import.
+      if(logActivity){
+        try{
+          await logActivity('statement_import',{
+            user_name:currentUserName||'Someone',
+            bank_name:(importRow&&importRow.bank_name)||'',
+            imported_count:Number(data.imported_count||0),
+          },statementImportId,familyId);
+        }catch(e){console.log('[STATEMENT ACTIVITY LOG ERROR]',e);}
+      }
+      try{await refreshTransactions();}catch(e){}
+      // Toast (3s) — the success feedback. No alert.
+      var override=Number(data.merchant_category_overrides_saved||0);
+      var msg='Imported '+Number(data.imported_count||0)+' transaction'+(Number(data.imported_count||0)===1?'':'s')+'.';
+      if(override>0)msg+=" We'll remember your category picks for next time.";
+      setToast(msg);
+      setTimeout(function(){
+        setToast('');
+        setSubmitting(false);
+        onImported&&onImported({imported_count:data.imported_count});
+        onClose();
+      },1800);
+    }catch(e){
+      console.log('[STATEMENT FINALIZE ERROR]',e);
+      haptic('error');
+      showFriendlyError('Could not import',e);
+      setSubmitting(false);
+    }
+  }
+
+  if(!visible)return null;
+  return <Modal visible={!!visible} transparent animationType="slide" onRequestClose={onClose}>
+    <View style={{flex:1,backgroundColor:theme.bg}}>
+      {/* Sticky header */}
+      <View style={{paddingTop:Platform.OS==='ios'?52:24,paddingBottom:12,paddingHorizontal:16,backgroundColor:theme.bg,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <TouchableOpacity onPress={onClose} disabled={submitting}><Text style={{fontFamily:fontW(500),fontSize:16,color:theme.primary}}>Cancel</Text></TouchableOpacity>
+          <View style={{flex:1,alignItems:'center'}}>
+            <Text numberOfLines={1} style={{fontFamily:fontW(600),fontWeight:'600',fontSize:15,color:theme.text}}>
+              {stagedTxs.length} transaction{stagedTxs.length===1?'':'s'}{importRow&&importRow.period_start&&importRow.period_end?', '+shortDate(importRow.period_start)+' – '+shortDate(importRow.period_end):''}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={onDone} disabled={!doneEnabled} style={{opacity:doneEnabled?1:0.4}}><Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:16,color:theme.primary}}>{submitting?'…':'Done'}</Text></TouchableOpacity>
+        </View>
+        {importRow?<Text numberOfLines={1} style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,textAlign:'center'}}>{(importRow.bank_name||'Statement')+' · '+(importRow.document_type==='credit_card'?'Credit card':'Bank account')+' · ending in '+(importRow.account_last4||'—')}</Text>:null}
+        <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted,textAlign:'center',marginTop:4}}>{confirmedCount} to import · {pendingCount+discardedCount} skipped</Text>
+      </View>
+
+      {/* Instructions */}
+      <View style={{paddingHorizontal:16,paddingVertical:10,backgroundColor:theme.surfaceElevated}}>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,lineHeight:17}}>Tap any group to look at the transactions inside. Tap any transaction to change its category. Long-press to discard.</Text>
+      </View>
+
+      {/* Body */}
+      {loading?<View style={{padding:32,alignItems:'center'}}>
+        <ActivityIndicator size="large" color={theme.primary}/>
+        <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginTop:14}}>Loading transactions…</Text>
+      </View>:<ScrollView style={{flex:1}} contentContainerStyle={{padding:16,paddingBottom:32}}>
+        {grouped.length===0?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,textAlign:'center',marginTop:32}}>No pending transactions in this import.</Text>:null}
+        {grouped.map(function(g){
+          var allHigh=g.minConf>=0.85;
+          var isExpanded=!!expandedCats[g.category]||g.category==='Income';
+          return <View key={'cat_'+g.category} style={{marginBottom:12}}>
+            {/* Group header card */}
+            <TouchableOpacity activeOpacity={0.85} onPress={function(){
+              haptic('light');
+              if(!isExpanded){
+                // Tapping a collapsed group: expand AND mark all rows in it confirmed.
+                setExpandedCats(function(prev){return Object.assign({},prev,{[g.category]:true});});
+                if(allHigh)confirmAllInCategory(g.category);
+              } else {
+                setExpandedCats(function(prev){var next=Object.assign({},prev);delete next[g.category];return next;});
+              }
+            }} style={{
+              backgroundColor:theme.surface,borderWidth:1,borderColor:theme.border,
+              borderRadius:14,padding:14,
+            }}>
+              <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+                <View style={{flexDirection:'row',alignItems:'center',gap:10,flex:1}}>
+                  <View style={{width:10,height:10,borderRadius:5,backgroundColor:(CAT_COLORS[g.category]||theme.primary)}}/>
+                  <View style={{flex:1}}>
+                    <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:16,color:theme.text}}>{g.category}</Text>
+                    <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:2}}>{g.rows.length} transaction{g.rows.length===1?'':'s'} · ₹{fmt(Math.round(g.total))}</Text>
+                  </View>
+                </View>
+                <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.primary}}>{isExpanded?'Hide':'Tap to review'}</Text>
+              </View>
+              {/* Confidence bar — only shown for collapsed all-high groups (not Income, which is always expanded) */}
+              {!isExpanded&&allHigh?<View style={{marginTop:10}}>
+                <View style={{height:4,borderRadius:2,backgroundColor:theme.surfaceElevated,overflow:'hidden'}}>
+                  <View style={{width:Math.round(g.avgConf*100)+'%',height:'100%',backgroundColor:theme.primary}}/>
+                </View>
+                <Text style={{fontFamily:FF.sans,fontSize:9,color:theme.muted,marginTop:4,letterSpacing:0.4,textTransform:'uppercase'}}>Group looks accurate</Text>
+              </View>:null}
+            </TouchableOpacity>
+
+            {/* Expanded rows */}
+            {isExpanded?g.rows.map(function(r){
+              var a=actions[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Daily Essentials'};
+              var cs=Number(r.confidence_score||0);
+              var dotColor=cs>=0.85?theme.primary:(cs>=0.65?theme.accent:theme.danger);
+              var isDiscarded=a.action==='discarded';
+              return <Pressable
+                key={r.id}
+                onPress={function(){if(!isDiscarded){setPickerForId(r.id);}else{toggleDiscard(r.id);}}}
+                onLongPress={function(){toggleDiscard(r.id);}}
+                delayLongPress={350}
+                style={{
+                  flexDirection:'row',alignItems:'center',gap:10,
+                  paddingVertical:12,paddingHorizontal:6,
+                  borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border,
+                  opacity:isDiscarded?0.45:1,
+                }}
+              >
+                <View style={{width:10,height:10,borderRadius:5,backgroundColor:dotColor}}/>
+                <View style={{flex:1,minWidth:0}}>
+                  <Text numberOfLines={1} style={{fontFamily:fontW(500),fontSize:15,color:theme.text,textDecorationLine:isDiscarded?'line-through':'none'}}>{(r.merchant_normalized||(r.raw_narration||'').slice(0,30)||'(unknown)')}</Text>
+                  <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:2}}>{r.parsed_date?shortDate(r.parsed_date):'—'} · ₹{fmt(Number(r.amount||0))}{r.transaction_type==='credit'?' · credit':''}</Text>
+                </View>
+                <View style={{
+                  paddingHorizontal:10,paddingVertical:6,borderRadius:9999,
+                  backgroundColor:a.action==='confirmed'?theme.primaryLight:theme.surfaceElevated,
+                  borderWidth:0,
+                }}>
+                  <Text style={{fontFamily:fontW(500),fontSize:12,color:a.action==='confirmed'?theme.primary:theme.textSecondary}}>{a.category_confirmed}</Text>
+                </View>
+              </Pressable>;
+            }):null}
+          </View>;
+        })}
+      </ScrollView>}
+
+      {/* Category picker — small modal popping over the review */}
+      <Modal visible={!!pickerForId} transparent animationType="fade" onRequestClose={function(){setPickerForId(null);}}>
+        <Pressable onPress={function(){setPickerForId(null);}} style={{flex:1,backgroundColor:'rgba(0,0,0,0.5)',justifyContent:'flex-end'}}>
+          <Pressable onPress={function(e){e.stopPropagation&&e.stopPropagation();}} style={{
+            backgroundColor:theme.bg,borderTopLeftRadius:24,borderTopRightRadius:24,
+            paddingTop:18,paddingHorizontal:20,paddingBottom:24,
+          }}>
+            <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:16,color:theme.text,marginBottom:14}}>Pick a category</Text>
+            {STATEMENT_CATEGORY_OPTIONS.map(function(c){
+              var sel=pickerForId&&actions[pickerForId]&&actions[pickerForId].category_confirmed===c;
+              return <TouchableOpacity key={'pick_'+c} onPress={function(){pickCategory(pickerForId,c);}} style={{
+                flexDirection:'row',alignItems:'center',justifyContent:'space-between',
+                paddingVertical:12,paddingHorizontal:14,marginBottom:8,
+                borderRadius:12,
+                backgroundColor:sel?theme.primaryLight:theme.surface,
+                borderWidth:1,borderColor:sel?theme.primary:theme.border,
+              }}>
+                <View style={{flexDirection:'row',alignItems:'center',gap:10}}>
+                  <View style={{width:10,height:10,borderRadius:5,backgroundColor:CAT_COLORS[c]||theme.muted}}/>
+                  <Text style={{fontFamily:fontW(500),fontSize:14,color:sel?theme.primary:theme.text}}>{c}</Text>
+                </View>
+                {sel?<Text style={{fontSize:14,color:theme.primary}}>✓</Text>:null}
+              </TouchableOpacity>;
+            })}
+            <View style={{marginTop:6}}><SecondaryButton full onPress={function(){setPickerForId(null);}}>Cancel</SecondaryButton></View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Toast */}
+      {toast?<View style={{position:'absolute',left:16,right:16,bottom:24,padding:14,borderRadius:14,backgroundColor:theme.primary}}>
+        <Text style={{fontFamily:fontW(500),fontSize:14,color:'#fff',lineHeight:19}}>{toast}</Text>
+      </View>:null}
+    </View>
+  </Modal>;
+}
+
+// Small date helper used by review modal — '5 Apr' style.
+function shortDate(d){
+  try{
+    var dt=toDate(d);
+    return dt.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+  }catch(e){return String(d||'');}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StatementUploadOnboardingPrompt — Step 5 in the primary-user onboarding flow.
+// Shown after FamilySetupScreen completes, before main_app. Member-tier users skip
+// this entirely (they're joining an existing family — don't pile on more steps).
+// ─────────────────────────────────────────────────────────────────────────────
+function StatementUploadOnboardingPrompt({onUpload,onSkip}){
+  var ins=useSafeAreaInsets();
+  var theme=useThemeColors();
+  return <View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
+    <ScrollView contentContainerStyle={{padding:24,paddingTop:48}}>
+      <Caps color={theme.muted} style={{marginBottom:8}}>Step 5 of 5</Caps>
+      <Text style={{fontFamily:FF.serif,fontSize:32,letterSpacing:-1,color:theme.text,lineHeight:36,marginBottom:6}}>One more thing before we start</Text>
+      <Text style={{fontFamily:FF.sans,fontSize:15,color:theme.textSecondary,lineHeight:22,marginBottom:18}}>Want to skip a month of typing?</Text>
+      <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,lineHeight:21,marginBottom:24}}>Most things you spend on already live in your bank or credit card statement. Upload a recent one and we'll fill in your last month — so the app reflects your real life from day one. (Optional. You can always do this later.)</Text>
+      <View style={{marginBottom:12}}><PrimaryButton full onPress={onUpload}>Yes, upload a statement</PrimaryButton></View>
+      <SecondaryButton full onPress={onSkip}>Skip for now</SecondaryButton>
+      <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted,marginTop:16,lineHeight:16,textAlign:'center'}}>We use your statement once and delete it within 24 hours.</Text>
+    </ScrollView>
+  </View>;
+}
+
+// StatementUploadOnboardingHost — wraps the onboarding prompt + the upload modal so
+// "Yes, upload a statement" can open the modal in-place without leaving the onboarding
+// screen. Closing the modal (success OR cancel) advances to main_app — review of any
+// imported statement is resumable from the Finance tab via the persistent banner.
+//
+// WHY THIS HOST EXISTS (do not "clean up" by inlining into the screen branch or merging
+// with StatementUploadOnboardingPrompt):
+// AppContext.Provider only wraps the main_app branch in AppInner; pre-main screens
+// (login, questionnaire, family_setup, this one) all take their data via props. But
+// StatementUploadModal calls useApp() internally for familyId/userId/currentUserName,
+// so the onboarding branch mounts a minimal 3-field AppContext.Provider just for this
+// host to read from. The host owns the showUpload toggle so the prompt component stays
+// stateless and reusable. If you refactor the modal to take props, this host can fold
+// back into the screen branch — until then, the duplication is intentional.
+function StatementUploadOnboardingHost({onDone}){
+  var[showUpload,setShowUpload]=useState(false);
+  return <>
+    <StatementUploadOnboardingPrompt
+      onUpload={function(){setShowUpload(true);}}
+      onSkip={onDone}
+    />
+    <StatementUploadModal
+      visible={showUpload}
+      onClose={function(){setShowUpload(false);onDone();}}
+      onOpenReview={function(){setShowUpload(false);onDone();}}
+    />
+  </>;
+}
+
+// ── PHASE 6: Vessel-based meal logging.
+// Two-stage compose/review modal. Compose accepts free-text + meal time + (optional) member +
+// photo + quick-pick chips. Tapping Continue calls parse-meal-log v7, which returns curated
+// nutrition data per dish from food_vessels (or AI-estimated for unknowns). Review lets the
+// user adjust quantity / unit per dish, toggle home-vs-restaurant cooking style, and save.
+// On save: insert into meals (existing column shape + new vessel columns) → fire-and-forget
+// update-portion-memory to remember this user's choices for next time.
+//
+// Photo is decoupled from nutrition (memory only). Old free-text edits fall back to compose
+// stage with the original `items` text pre-populated since legacy meals have no dish_breakdown.
+//
+// VESSEL_GRAMS is the unit-to-grams map for when the user changes the unit away from the
+// dish's default_vessel. For 'piece', dish-default vessel_grams wins; otherwise 30g fallback.
+var VESSEL_GRAMS={katori:150,plate:300,glass:200,spoon:15};
+var QUICK_QTY_OPTIONS=[0.5,1,1.5,2,3];
+var ALLOWED_VESSELS=['katori','plate','piece','glass','spoon'];
+
+function gramsForDish(dish,unit){
+  if(unit===dish.default_vessel)return Number(dish.vessel_grams||0);
+  if(unit==='piece')return dish.default_vessel==='piece'?Number(dish.vessel_grams||30):30;
+  return VESSEL_GRAMS[unit]||Number(dish.vessel_grams||0);
+}
+
+// Compute per-dish macros given quantity + unit + cooking style. Returns rounded numbers.
+function computeDishMacros(dish,state,cookingStyle){
+  var unit=state.unit||dish.default_vessel;
+  var qty=Number(state.quantity||0);
+  var grams=gramsForDish(dish,unit)*qty;
+  var protein=grams*Number(dish.protein_per_gram||0);
+  var carbs=grams*Number(dish.carbs_per_gram||0);
+  var fatBaseline=grams*Number(dish.fat_per_gram||0);
+  var fat=cookingStyle==='restaurant'?fatBaseline*Number(dish.restaurant_fat_multiplier||1.30):fatBaseline;
+  var calories=grams*Number(dish.calories_per_gram||0);
+  if(cookingStyle==='restaurant'){
+    // Restaurant fat lift adds ~9 kcal per gram of extra fat (Atwater).
+    calories+=fatBaseline*(Number(dish.restaurant_fat_multiplier||1.30)-1)*9;
+  }
+  return{
+    grams:Math.round(grams),
+    protein:Math.round(protein*10)/10,
+    carbs:Math.round(carbs*10)/10,
+    fat:Math.round(fat*10)/10,
+    calories:Math.round(calories),
+  };
+}
+
 function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
   var theme=useThemeColors();
   var{familyId,members,userId,isAdmin,refreshMeals,upsertMealLocal,logActivity,currentUserName}=useApp();
-  var[mt,setMt]=useState('lunch');
-  var[items,setItems]=useState('');
-  var[mid,setMid]=useState('');
-  var[loading,setLoading]=useState(false);
-  var[result,setResult]=useState(null);
-  var[selectedDate,setSelectedDate]=useState(new Date());
+  // ── Stage machine: 'compose' (typing) → 'review' (per-dish quantity/unit) → 'saving' ──
+  var[mealStage,setMealStage]=useState('compose');
+  var[mealTime,setMealTime]=useState(initialMealType||'lunch');
+  var[itemsText,setItemsText]=useState('');
+  var[mid,setMid]=useState(''); // member picker (preserved for co-admin/admin logging on behalf)
+  var[selectedDate,setSelectedDate]=useState(initialDate?toDate(initialDate):new Date());
+  var[parsedDishes,setParsedDishes]=useState([]);
+  var[perDishState,setPerDishState]=useState({});
+  var[cookingStyle,setCookingStyle]=useState('home'); // meal-level — applies to all dishes
   var[photoUri,setPhotoUri]=useState('');
-  // PHASE 6: protein guide modal state
-  var[showProteinGuide,setShowProteinGuide]=useState(false);
-  var[guideSearch,setGuideSearch]=useState('');
-  var[foodsList,setFoodsList]=useState(null); // null while loading; array when loaded
+  var[topDishes,setTopDishes]=useState([]);
+  var[parsing,setParsing]=useState(false);
+  var[parseError,setParseError]=useState('');
+  var[unitPickerFor,setUnitPickerFor]=useState(null); // dish_normalized whose unit dropdown is open
   var mealTypes=LIMITS.meal.allowedTypes;
-
-  // PHASE 6: lazy-load foods list from DB when guide opens, fall back to inline list
+  // ── Effects ────────────────────────────────────────────────────────────────
   useEffect(function(){
-    if(showProteinGuide&&foodsList==null){
-      (async function(){
-        try{
-          var r=await supabase.from('foods').select('name,protein_g,category').gt('protein_g',0).order('protein_g',{ascending:false}).limit(200);
-          if(r&&r.data&&r.data.length>0){
-            setFoodsList(r.data.map(function(f){return{name:f.name,protein:Number(f.protein_g||0),category:f.category||'Other'};}));
-          } else {
-            setFoodsList(PROTEIN_GUIDE_FALLBACK);
-          }
-        } catch(e){
-          setFoodsList(PROTEIN_GUIDE_FALLBACK);
-        }
-      })();
+    if(!visible)return;
+    // Compute a sensible default meal time by hour-of-day if no explicit initial type was passed.
+    function defaultByHour(){var h=new Date().getHours();if(h<11)return'breakfast';if(h<16)return'lunch';if(h<19)return'snack';return'dinner';}
+    if(editMeal){
+      setMealTime((editMeal.mealTime||'lunch').toLowerCase());
+      setSelectedDate(toDate(editMeal.date));
+      setMid(editMeal.memberId||'');
+      setPhotoUri(editMeal.photo_url||editMeal.photo_path||'');
+      // Edit-mode UX: pre-fill the original items text and stay in compose. The user taps
+      // Continue to re-parse via the vessel pipeline. Legacy meals have no dish_breakdown,
+      // and even meals that DO have one still need fresh per-gram macros from food_vessels
+      // for the review-stage math, so re-parsing is the simplest correct path.
+      setItemsText(editMeal.items||'');
+    } else {
+      setMealTime(initialMealType||defaultByHour());
+      setSelectedDate(initialDate?toDate(initialDate):new Date());
+      setMid('');
+      setPhotoUri('');
+      setItemsText('');
     }
-  },[showProteinGuide]);
-
-  // B2: Pre-populate fields when editing an existing meal
-  useEffect(function(){
-    if(visible){
-      if(editMeal){
-        setMt((editMeal.mealTime||'lunch').toLowerCase());
-        setItems(editMeal.items||'');
-        setMid(editMeal.memberId||'');
-        setSelectedDate(toDate(editMeal.date));
-        setResult(null);
-        setPhotoUri(editMeal.photo_url||editMeal.photo_path||'');
-      } else {
-        setMt(initialMealType||'lunch');setItems('');setMid('');setSelectedDate(initialDate?toDate(initialDate):new Date());setResult(null);setPhotoUri('');
-      }
-    }
+    setMealStage('compose');
+    setParsedDishes([]);
+    setPerDishState({});
+    setCookingStyle('home');
+    setParseError('');
+    setUnitPickerFor(null);
   },[visible,editMeal,initialMealType,initialDate]);
+
+  // Load top-dish chips on open (silent on error — chips just don't show).
+  useEffect(function(){
+    if(!visible||!userId)return;
+    (async function(){
+      try{
+        var r=await supabase.rpc('get_user_top_dishes',{p_user_id:userId,p_limit:4});
+        if(r&&!r.error&&Array.isArray(r.data))setTopDishes(r.data);
+        else setTopDishes([]);
+      }catch(e){setTopDishes([]);}
+    })();
+  },[visible,userId]);
 
   useEffect(function(){
     (async function(){
@@ -3327,8 +4341,16 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
     })();
   },[]);
 
+  // Android hardware back: act like Cancel based on stage.
+  useEffect(function(){
+    if(!visible)return;
+    var sub=BackHandler.addEventListener('hardwareBackPress',function(){handleCancel();return true;});
+    return function(){sub.remove();};
+  },[visible,mealStage]);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
   async function pickImage(){
-    Alert.alert('Add Photo','Choose source',[
+    Alert.alert('Add photo','Choose source',[
       {text:'Take Photo',onPress:async function(){
         try{
           var cam=await ImagePicker.requestCameraPermissionsAsync();
@@ -3349,292 +4371,419 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
     ]);
   }
 
-  async function calculateMealNutrients(rawInput,memberId){
-    var normalized=normalizeText(rawInput).toLowerCase();
-    var cacheKey='meal_nutrients_v1_'+normalized;
+  // Parse free-text via the vessel pipeline edge function and advance to review.
+  // Caller passes the text directly so we don't depend on state-batching from quick-chip taps.
+  async function parseAndAdvance(text){
+    var clean=normalizeText(text);
+    if(!clean){Alert.alert('Validation error','Please describe what you ate.');return;}
+    if(clean.length>LIMITS.meal.descMax){Alert.alert('Validation error','Meal description must be '+LIMITS.meal.descMax+' characters or less.');return;}
+    setParsing(true);setParseError('');
     try{
-      var cachedRaw=await AsyncStorage.getItem(cacheKey);
-      if(cachedRaw){
-        var cachedObj=JSON.parse(cachedRaw);
-        if(cachedObj&&typeof cachedObj.protein==='number')return cachedObj;
+      var resp=await fetch(EDGE_MEAL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY},body:JSON.stringify({items_text:clean,user_id:userId})});
+      var data=await resp.json().catch(function(){return null;});
+      if(resp.status===422){
+        setParseError("We couldn't understand that. Try simpler descriptions, like '2 rotis, dal, sabzi'.");
+        return;
       }
-    }catch(e){console.log('[MEAL NUTRIENT CACHE READ ERROR]',e);}
-
-    var mN=members.find(function(m){return m.id===memberId;})||members[0];
-
-    // PHASE 6: try the edge function first; if it's not deployed (404),
-    // fall back to a foods-table lookup so meals still save.
-    var totals=null;
-    try{
-      var resp=await fetch(EDGE_MEAL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY},body:JSON.stringify({user_id:userId,member_id:memberId||(mN&&mN.id)||null,member_name:mN?mN.name:'',meal_type:mt,raw_input:rawInput})});
-      var parsed=await resp.json();
-      console.log('[MEAL EDGE FN]',parsed);
-      if(resp.ok&&parsed&&parsed.success){
-        totals={
-          protein:Number(parsed.totals&&parsed.totals.protein||0),
-          carbs:Number(parsed.totals&&parsed.totals.carbs||0),
-          calories:Number(parsed.totals&&parsed.totals.calories||0),
-          fat:Number(parsed.totals&&parsed.totals.fat||parsed.totals&&parsed.totals.fats||0),
-          cacheKey:cacheKey,
+      if(!resp.ok||!data||!Array.isArray(data.dishes)||data.dishes.length===0){
+        showFriendlyError('Could not parse meal',new Error((data&&data.detail)||'parse error'));
+        return;
+      }
+      // Seed perDishState from the response. user_default_* fields drive defaults when present.
+      var seed={};
+      data.dishes.forEach(function(d){
+        seed[d.dish_normalized]={
+          quantity:d.user_default_quantity!=null?Number(d.user_default_quantity):1,
+          unit:d.user_default_unit||d.default_vessel,
+          isUserDefault:d.user_default_quantity!=null,
         };
-      } else {
-        console.log('[MEAL EDGE FN UNAVAILABLE — falling back to foods table]',parsed&&parsed.message);
-      }
-    }catch(edgeErr){
-      console.log('[MEAL EDGE FN ERROR — falling back to foods table]',edgeErr);
+      });
+      setParsedDishes(data.dishes);
+      setPerDishState(seed);
+      // Cooking style: if any dish has a remembered style, use the most common; else 'home'.
+      var stylesCount={home:0,restaurant:0};
+      data.dishes.forEach(function(d){if(d.user_default_cooking_style)stylesCount[d.user_default_cooking_style]++;});
+      var initialStyle=stylesCount.restaurant>stylesCount.home?'restaurant':'home';
+      setCookingStyle(initialStyle);
+      setMealStage('review');
+      setItemsText(clean);
+      haptic('light');
+    }catch(e){
+      console.log('[MEAL PARSE ERROR]',e);
+      showFriendlyError('Could not reach meal parser',e);
+    }finally{
+      setParsing(false);
     }
-
-    if(!totals){
-      // Fallback: parse input intelligently against the foods table.
-      // Strategy:
-      //   1. Split input on commas/and into "items" (e.g. ["200g Chicken curry", "50g curd", "300g rice"])
-      //   2. For each item, extract quantity (default 100g) and a clean name.
-      //   3. Try to match the full clean name as a phrase first; if no hit, fall back to its
-      //      longest sub-phrase / single significant word.
-      //   4. Scale that food's per-100g nutrients by quantity/100.
-      var items=normalized.replace(/\band\b/g,',').split(/,/).map(function(s){return s.trim();}).filter(Boolean);
-      var sumP=0, sumC=0, sumCa=0, sumF=0, matched=0;
-      var matchedItems=[];
-      try{
-        for(var i=0;i<items.length;i++){
-          var raw=items[i];
-          // extract grams hint, then strip numbers + common units
-          var qtyMatch=raw.match(/(\d+(?:\.\d+)?)\s*(g|gm|gms|gram|grams|ml)/);
-          var qtyG=qtyMatch?parseFloat(qtyMatch[1]):100;
-          // also handle stuck-together "300grice" → 300 grams of rice
-          var stuckMatch=raw.match(/^(\d+)g(\w+)/);
-          var name;
-          if(stuckMatch){
-            qtyG=parseFloat(stuckMatch[1]);
-            name=stuckMatch[2];
-          } else {
-            // strip leading numbers + units, common stop words
-            name=raw
-              .replace(/\d+(?:\.\d+)?\s*(g|gm|gms|gram|grams|ml|l|cup|cups|tbsp|tsp|piece|pieces|pcs|slice|slices|bowl|bowls|plate|plates)\b/g,'')
-              .replace(/\d+/g,'')
-              .replace(/\b(of|the|a|an)\b/g,'')
-              .trim();
-          }
-          if(!name)continue;
-
-          // Try (a) full name as phrase, (b) longest 2-word sub-phrase, (c) single longest word
-          var attempts=[];
-          attempts.push(name);
-          var words=name.split(/\s+/).filter(function(w){return w.length>=3;});
-          if(words.length>=2){
-            for(var w=0;w<words.length-1;w++){
-              attempts.push(words[w]+' '+words[w+1]);
-            }
-          }
-          // single words, longest first
-          words.slice().sort(function(a,b){return b.length-a.length;}).forEach(function(w){attempts.push(w);});
-
-          var hit=null;
-          for(var a=0;a<attempts.length&&!hit;a++){
-            var q=attempts[a];
-            // Prefer foods with non-zero protein; if none match, accept zero-row
-            var foodResRich=await supabase.from('foods')
-              .select('protein_g,carbs_g,calories,fat_g,serving_size_g,name')
-              .ilike('name','%'+q+'%')
-              .gt('protein_g',0)
-              .order('protein_g',{ascending:false})
-              .limit(1);
-            if(foodResRich&&foodResRich.data&&foodResRich.data.length){
-              hit={row:foodResRich.data[0],matchedOn:q};
-              break;
-            }
-            var foodRes=await supabase.from('foods')
-              .select('protein_g,carbs_g,calories,fat_g,serving_size_g,name')
-              .ilike('name','%'+q+'%')
-              .limit(1);
-            if(foodRes&&foodRes.data&&foodRes.data.length){
-              hit={row:foodRes.data[0],matchedOn:q};
-            }
-          }
-
-          if(hit){
-            var row=hit.row;
-            // foods table values are per 100g — scale by qtyG/100
-            var scale=qtyG/100;
-            sumP += Number(row.protein_g||0)*scale;
-            sumC += Number(row.carbs_g||0)*scale;
-            sumCa+= Number(row.calories||0)*scale;
-            sumF += Number(row.fat_g||0)*scale;
-            matched++;
-            matchedItems.push({input:raw,name:row.name,qtyG:qtyG,matchedOn:hit.matchedOn});
-          }
-        }
-      }catch(fallbackErr){
-        console.log('[MEAL FALLBACK ERROR]',fallbackErr);
-      }
-      // If we matched nothing, give the user a tiny default so the save still completes
-      // (rather than blocking the whole flow). They can edit values later.
-      if(matched===0){
-        totals={protein:0,carbs:0,calories:0,fat:0,cacheKey:cacheKey,fallbackEmpty:true};
-      } else {
-        totals={protein:Math.round(sumP),carbs:Math.round(sumC),calories:Math.round(sumCa),fat:Math.round(sumF),cacheKey:cacheKey,fallback:true,matchedItems:matchedItems};
-      }
-      console.log('[MEAL NUTRIENT FALLBACK]',{items:items,matched:matched,matchedItems:matchedItems,totals:totals});
-    }
-
-    try{await AsyncStorage.setItem(cacheKey,JSON.stringify(totals));}catch(e){console.log('[MEAL NUTRIENT CACHE WRITE ERROR]',e);}
-    return totals;
   }
 
-  async function save(){
-    if(result&&!editMeal){
-      setMt(initialMealType||'lunch');
-      setItems('');
-      setMid('');
-      setSelectedDate(new Date());
-      setResult(null);
-      setPhotoUri('');
+  function handleQuickPickChip(chip){
+    haptic('light');
+    setItemsText(chip.dish_name||chip.dish_normalized);
+    parseAndAdvance(chip.dish_name||chip.dish_normalized);
+  }
+
+  function handleCancel(){
+    if(mealStage==='review'){
+      Alert.alert('Discard this meal?','Your dish edits won’t be saved.',[
+        {text:'Cancel',style:'cancel'},
+        {text:'Discard',style:'destructive',onPress:function(){resetAndClose();}},
+      ]);
       return;
     }
-    var cleanItems=normalizeText(items);
-    if(!mealTypes.includes(mt)){Alert.alert('Validation error','Please select breakfast, lunch, or dinner.');return;}
-    if(!cleanItems){Alert.alert('Validation error','Please describe what you ate.');return;}
-    if(cleanItems.length>LIMITS.meal.descMax){Alert.alert('Validation error','Meal description must be '+LIMITS.meal.descMax+' characters or less.');return;}
-    if(isFutureDate(selectedDate)){Alert.alert('Validation error','Date cannot be in the future.');return;}
-    if(mid&&!canModifyMemberData(isAdmin,members,userId,mid)){Alert.alert('Not allowed','You can only log your own meals.');return;}
-
-    setLoading(true);setResult(null);
-    try{
-      var mN=members.find(function(m){return m.id===mid;})||members[0];
-      var nutrients=await calculateMealNutrients(cleanItems,mid);
-      var uploadedPhotoPath=photoUri;
-      if(photoUri&&photoUri.indexOf('http')!==0){
-        uploadedPhotoPath=await uploadPhotoToStorage('meal-photos',photoUri,userId,'meal');
-      }
-      var mealPayload={
-        family_id:familyId,meal_time:mt.charAt(0).toUpperCase()+mt.slice(1),items:cleanItems,
-        protein:nutrients.protein,carbs:nutrients.carbs,cal:nutrients.calories,
-        member_id:mid||(mN&&mN.id)||'',member_name:mN?mN.name:'',date:isoDate(selectedDate),photo_path:uploadedPhotoPath||null,
-      };
-      if(editMeal){
-        var mealUpdate=await supabase.from('meals').update(mealPayload).eq('id',editMeal.id).select().single();
-        if(mealUpdate.error&&String(mealUpdate.error.message||'').toLowerCase().includes('photo_path')){
-          var mealFallback=Object.assign({},mealPayload);delete mealFallback.photo_path;
-          mealUpdate=await supabase.from('meals').update(mealFallback).eq('id',editMeal.id).select().single();
-        }
-        console.log('[MEAL UPDATE]',{id:editMeal.id,payload:mealPayload,data:mealUpdate.data,error:mealUpdate.error});
-        if(mealUpdate.error)throw mealUpdate.error;
-        upsertMealLocal(normMeals([mealUpdate.data])[0]);
-        haptic('light');
-      } else {
-        var mealInsert=await supabase.from('meals').insert(mealPayload).select().single();
-        if(mealInsert.error&&String(mealInsert.error.message||'').toLowerCase().includes('photo_path')){
-          var mealInsertFallback=Object.assign({},mealPayload);delete mealInsertFallback.photo_path;
-          mealInsert=await supabase.from('meals').insert(mealInsertFallback).select().single();
-        }
-        console.log('[MEAL INSERT]',{payload:mealPayload,data:mealInsert.data,error:mealInsert.error});
-        if(mealInsert.error)throw mealInsert.error;
-        upsertMealLocal(normMeals([mealInsert.data])[0]);
-        var mid2=mealPayload.member_id||'joint';
-        await recordScore(familyId,mid2,'meal_logged',15);
-        if(nutrients.protein>=50){await recordScore(familyId,mid2,'protein_hit',20);}
-        await bumpStreak(familyId,mid2,'meals');
-        haptic('medium');
-      }
-      setResult({protein:nutrients.protein,carbs:nutrients.carbs,calories:nutrients.calories,fat:nutrients.fat});
-      await refreshMeals();
-      if(logActivity){
-        await logActivity('meal',{
-          user_name:currentUserName||'Someone',
-          action:editMeal?'updated':'created',
-          meal_time:mealPayload.meal_time,
-          protein:mealPayload.protein,
-          member_name:mN?mN.name:'',
-        },editMeal?editMeal.id:null,familyId);
-      }
-      if(editMeal){setTimeout(function(){resetAndClose();},600);}
-    }catch(e){console.log('[MEAL SAVE ERROR]',e);showFriendlyError(editMeal?'Could not update meal':'Could not save meal',e);}
-    setLoading(false);
+    if(mealStage==='saving')return; // ignore while saving
+    resetAndClose();
   }
 
-  function resetAndClose(){setMt(initialMealType||'lunch');setItems('');setMid('');setSelectedDate(initialDate?toDate(initialDate):new Date());setResult(null);setPhotoUri('');onClose();}
+  function resetAndClose(){
+    setMealStage('compose');
+    setItemsText('');
+    setParsedDishes([]);
+    setPerDishState({});
+    setPhotoUri('');
+    setMid('');
+    setParseError('');
+    setUnitPickerFor(null);
+    onClose();
+  }
 
-  return(<React.Fragment>
-    <ModalSheet visible={visible} title={editMeal?'Edit meal':'Log a meal'} onClose={resetAndClose}>
-      <SelectField label="Meal type" value={mt} onChange={setMt} options={mealTypes.map(function(t){return{label:t.charAt(0).toUpperCase()+t.slice(1),value:t};})} placeholder="Select meal type"/>
+  function changeQuantity(dishKey,delta){
+    setPerDishState(function(prev){
+      var cur=prev[dishKey]||{quantity:1,unit:'katori'};
+      var next=Math.max(0,Math.round((Number(cur.quantity||0)+delta)*10)/10);
+      return Object.assign({},prev,{[dishKey]:Object.assign({},cur,{quantity:next})});
+    });
+    haptic('light');
+  }
+  function setQuantityDirect(dishKey,qty){
+    setPerDishState(function(prev){
+      var cur=prev[dishKey]||{quantity:1,unit:'katori'};
+      return Object.assign({},prev,{[dishKey]:Object.assign({},cur,{quantity:qty})});
+    });
+    haptic('light');
+  }
+  function changeUnit(dishKey,unit){
+    setPerDishState(function(prev){
+      var cur=prev[dishKey]||{quantity:1,unit:'katori'};
+      return Object.assign({},prev,{[dishKey]:Object.assign({},cur,{unit:unit})});
+    });
+    setUnitPickerFor(null);
+    haptic('light');
+  }
+
+  // Total nutrition across all dishes — used both for display and the meals row payload.
+  function computeMealTotals(){
+    var totals={protein:0,carbs:0,fat:0,calories:0};
+    parsedDishes.forEach(function(d){
+      var m=computeDishMacros(d,perDishState[d.dish_normalized]||{quantity:1,unit:d.default_vessel},cookingStyle);
+      totals.protein+=m.protein;totals.carbs+=m.carbs;totals.fat+=m.fat;totals.calories+=m.calories;
+    });
+    return{
+      protein:Math.round(totals.protein*10)/10,
+      carbs:Math.round(totals.carbs*10)/10,
+      fat:Math.round(totals.fat*10)/10,
+      calories:Math.round(totals.calories),
+    };
+  }
+
+  // Save: insert/update meals row + fire-and-forget portion memory.
+  async function handleSave(){
+    if(!mealTypes.includes(mealTime)){Alert.alert('Validation error','Please select breakfast, lunch, snack, or dinner.');return;}
+    if(isFutureDate(selectedDate)){Alert.alert('Validation error','Date cannot be in the future.');return;}
+    if(mid&&!canModifyMemberData(isAdmin,members,userId,mid)){Alert.alert('Not allowed','You can only log your own meals.');return;}
+    if(parsedDishes.length===0){Alert.alert('Validation error','No dishes to save.');return;}
+    var anyZero=parsedDishes.some(function(d){return Number((perDishState[d.dish_normalized]||{}).quantity||0)<=0;});
+    if(anyZero){Alert.alert('Validation error','Set a quantity above zero for every dish.');return;}
+
+    setMealStage('saving');
+    try{
+      var mN=members.find(function(m){return m.id===mid;})||members[0];
+      var totals=computeMealTotals();
+
+      // Photo upload (decoupled from nutrition — memory only).
+      var uploadedPhotoPath=photoUri;
+      if(photoUri&&photoUri.indexOf('http')!==0){
+        try{uploadedPhotoPath=await uploadPhotoToStorage('meal-photos',photoUri,userId,'meal');}
+        catch(photoErr){console.log('[MEAL PHOTO UPLOAD ERROR]',photoErr);uploadedPhotoPath=null;}
+      }
+
+      // Build dish_breakdown for the meals.dish_breakdown jsonb column.
+      var dishBreakdown=parsedDishes.map(function(d){
+        var s=perDishState[d.dish_normalized]||{quantity:1,unit:d.default_vessel};
+        var m=computeDishMacros(d,s,cookingStyle);
+        return{
+          dish_normalized:d.dish_normalized,
+          dish_name:d.dish_name,
+          quantity:Number(s.quantity),
+          unit:s.unit,
+          grams:m.grams,
+          protein:m.protein,
+          carbs:m.carbs,
+          fat:m.fat,
+          calories:m.calories,
+          nutrition_source:d.nutrition_source,
+        };
+      });
+      var allCurated=parsedDishes.every(function(d){return d.nutrition_source==='curated';});
+      var nutritionSource=allCurated?'curated':'ai_estimate';
+
+      var mealPayload={
+        family_id:familyId,
+        meal_time:mealTime.charAt(0).toUpperCase()+mealTime.slice(1),
+        items:itemsText,
+        protein:totals.protein,
+        carbs:totals.carbs,
+        fat:totals.fat,
+        cal:totals.calories,
+        member_id:mid||(mN&&mN.id)||'',
+        member_name:mN?mN.name:'',
+        date:isoDate(selectedDate),
+        photo_path:uploadedPhotoPath||null,
+        // New vessel columns:
+        vessel_unit:null,           // reserved for v2 single-dish entries; multi-dish meals store the breakdown in dish_breakdown
+        vessel_quantity:null,
+        cooking_style:cookingStyle,
+        nutrition_source:nutritionSource,
+        dish_breakdown:dishBreakdown,
+      };
+
+      var savedRow;
+      if(editMeal){
+        var upd=await supabase.from('meals').update(mealPayload).eq('id',editMeal.id).select().single();
+        if(upd.error)throw upd.error;
+        savedRow=upd.data;
+        upsertMealLocal(normMeals([upd.data])[0]);
+      }else{
+        var ins=await supabase.from('meals').insert(mealPayload).select().single();
+        if(ins.error)throw ins.error;
+        savedRow=ins.data;
+        upsertMealLocal(normMeals([ins.data])[0]);
+        var scoreMid=mealPayload.member_id||'joint';
+        try{await recordScore(familyId,scoreMid,'meal_logged',15);}catch(e){}
+        if(totals.protein>=50){try{await recordScore(familyId,scoreMid,'protein_hit',20);}catch(e){}}
+        try{await bumpStreak(familyId,scoreMid,'meals');}catch(e){}
+      }
+
+      // Fire-and-forget portion memory update — failures must not block save.
+      try{
+        fetch(EDGE_UPDATE_PORTION,{
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY},
+          body:JSON.stringify({
+            user_id:userId,
+            dishes:parsedDishes.map(function(d){
+              var s=perDishState[d.dish_normalized]||{quantity:1,unit:d.default_vessel};
+              return{dish_normalized:d.dish_normalized,quantity:Number(s.quantity),unit:s.unit,cooking_style:cookingStyle};
+            }),
+          }),
+        }).catch(function(e){console.log('[UPDATE PORTION ERROR]',e);});
+      }catch(e){console.log('[UPDATE PORTION DISPATCH ERROR]',e);}
+
+      // Activity feed (preserve existing pattern; payload shape unchanged).
+      if(logActivity){
+        try{
+          await logActivity('meal',{
+            user_name:currentUserName||'Someone',
+            action:editMeal?'updated':'created',
+            meal_time:mealPayload.meal_time,
+            protein:mealPayload.protein,
+            member_name:mN?mN.name:'',
+            dish_count:parsedDishes.length,
+          },savedRow&&savedRow.id||(editMeal&&editMeal.id)||null,familyId);
+        }catch(e){console.log('[MEAL ACTIVITY LOG ERROR]',e);}
+      }
+
+      try{await refreshMeals();}catch(e){}
+      haptic('success');
+      resetAndClose();
+    }catch(e){
+      console.log('[MEAL SAVE ERROR]',e);
+      haptic('error');
+      showFriendlyError(editMeal?'Could not update meal':'Could not save meal',e);
+      setMealStage('review'); // keep edits intact
+    }
+  }
+
+  // ── Render helpers ─────────────────────────────────────────────────────────
+  function MealTimePills(){
+    return <View style={{flexDirection:'row',gap:8,marginBottom:14}}>
+      {mealTypes.map(function(t){
+        var sel=mealTime===t;
+        return <TouchableOpacity key={t} activeOpacity={0.8} onPress={function(){haptic('light');setMealTime(t);}} style={{
+          flex:1,height:38,borderRadius:9999,
+          alignItems:'center',justifyContent:'center',
+          backgroundColor:sel?theme.primary:'transparent',
+          borderWidth:sel?0:1,borderColor:theme.border,
+        }}><Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:13,color:sel?'#fff':theme.textSecondary}}>{t.charAt(0).toUpperCase()+t.slice(1)}</Text></TouchableOpacity>;
+      })}
+    </View>;
+  }
+
+  function MemberChips(){
+    if(!members||members.length===0)return null;
+    return <View>
       <Caps style={{marginBottom:8}}>Who?</Caps>
-      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
-        {members.map(function(m){return <TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:14}}>
+        {members.map(function(m){return <TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){haptic('light');setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
       </View>
-      <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
-      <TouchableOpacity onPress={pickImage} style={{alignSelf:'flex-start',marginBottom:10}}>
-        <Pill bg={theme.surfaceElevated} fg={theme.textSecondary}>📷 Add photo</Pill>
-      </TouchableOpacity>
-      {photoUri?<Image source={{uri:photoUri}} style={[z.photoPreview,{borderRadius:12,marginBottom:10}]}/>:null}
-      <Caps style={{marginBottom:8}}>What did you eat?</Caps>
-      <TextInput
-        style={[z.inp,{height:88,textAlignVertical:'top',paddingTop:10,marginBottom:6,backgroundColor:theme.surface,color:theme.text,borderColor:theme.primary,borderWidth:1.5}]}
-        value={items} onChangeText={setItems} maxLength={LIMITS.meal.descMax}
-        placeholder={'e.g. 2 rotis, dal fry, curd and a banana\nor: idli sambar and chai'}
-        placeholderTextColor={theme.muted} multiline
-      />
-      <Caps color={theme.muted} style={{marginBottom:10}}>Write naturally — AI calculates protein and calories automatically</Caps>
-      <TouchableOpacity onPress={function(){haptic('light');setShowProteinGuide(true);}} style={{alignSelf:'flex-start',marginBottom:14}}>
-        <Pill bg={theme.accentLight} fg={theme.accent}>📖 Protein guide · Indian foods</Pill>
-      </TouchableOpacity>
-      {result&&<View style={{marginBottom:16}}>
-        <Caps color={theme.primary} style={{marginBottom:8}}>Meal captured ✓ Parsed nutrition</Caps>
-        <View style={{flexDirection:'row',gap:8,marginBottom:8}}>
-          <View style={{flex:1}}><Block bg={theme.surfaceElevated} style={{padding:14}}><Caps>Calories</Caps><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{result.calories}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> kcal</Text></Text></Block></View>
-          <View style={{flex:1}}><Block bg={theme.surfaceElevated} style={{padding:14}}><Caps>Protein</Caps><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.primary,marginTop:4}}>{result.protein}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> g</Text></Text></Block></View>
-        </View>
-        <View style={{flexDirection:'row',gap:8}}>
-          <View style={{flex:1}}><Block bg={theme.surfaceElevated} style={{padding:14}}><Caps>Carbs</Caps><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{result.carbs}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> g</Text></Text></Block></View>
-          <View style={{flex:1}}><Block bg={theme.surfaceElevated} style={{padding:14}}><Caps>Fat</Caps><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{result.fat}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> g</Text></Text></Block></View>
-        </View>
-      </View>}
-      <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-        <View style={{flex:1}}><SecondaryButton full onPress={resetAndClose}>{result?'Done':'Cancel'}</SecondaryButton></View>
-        <View style={{flex:1.4}}><PrimaryButton full disabled={loading||!items.trim()} onPress={save}>{loading?'Saving…':editMeal?'Update meal':(result?'Log another':'Log meal')}</PrimaryButton></View>
-      </View>
-    </ModalSheet>
+    </View>;
+  }
 
-    {/* PHASE 6: Indian protein reference modal — searchable list of common Indian foods with protein per 100g */}
-    <ModalSheet visible={showProteinGuide} title="Protein guide" onClose={function(){setShowProteinGuide(false);}} scroll={false}>
-      <Caps color={theme.muted} style={{marginBottom:10}}>Common Indian foods · grams of protein per 100g</Caps>
-      <TextInput
-        style={[z.inp,{marginBottom:8,backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]}
-        value={guideSearch} onChangeText={setGuideSearch}
-        placeholder="Search e.g. paneer, chicken, dal..." placeholderTextColor={theme.muted}
-      />
-      <View style={{flexDirection:'row',flexWrap:'wrap',marginBottom:8}}>
-        <View style={{flexDirection:'row',alignItems:'center',marginRight:10,marginBottom:4}}><View style={{width:10,height:10,borderRadius:5,backgroundColor:theme.primary,marginRight:4}}/><Caps color={theme.muted}>≥20g high</Caps></View>
-        <View style={{flexDirection:'row',alignItems:'center',marginRight:10,marginBottom:4}}><View style={{width:10,height:10,borderRadius:5,backgroundColor:theme.accent,marginRight:4}}/><Caps color={theme.muted}>10–19g moderate</Caps></View>
-        <View style={{flexDirection:'row',alignItems:'center',marginBottom:4}}><View style={{width:10,height:10,borderRadius:5,backgroundColor:theme.muted,marginRight:4}}/><Caps color={theme.muted}>{'<'}10g low</Caps></View>
+  function PhotoRow(){
+    return <View style={{marginBottom:14}}>
+      {!photoUri?<TouchableOpacity onPress={pickImage} style={{alignSelf:'flex-start'}}>
+        <Pill bg={theme.surfaceElevated} fg={theme.textSecondary}>📷 Add photo (optional)</Pill>
+      </TouchableOpacity>:<View style={{flexDirection:'row',alignItems:'center',gap:10}}>
+        <Image source={{uri:photoUri}} style={{width:60,height:60,borderRadius:10}}/>
+        <TouchableOpacity onPress={function(){haptic('light');setPhotoUri('');}} style={{paddingHorizontal:10,paddingVertical:6,borderRadius:9999,borderWidth:1,borderColor:theme.border}}>
+          <Text style={{fontFamily:fontW(500),fontSize:13,color:theme.textSecondary}}>✕ Remove</Text>
+        </TouchableOpacity>
+      </View>}
+    </View>;
+  }
+
+  function CookingStyleToggle(){
+    return <View style={{marginBottom:14}}>
+      <Caps style={{marginBottom:8}}>Cooking style</Caps>
+      <View style={{flexDirection:'row',gap:8}}>
+        {[['home','Home-cooked'],['restaurant','Restaurant']].map(function(pair){
+          var val=pair[0];var sel=cookingStyle===val;
+          return <TouchableOpacity key={val} activeOpacity={0.8} onPress={function(){haptic('light');setCookingStyle(val);}} style={{
+            flex:1,height:38,borderRadius:9999,
+            alignItems:'center',justifyContent:'center',
+            backgroundColor:sel?theme.primary:'transparent',
+            borderWidth:sel?0:1,borderColor:theme.border,
+          }}><Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:13,color:sel?'#fff':theme.textSecondary}}>{pair[1]}</Text></TouchableOpacity>;
+        })}
       </View>
-      <ScrollView style={{maxHeight:380}} showsVerticalScrollIndicator={true}>
-        {(function(){
-          if(foodsList==null)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,textAlign:'center',padding:24}}>Loading…</Text>;
-          var q=(guideSearch||'').toLowerCase().trim();
-          var filtered=foodsList.filter(function(f){return !q || f.name.toLowerCase().indexOf(q)>=0 || (f.category||'').toLowerCase().indexOf(q)>=0;});
-          if(filtered.length===0)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,textAlign:'center',padding:24}}>No matches. Try paneer, chicken, dal…</Text>;
-          var groups={};
-          filtered.forEach(function(f){var c=f.category||'Other';if(!groups[c])groups[c]=[];groups[c].push(f);});
-          var groupNames=Object.keys(groups);
-          return groupNames.map(function(g){
-            return <View key={'grp_'+g} style={{marginBottom:12}}>
-              <Caps style={{marginBottom:6}}>{g}</Caps>
-              {groups[g].map(function(food,fi){
-                var color=food.protein>=20?theme.primary:(food.protein>=10?theme.accent:theme.muted);
-                return <View key={'food_'+g+'_'+fi+'_'+food.name} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:8,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
-                  <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,flex:1}} numberOfLines={1}>{food.name}</Text>
-                  <View style={{paddingHorizontal:10,paddingVertical:4,borderRadius:8,backgroundColor:color+'22'}}>
-                    <Text style={{fontFamily:FF.sansBold,color:color,fontWeight:'700',fontSize:13}}>{food.protein}g</Text>
-                  </View>
-                </View>;
-              })}
-            </View>;
-          });
-        })()}
-        <View style={{height:24}}/>
+    </View>;
+  }
+
+  function DishRow(props){
+    var d=props.dish;
+    var s=perDishState[d.dish_normalized]||{quantity:1,unit:d.default_vessel};
+    var macros=computeDishMacros(d,s,cookingStyle);
+    var unitOpen=unitPickerFor===d.dish_normalized;
+    var unitGrams=gramsForDish(d,s.unit);
+    return <View style={{paddingVertical:14,borderTopWidth:props.first?0:StyleSheet.hairlineWidth,borderTopColor:theme.border}}>
+      {/* Dish name row */}
+      <View style={{flexDirection:'row',alignItems:'baseline',justifyContent:'space-between',marginBottom:6}}>
+        <View style={{flex:1,flexDirection:'row',alignItems:'baseline',flexWrap:'wrap',gap:6}}>
+          <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:16,color:theme.text}}>{d.dish_name}</Text>
+          <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.textSecondary}}>≈{Math.round(unitGrams)}g per {s.unit}</Text>
+        </View>
+        {s.isUserDefault?<Text style={{fontFamily:FF.sans,fontSize:10,color:theme.textSecondary}}>From last time</Text>:null}
+        {d.nutrition_source==='ai_estimate'?<TouchableOpacity onPress={function(){Alert.alert('Estimated nutrition',"We don't have exact data for this dish yet — values are estimated.");}} style={{marginLeft:6}}>
+          <Text style={{fontSize:13,color:theme.textSecondary}}>ⓘ</Text>
+        </TouchableOpacity>:null}
+      </View>
+      {/* Unit picker (single pill that toggles a dropdown) */}
+      <View style={{marginBottom:8}}>
+        <TouchableOpacity activeOpacity={0.8} onPress={function(){haptic('light');setUnitPickerFor(unitOpen?null:d.dish_normalized);}} style={{
+          alignSelf:'flex-start',height:32,paddingHorizontal:14,borderRadius:9999,
+          alignItems:'center',justifyContent:'center',
+          backgroundColor:theme.surfaceElevated,borderWidth:1,borderColor:theme.border,
+        }}><Text style={{fontFamily:fontW(500),fontSize:13,color:theme.text}}>{s.unit} ▾</Text></TouchableOpacity>
+        {unitOpen?<View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:6}}>
+          {ALLOWED_VESSELS.map(function(u){
+            var sel=s.unit===u;
+            return <TouchableOpacity key={u} onPress={function(){changeUnit(d.dish_normalized,u);}} style={{
+              paddingHorizontal:12,height:30,borderRadius:9999,
+              alignItems:'center',justifyContent:'center',
+              backgroundColor:sel?theme.primary:'transparent',
+              borderWidth:sel?0:1,borderColor:theme.border,
+            }}><Text style={{fontFamily:fontW(500),fontSize:12,color:sel?'#fff':theme.textSecondary}}>{u}</Text></TouchableOpacity>;
+          })}
+        </View>:null}
+      </View>
+      {/* Quantity row */}
+      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:18,marginBottom:8}}>
+        <TouchableOpacity onPress={function(){changeQuantity(d.dish_normalized,-0.5);}} style={{width:36,height:36,borderRadius:9999,alignItems:'center',justifyContent:'center',backgroundColor:theme.surfaceElevated,borderWidth:1,borderColor:theme.border}}>
+          <Text style={{fontFamily:fontW(600),fontSize:18,color:theme.text}}>−</Text>
+        </TouchableOpacity>
+        <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:28,color:theme.text,minWidth:54,textAlign:'center'}}>{Number(s.quantity).toString()}</Text>
+        <TouchableOpacity onPress={function(){changeQuantity(d.dish_normalized,0.5);}} style={{width:36,height:36,borderRadius:9999,alignItems:'center',justifyContent:'center',backgroundColor:theme.surfaceElevated,borderWidth:1,borderColor:theme.border}}>
+          <Text style={{fontFamily:fontW(600),fontSize:18,color:theme.text}}>+</Text>
+        </TouchableOpacity>
+      </View>
+      {/* Quick-pick row */}
+      <View style={{flexDirection:'row',gap:6,marginBottom:8,justifyContent:'center'}}>
+        {QUICK_QTY_OPTIONS.map(function(q){
+          var sel=Number(s.quantity)===q;
+          var label=q===0.5?'½':q===1.5?'1½':String(q);
+          return <TouchableOpacity key={q} onPress={function(){setQuantityDirect(d.dish_normalized,q);}} style={{
+            paddingHorizontal:12,height:30,borderRadius:9999,
+            alignItems:'center',justifyContent:'center',
+            backgroundColor:sel?theme.primary:theme.primaryLight,
+            borderWidth:0,
+          }}><Text style={{fontFamily:fontW(500),fontSize:14,color:sel?'#fff':theme.primary}}>{label}</Text></TouchableOpacity>;
+        })}
+      </View>
+      {/* Macro preview */}
+      <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,textAlign:'center'}}>≈{macros.calories} kcal · {macros.protein}g protein</Text>
+    </View>;
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  if(mealStage==='review'||mealStage==='saving'){
+    var totals=computeMealTotals();
+    var saving=mealStage==='saving';
+    var saveDisabled=saving||parsedDishes.some(function(d){return Number((perDishState[d.dish_normalized]||{}).quantity||0)<=0;});
+    return <ModalSheet visible={visible} title={editMeal?'Edit meal':'How much did you eat?'} onClose={handleCancel}>
+      <CookingStyleToggle/>
+      {parsedDishes.map(function(d,i){return <DishRow key={d.dish_normalized} dish={d} first={i===0}/>;})}
+      <View style={{paddingVertical:12,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.border,marginBottom:14}}>
+        <View style={{flexDirection:'row',justifyContent:'space-between'}}>
+          <Caps>Meal total</Caps>
+          <Caps color={theme.textSecondary}>{totals.calories} kcal · {totals.protein}g protein</Caps>
+        </View>
+      </View>
+      <PhotoRow/>
+      <View style={{flexDirection:'row',gap:10}}>
+        <View style={{flex:1}}><SecondaryButton full disabled={saving} onPress={handleCancel}>Cancel</SecondaryButton></View>
+        <View style={{flex:1.4}}><PrimaryButton full disabled={saveDisabled} onPress={handleSave}>{saving?'Saving…':editMeal?'Update meal':'Save meal'}</PrimaryButton></View>
+      </View>
+    </ModalSheet>;
+  }
+
+  // Compose stage
+  return <ModalSheet visible={visible} title={editMeal?'Edit meal':'Log meal'} onClose={handleCancel}>
+    <Caps style={{marginBottom:8}}>Meal time</Caps>
+    <MealTimePills/>
+    <MemberChips/>
+    <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
+
+    {topDishes.length>0?<View style={{marginBottom:6}}>
+      <Caps style={{marginBottom:8}}>Log it again</Caps>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingRight:16}}>
+        {topDishes.map(function(td){return <TouchableOpacity key={'qd_'+td.dish_normalized} onPress={function(){handleQuickPickChip(td);}} style={{
+          height:36,paddingHorizontal:14,borderRadius:9999,
+          alignItems:'center',justifyContent:'center',
+          backgroundColor:theme.primaryLight,borderWidth:0,
+        }}><Text style={{fontFamily:fontW(500),fontSize:14,color:theme.primary}}>{td.dish_name}</Text></TouchableOpacity>;})}
       </ScrollView>
-    </ModalSheet>
-  </React.Fragment>);
+      <Caps color={theme.muted} style={{marginTop:6,marginBottom:14}}>Tap to log this again</Caps>
+    </View>:null}
+
+    <Caps style={{marginBottom:8}}>What did you eat?</Caps>
+    <TextInput
+      style={[z.inp,{height:88,textAlignVertical:'top',paddingTop:10,marginBottom:6,backgroundColor:theme.surface,color:theme.text,borderColor:theme.primary,borderWidth:1.5}]}
+      value={itemsText} onChangeText={setItemsText} maxLength={LIMITS.meal.descMax}
+      placeholder={'What did you eat? E.g. 2 rotis, dal, sabzi'}
+      placeholderTextColor={theme.muted} multiline
+    />
+    <Caps color={theme.muted} style={{marginBottom:14}}>{topDishes.length>0?'Or tap a chip above to log it again.':'Write naturally — we’ll figure out the dishes.'}</Caps>
+
+    <PhotoRow/>
+
+    {parseError?<View style={{marginBottom:12,padding:12,borderRadius:12,backgroundColor:theme.accentLight}}>
+      <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.accent,lineHeight:18}}>{parseError}</Text>
+    </View>:null}
+
+    <View style={{flexDirection:'row',gap:10,marginTop:4}}>
+      <View style={{flex:1}}><SecondaryButton full onPress={handleCancel}>Cancel</SecondaryButton></View>
+      <View style={{flex:1.4}}><PrimaryButton full disabled={parsing||!itemsText.trim()} onPress={function(){parseAndAdvance(itemsText);}}>{parsing?'Reading…':'Continue'}</PrimaryButton></View>
+    </View>
+  </ModalSheet>;
 }
 
 function AddGoalModal({visible,onClose,defaultGoalType,defaultCategory,prefillName,contextLabel}){
@@ -4288,7 +5437,10 @@ function HomeScreen(){
   var theme=useThemeColors();
   var navigation=useNavigation();
   var{familyId,familyName,members,transactions,meals,goals,wellness,todayNudge,openSettings,setQuickAction,userCreatedAt,userId,refreshTransactions,upsertTransactionLocal,dismissNudge,dismissedNudgeIds,waterTrackingEnabled,waterTargetLitres,refreshMeals,refreshWellness,refreshActivityFeed,refreshNudges,familyProteinToday,screenTargetHrs}=useApp();
+  var perms=useFamilyPermissions();
+  var[memberFilterId,setMemberFilterId]=useState(null);
   var[showTx,setShowTx]=useState(false);
+  var[showQuickLog,setShowQuickLog]=useState(false);
   var[editTx,setEditTx]=useState(null); // B2: holds the transaction being edited
   var[catchupDismissed,setCatchupDismissed]=useState(false); // B4: checklist only surfaces once per morning
   var[todayStatus,setTodayStatus]=useState({loading:true,missing:[]});
@@ -4395,9 +5547,15 @@ function HomeScreen(){
     if(!hasScreen)missing.push({key:'today-screen',label:'Note screen time',tab:'Wellness',action:'open_screen'});
     setTodayStatus({loading:false,missing:missing});
   },[familyId,transactions,meals,wellness]);
-  var now=new Date();var monthTxs=transactions.filter(function(t){return isThisMonth(t.date);});
-  var income=monthTxs.filter(function(t){return t.category==='Income';}).reduce(function(s,t){return s+t.amount;},0);
-  var expenses=monthTxs.filter(function(t){return t.category!=='Income';}).reduce(function(s,t){return s+t.amount;},0);var net=income-expenses;
+  var now=new Date();
+  // Chip-reactive scope: when a member is selected, all sections below the top cards
+  // (stats strip, last-seven-days, latest, waiting-to-confirm) read from this scoped list.
+  // Top cards (streak hero, 2x2 grid, "Did I hit my targets?") still read from the
+  // unfiltered transactions/meals/wellness arrays — they're the family-level snapshot.
+  function txMatchesMemberFilter(t){return !memberFilterId || (t.memberId||t.member_id)===memberFilterId;}
+  var scopedTxs=memberFilterId?transactions.filter(txMatchesMemberFilter):transactions;
+  var monthTxs=scopedTxs.filter(function(t){return isThisMonth(t.date);});
+  var expenses=monthTxs.filter(function(t){return t.category!=='Income';}).reduce(function(s,t){return s+t.amount;},0);
   var today=isoDate(now);var todayMeals=meals.filter(function(m){return isoDate(m.date)===today;});
   var catTotals={};monthTxs.filter(function(t){return t.category!=='Income';}).forEach(function(t){catTotals[t.category]=(catTotals[t.category]||0)+t.amount;});
   var topCat=Object.keys(catTotals).sort(function(a,b){return catTotals[b]-catTotals[a];})[0]||'-';
@@ -4422,7 +5580,9 @@ function HomeScreen(){
       }
     }catch(e){console.log('[TX CONFIRM ERROR]',e);haptic('error');showFriendlyError('Could not confirm transaction',e);}
   }
-  var unconf=transactions.filter(function(t){return!t.confirmed;});
+  var unconf=scopedTxs.filter(function(t){return!t.confirmed;});
+  var filteredMember=memberFilterId?(members||[]).find(function(m){return m.id===memberFilterId;}):null;
+  var filteredMemberName=filteredMember?(filteredMember.name||'this member').split(' ')[0]:null;
   var visibleTodayNudge=(todayNudge&&dismissedNudgeIds.indexOf(todayNudge.id)===-1)?todayNudge:null;
   var nudgeLabel=visibleTodayNudge?(visibleTodayNudge.domain==='finance'?'💡 Finance':visibleTodayNudge.domain==='wellness'?'🥗 Wellness':visibleTodayNudge.domain==='goals'?'🏺 Goals':'🏡 Family'):null;
 
@@ -4542,6 +5702,7 @@ function HomeScreen(){
 
   return(<View style={[z.scr,{paddingTop:ins.top,backgroundColor:theme.bg}]}>
     <AddTxModal visible={showTx||!!editTx} onClose={function(){setShowTx(false);setEditTx(null);}} editTx={editTx}/>
+    <QuickLogSheet visible={showQuickLog} onClose={function(){setShowQuickLog(false);}}/>
     <DayDetailModal visible={showDayDetail} date={dayDetailDate} onClose={function(){setShowDayDetail(false);}} onChangeDate={setDayDetailDate} onEditTransaction={function(t){setShowDayDetail(false);setEditTx(t);}} onAddTransaction={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_tx',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Finance');}} onEditMeal={function(m){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_meal',mealType:(m.mealTime||'lunch'),initialDate:isoDate(m.date),editMealId:m.id,nonce:Date.now()});navigation.navigate('Wellness');}} onAddMeal={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_meal',mealType:'lunch',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}} onAddWater={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_water',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}} onAddScreen={function(d){setShowDayDetail(false);setQuickAction&&setQuickAction({action:'open_screen',initialDate:isoDate(d),nonce:Date.now()});navigation.navigate('Wellness');}}/>
     <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
@@ -4682,16 +5843,39 @@ function HomeScreen(){
       <Text style={[z.nudgeTx,{color:theme.text,fontSize:15,lineHeight:22}]}>{visibleTodayNudge.nudge_text}</Text>
     </TouchableOpacity>}
 
-    {/* When there is no nudge yet, show a quiet, sentence-first welcome line so the screen never opens with a number */}
+    {/* When there is no nudge yet, show a quiet, sentence-first welcome line so the screen never opens with a number.
+        Reactive to the member chip selection below — phrases the lens the rest of the screen is showing. */}
     {!visibleTodayNudge&&<View style={{marginTop:6,marginBottom:8,paddingHorizontal:4}}>
       <Text style={{fontSize:15,fontWeight:'500',color:theme.textSecondary,lineHeight:22}}>
-        {members.length>1
-          ?'Here is what your family looks like today.'
-          :'Here is what today looks like for you and your family.'}
+        {memberFilterId
+          ?(filteredMember&&filteredMember.userId===userId
+              ?'Here is what today looks like for you.'
+              :'Here is what today looks like for '+(filteredMemberName||'this member')+'.')
+          :(members.length>1
+              ?'Here is what your family looks like today.'
+              :'Here is what today looks like for you and your family.')}
       </Text>
     </View>}
 
-    {!todayStatus.loading&&isAllCaughtUp&&<View style={[z.ok,{marginTop:10,backgroundColor:theme.primaryLight}]}><Text style={[z.okTx,{color:theme.primary}]}>Today is fully captured ✓</Text></View>}
+    {/* Member chip strip — drill into one member's data for sections below the top cards.
+        Top cards (streak hero + 2x2 grid + targets card) intentionally stay aggregate.
+        Permission gate: tier='member' can only pick "Whole family" or self; other taps alert. */}
+    <MemberChipStrip
+      members={members}
+      selectedId={memberFilterId}
+      onSelect={setMemberFilterId}
+      gate={function(nextId){
+        if(!nextId)return true; // Whole family always allowed
+        if(perms.tier==='creator'||perms.tier==='co_admin')return true;
+        if(nextId===perms.currentMemberId)return true;
+        var target=(members||[]).find(function(m){return m.id===nextId;});
+        var targetName=target?(target.name||'this member').split(' ')[0]:'this member';
+        Alert.alert('No access',targetName+"'s spending is private. Ask a family admin if you need this.");
+        return false;
+      }}
+    />
+
+    {!todayStatus.loading&&isAllCaughtUp&&!memberFilterId&&<View style={[z.ok,{marginTop:10,backgroundColor:theme.primaryLight}]}><Text style={[z.okTx,{color:theme.primary}]}>Today is fully captured ✓</Text></View>}
 
     {/* Stats strip — every tile is now tappable */}
     <View style={[z.strip,{marginTop:10,marginBottom:16}]}>
@@ -4743,9 +5927,26 @@ function HomeScreen(){
       var barDate=addDays(now,-dayOffset);
       return<TouchableOpacity key={i} activeOpacity={0.7} onPress={function(){haptic('light');openDayDetail(barDate);}} style={z.barC}><View style={[z.bar,{height:Math.max((amt/maxSp)*80,4),backgroundColor:theme.primary}]}/><Text style={[z.barL,{color:theme.muted}]}>{dayLabels[(now.getDay()-6+i+7)%7]}</Text></TouchableOpacity>;
     })}</View><Text style={[z.note,{color:theme.textSecondary}]}>Total: {'₹'}{fmt(weekSpend.reduce(function(a,b){return a+b;},0))}</Text></View>
-    {transactions.length>0&&<View><Sec>Latest</Sec>{transactions.slice(0,5).map(function(t){return<TouchableOpacity key={t.id} style={[z.actR,{borderBottomColor:theme.border}]} onPress={function(){setEditTx(t);}}><View style={{flex:1}}><Text style={[z.actTx,{color:theme.text}]}>{t.memberName||'Joint'} {'₹'}{fmt(t.amount)} {t.category}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.merchant}</Text></View><Text style={[z.cap,{color:theme.muted}]}>{'✎'}</Text></TouchableOpacity>;})}</View>}
-    {transactions.length===0&&<View style={[z.nudge,{marginTop:20,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}><Text style={[z.nudgeTx,{color:theme.text}]}>Nothing captured yet. The first entry is the hardest.</Text></View>}
-    <View style={{height:32}}/></ScrollView></View>);
+    {scopedTxs.length>0&&<View><Sec>Latest</Sec>{scopedTxs.slice(0,5).map(function(t){return<TouchableOpacity key={t.id} style={[z.actR,{borderBottomColor:theme.border}]} onPress={function(){setEditTx(t);}}><View style={{flex:1}}><Text style={[z.actTx,{color:theme.text}]}>{t.memberName||'Joint'} {'₹'}{fmt(t.amount)} {t.category}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.merchant}</Text></View><Text style={[z.cap,{color:theme.muted}]}>{'✎'}</Text></TouchableOpacity>;})}</View>}
+    {scopedTxs.length===0&&<View style={[z.nudge,{marginTop:20,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}><Text style={[z.nudgeTx,{color:theme.text}]}>{memberFilterId?'No entries captured for '+(filteredMemberName||'this member')+' yet.':'Nothing captured yet. The first entry is the hardest.'}</Text></View>}
+    <View style={{height:32}}/></ScrollView>
+    <TouchableOpacity
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel="Quick log a transaction"
+      onPress={function(){haptic('light');setShowQuickLog(true);}}
+      style={{
+        position:'absolute',right:16,bottom:16,
+        width:56,height:56,borderRadius:28,
+        backgroundColor:theme.primary,
+        alignItems:'center',justifyContent:'center',
+        elevation:6,
+        shadowColor:'#000',shadowOpacity:0.2,shadowRadius:8,shadowOffset:{width:0,height:4},
+      }}
+    >
+      <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:28,color:'#fff',lineHeight:30}}>+</Text>
+    </TouchableOpacity>
+    </View>);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4773,6 +5974,31 @@ function FinanceScreen(){
   var[viewMonth,setViewMonth]=useState(new Date()); // F2: month picker
   var[showMonthPicker,setShowMonthPicker]=useState(false);
   var[goalQuickAdd,setGoalQuickAdd]=useState(null); // F18: long-press goal → quick contribute
+  var[memberFilterId,setMemberFilterId]=useState(null); // chip-strip filter for sections below the top cards
+  var perms=useFamilyPermissions();
+  // Phase 6 statement upload state — modals + filter pill + resume banner.
+  var[showStatementUpload,setShowStatementUpload]=useState(false);
+  var[reviewStatementId,setReviewStatementId]=useState(null);
+  var[sourceFilter,setSourceFilter]=useState('all'); // 'all' | 'manual' | 'statement'
+  var[pendingReviews,setPendingReviews]=useState([]); // statement_imports rows with status='review'
+  var[resumeDismissed,setResumeDismissed]=useState(false);
+
+  // Load pending reviews when the tab focuses or after a successful import. RLS
+  // restricts to this user's rows automatically. We also bound by delete_after so
+  // we don't show banners for rows the cleanup job will expire any moment.
+  async function loadPendingReviews(){
+    if(!userId)return;
+    try{
+      var r=await supabase.from('statement_imports')
+        .select('id, bank_name, document_type, period_start, period_end, parsed_transaction_count, delete_after')
+        .eq('user_id',userId)
+        .eq('status','review')
+        .gt('delete_after',new Date().toISOString())
+        .order('created_at',{ascending:false});
+      if(!r.error)setPendingReviews(r.data||[]);
+    }catch(e){console.log('[FINANCE PENDING REVIEWS ERROR]',e);}
+  }
+  useEffect(function(){loadPendingReviews();},[userId]);
   useEffect(function(){
     var t=setTimeout(function(){setDebouncedSearch(searchText);},250);
     return function(){clearTimeout(t);};
@@ -4873,12 +6099,25 @@ function FinanceScreen(){
   var now=new Date();
   function isInViewMonth(d){var dt=toDate(d);return dt.getMonth()===viewMonth.getMonth()&&dt.getFullYear()===viewMonth.getFullYear();}
   var categoryFilterOptions=CAT_LIST.slice();
+  // Top-card scope (Saved this month / Earned / Spent) — always whole-family, per spec.
   var monthTxs=transactions.filter(function(t){return isInViewMonth(t.date);});
   var income=monthTxs.filter(function(t){return t.category==='Income';}).reduce(function(s,t){return s+t.amount;},0);
   var expenses=monthTxs.filter(function(t){return t.category!=='Income';}).reduce(function(s,t){return s+t.amount;},0);
   var savings=income-expenses;var savePct=income>0?Math.round((savings/income)*100):0;
-  var catData={};categoryFilterOptions.forEach(function(c){catData[c]=0;});monthTxs.filter(function(t){return t.category!=='Income';}).forEach(function(t){catData[t.category]=(catData[t.category]||0)+t.amount;});
-  var filteredMonthTxs=applyFilters(monthTxs);
+  // Chip-reactive scope for "Where it went", "Recent", "These usually happen", search results.
+  var scopedTxs=memberFilterId?transactions.filter(function(t){return (t.memberId||t.member_id)===memberFilterId;}):transactions;
+  var scopedMonthTxs=scopedTxs.filter(function(t){return isInViewMonth(t.date);});
+  var scopedExpenses=scopedMonthTxs.filter(function(t){return t.category!=='Income';}).reduce(function(s,t){return s+t.amount;},0);
+  var catData={};categoryFilterOptions.forEach(function(c){catData[c]=0;});scopedMonthTxs.filter(function(t){return t.category!=='Income';}).forEach(function(t){catData[t.category]=(catData[t.category]||0)+t.amount;});
+  var filteredMonthTxs=applyFilters(scopedMonthTxs).filter(function(t){
+    // Phase 6 statement-source pill: 'manual' shows only rows without statement_import_id;
+    // 'statement' shows only imported rows; 'all' is unfiltered.
+    if(sourceFilter==='manual')return !t.statement_import_id;
+    if(sourceFilter==='statement')return !!t.statement_import_id;
+    return true;
+  });
+  var financeFilteredMember=memberFilterId?(members||[]).find(function(m){return m.id===memberFilterId;}):null;
+  var financeFilteredMemberName=financeFilteredMember?(financeFilteredMember.name||'this member').split(' ')[0]:null;
   var financeGoals=(goals||[]).filter(function(g){return String(g.category||'').toLowerCase()!=='health'&&String(g.category||'').toLowerCase()!=='protein'&&String(g.category||'').toLowerCase()!=='hydration'&&String(g.category||'').toLowerCase()!=='sleep'&&String(g.category||'').toLowerCase()!=='screen time';});
   var financeSharedGoals=(sharedGoals||[]).filter(function(g){return String(g.category||'').toLowerCase()!=='health'&&String(g.category||'').toLowerCase()!=='protein'&&String(g.category||'').toLowerCase()!=='hydration'&&String(g.category||'').toLowerCase()!=='sleep'&&String(g.category||'').toLowerCase()!=='screen time';});
   var unconfirmedRecurringTx=filteredMonthTxs.filter(function(t){return !t.confirmed && !!t.recurring_transaction_id;});
@@ -4901,6 +6140,17 @@ function FinanceScreen(){
     <SharedGoalModal visible={showSharedGoalModal} onClose={function(){setShowSharedGoalModal(false);setActiveSharedGoal(null);}} goal={activeSharedGoal}/> 
     <CategoryQuickPickModal visible={!!catPickTx} onClose={function(){setCatPickTx(null);}} transaction={catPickTx}/>
     <SharedGoalContributionModal visible={!!goalQuickAdd&&goalQuickAdd.kind==='shared'} onClose={function(){setGoalQuickAdd(null);}} goal={goalQuickAdd&&goalQuickAdd.kind==='shared'?goalQuickAdd.raw:null}/>
+    <StatementUploadModal
+      visible={showStatementUpload}
+      onClose={function(){setShowStatementUpload(false);loadPendingReviews();}}
+      onOpenReview={function(id){setShowStatementUpload(false);setReviewStatementId(id);loadPendingReviews();}}
+    />
+    <StatementReviewModal
+      visible={!!reviewStatementId}
+      statementImportId={reviewStatementId}
+      onClose={function(){setReviewStatementId(null);loadPendingReviews();}}
+      onImported={function(){loadPendingReviews();}}
+    />
     <ModalSheet visible={showMonthPicker} title="Choose month" onClose={function(){setShowMonthPicker(false);}}>
       {(function(){
         var arr=[];for(var i=0;i<24;i++)arr.push(i);
@@ -5034,17 +6284,36 @@ function FinanceScreen(){
       </ScrollView>;
     })()}
 
+    {/* Member chip strip — drill into one member's finance below the top hero. Top cards stay aggregate.
+        Permission gate: tier='member' can only pick "Whole family" or self; other taps alert "No access". */}
+    <View style={{marginTop:14}}>
+      <MemberChipStrip
+        members={members}
+        selectedId={memberFilterId}
+        onSelect={setMemberFilterId}
+        gate={function(nextId){
+          if(!nextId)return true;
+          if(perms.tier==='creator'||perms.tier==='co_admin')return true;
+          if(nextId===perms.currentMemberId)return true;
+          var target=(members||[]).find(function(m){return m.id===nextId;});
+          var targetName=target?(target.name||'this member').split(' ')[0]:'this member';
+          Alert.alert('No access',targetName+"'s spending is private. Ask a family admin if you need this.");
+          return false;
+        }}
+      />
+    </View>
+
     {/* Where it went — all categories sorted, tappable to filter (Phase 2.2.B) */}
     <Block style={{padding:16,marginTop:12}}>
       <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Where it went</Text>
+        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>{memberFilterId?(financeFilteredMemberName||'Member')+'’s spending':'Where it went'}</Text>
         <Caps color={theme.muted}>Tap to filter</Caps>
       </View>
       {(function(){
         var sorted=Object.keys(catData).map(function(c){return{cat:c,amt:catData[c]||0};}).filter(function(o){return o.amt>0;}).sort(function(a,b){return b.amt-a.amt;});
         if(sorted.length===0)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No spending yet this month.</Text>;
         return sorted.map(function(row,i){
-          var pct=expenses>0?Math.round((row.amt/expenses)*100):0;
+          var pct=scopedExpenses>0?Math.round((row.amt/scopedExpenses)*100):0;
           var active=filters.category===row.cat;
           return <TouchableOpacity key={row.cat} activeOpacity={0.7} onPress={function(){haptic('light');setFilters(Object.assign({},filters,{category:row.cat}));}} style={{marginBottom:i<sorted.length-1?12:0,opacity:active?1:1}}>
             <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:6,alignItems:'center'}}>
@@ -5061,8 +6330,54 @@ function FinanceScreen(){
       })()}
     </Block>
 
+    {/* Phase 6 — "Catch me up" entry: opens StatementUploadModal. Sits above Recent
+        as a secondary CTA — primary stays the Capture button below the list. */}
+    <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowStatementUpload(true);}} style={{
+      marginTop:12,padding:14,borderRadius:14,
+      backgroundColor:theme.surface,
+      borderWidth:1,borderColor:theme.primary,
+      flexDirection:'row',alignItems:'center',gap:12,
+    }}>
+      <Text style={{fontSize:22}}>📄</Text>
+      <View style={{flex:1}}>
+        <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:14,color:theme.text}}>Catch me up — upload last statement</Text>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,marginTop:2}}>Pull a month of transactions from your bank or credit card PDF.</Text>
+      </View>
+      <Text style={{fontFamily:fontW(500),fontSize:14,color:theme.primary}}>›</Text>
+    </TouchableOpacity>
+
+    {/* Resume banner — surfaces unfinished imports from the last 24h. */}
+    {pendingReviews.length>0&&!resumeDismissed?<View style={{
+      marginTop:10,padding:12,borderRadius:14,
+      backgroundColor:theme.accentLight,
+      borderLeftWidth:3,borderLeftColor:theme.accent,
+      flexDirection:'row',alignItems:'center',gap:10,
+    }}>
+      <View style={{flex:1}}>
+        <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setReviewStatementId(pendingReviews[0].id);}}>
+          <Text style={{fontFamily:fontW(500),fontSize:13,color:theme.text,lineHeight:18}}>You have {pendingReviews.length} unfinished review{pendingReviews.length===1?'':'s'} from your last upload. Continue?</Text>
+        </TouchableOpacity>
+      </View>
+      <TouchableOpacity onPress={function(){setResumeDismissed(true);}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
+        <Text style={{fontFamily:fontW(500),fontSize:18,color:theme.accent}}>×</Text>
+      </TouchableOpacity>
+    </View>:null}
+
+    {/* Source filter pills — All / Manual / From statements. */}
+    <View style={{flexDirection:'row',gap:6,marginTop:12,marginBottom:6}}>
+      {[['all','All'],['manual','Manual'],['statement','From statements']].map(function(pair){
+        var sel=sourceFilter===pair[0];
+        return <TouchableOpacity key={'srcf_'+pair[0]} onPress={function(){haptic('light');setSourceFilter(pair[0]);}} style={{
+          paddingHorizontal:12,height:32,borderRadius:9999,
+          alignItems:'center',justifyContent:'center',
+          backgroundColor:sel?theme.primary:'transparent',
+          borderWidth:sel?0:1,borderColor:theme.border,
+        }}><Text style={{fontFamily:fontW(500),fontSize:12,color:sel?'#fff':theme.textSecondary}}>{pair[1]}</Text></TouchableOpacity>;
+      })}
+    </View>
+
     {/* Recent transactions — top 5 */}
-    <Block style={{padding:0,marginTop:12,overflow:'hidden'}}>
+    <Block style={{padding:0,marginTop:6,overflow:'hidden'}}>
       <View style={{paddingHorizontal:16,paddingTop:14,paddingBottom:8,flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Recent</Text>
         <Caps color={theme.primary}>{filteredMonthTxs.length} this month</Caps>
@@ -5076,7 +6391,10 @@ function FinanceScreen(){
         return <View key={t.id} style={{flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:16,paddingVertical:12,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.border}}>
           <Avatar name={t.memberName||'?'} color={slot.bg} size={32}/>
           <View style={{flex:1,minWidth:0}}>
-            <Text numberOfLines={1} style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{t.merchant}</Text>
+            <View style={{flexDirection:'row',alignItems:'baseline',gap:6,flexWrap:'wrap'}}>
+              <Text numberOfLines={1} style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text,flexShrink:1}}>{t.merchant}</Text>
+              {t.statement_import_id?<Text style={{fontFamily:FF.sans,fontSize:10,fontStyle:'italic',color:theme.textSecondary}}>from statement</Text>:null}
+            </View>
             <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:4}}>
               <Pill bg={cc.bg} fg={cc.text}>{t.category||'Uncat'}</Pill>
               <Caps color={theme.muted}>{displayDate(t.date)}</Caps>
@@ -5603,30 +6921,63 @@ function WellnessScreen(){
         </TouchableOpacity>
       </View>
       {(function(){
-        var byType={breakfast:[],lunch:[],dinner:[],snack:[]};
-        (memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).forEach(function(m){
-          var t=String(m.mealTime||m.meal_time||'').toLowerCase();
-          if(byType[t])byType[t].push(m);
-          else byType.snack.push(m);
-        });
         var typeOrder=['breakfast','lunch','dinner','snack'];
-        var rendered=[];
-        typeOrder.forEach(function(t){
-          var rows=byType[t];
-          if(!rows||rows.length===0)return;
-          var summary=rows.map(function(r){return r.items;}).join(' · ');
-          var totalKcal=rows.reduce(function(s,r){return s+Number(r.cal||0);},0);
-          var totalP=rows.reduce(function(s,r){return s+Number(r.protein||0);},0);
-          rendered.push(<View key={t} style={{paddingVertical:10,borderTopWidth:rendered.length>0?StyleSheet.hairlineWidth:0,borderTopColor:theme.border}}>
-            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline'}}>
-              <Caps>{t.charAt(0).toUpperCase()+t.slice(1)}</Caps>
+        // When a member chip is active, show a single member's day grouped by meal slot (existing behavior).
+        // When no chip is active ("Whole family"), render per-member rows side-by-side instead of summing
+        // kcal/protein across the family — that sum would be a household aggregate, which we don't show.
+        if(memberFilterId){
+          var byType={breakfast:[],lunch:[],dinner:[],snack:[]};
+          todayMeals.filter(function(m){return m.memberId===memberFilterId;}).forEach(function(m){
+            var t=String(m.mealTime||m.meal_time||'').toLowerCase();
+            if(byType[t])byType[t].push(m);
+            else byType.snack.push(m);
+          });
+          var rendered=[];
+          typeOrder.forEach(function(t){
+            var rows=byType[t];
+            if(!rows||rows.length===0)return;
+            var summary=rows.map(function(r){return r.items;}).join(' · ');
+            var totalKcal=rows.reduce(function(s,r){return s+Number(r.cal||0);},0);
+            var totalP=rows.reduce(function(s,r){return s+Number(r.protein||0);},0);
+            rendered.push(<View key={t} style={{paddingVertical:10,borderTopWidth:rendered.length>0?StyleSheet.hairlineWidth:0,borderTopColor:theme.border}}>
+              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline'}}>
+                <Caps>{t.charAt(0).toUpperCase()+t.slice(1)}</Caps>
+                <Caps color={theme.textSecondary}>{totalKcal} kcal · {totalP}g protein</Caps>
+              </View>
+              <Text style={{fontFamily:FF.sans,fontSize:14,fontWeight:'500',color:theme.text,marginTop:4}}>{summary}</Text>
+            </View>);
+          });
+          if(rendered.length===0)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,paddingVertical:6}}>No meals captured yet today.</Text>;
+          return rendered;
+        }
+        var perMember=(members||[]).map(function(m){
+          return{member:m,meals:todayMeals.filter(function(ml){return (ml.memberId||ml.member_id)===m.id;})};
+        }).filter(function(r){return r.meals.length>0;});
+        if(perMember.length===0)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,paddingVertical:6}}>No meals captured yet today.</Text>;
+        return perMember.map(function(row,idx){
+          var byType={breakfast:[],lunch:[],dinner:[],snack:[]};
+          row.meals.forEach(function(m){
+            var t=String(m.mealTime||m.meal_time||'').toLowerCase();
+            if(byType[t])byType[t].push(m);
+            else byType.snack.push(m);
+          });
+          var totalKcal=row.meals.reduce(function(s,r){return s+Number(r.cal||0);},0);
+          var totalP=row.meals.reduce(function(s,r){return s+Number(r.protein||0);},0);
+          return <View key={'eaten_'+row.member.id} style={{paddingVertical:12,borderTopWidth:idx>0?StyleSheet.hairlineWidth:0,borderTopColor:theme.border}}>
+            <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
+              <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:theme.text}}>{row.member.name}</Text>
               <Caps color={theme.textSecondary}>{totalKcal} kcal · {totalP}g protein</Caps>
             </View>
-            <Text style={{fontFamily:FF.sans,fontSize:14,fontWeight:'500',color:theme.text,marginTop:4}}>{summary}</Text>
-          </View>);
+            {typeOrder.map(function(t){
+              var rows=byType[t];
+              if(!rows||rows.length===0)return null;
+              var summary=rows.map(function(r){return r.items;}).join(' · ');
+              return <Text key={t} style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:3,lineHeight:18}}>
+                <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',color:theme.text}}>{t.charAt(0).toUpperCase()+t.slice(1)}: </Text>{summary}
+              </Text>;
+            })}
+          </View>;
         });
-        if(rendered.length===0)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,paddingVertical:6}}>No meals captured yet today.</Text>;
-        return rendered;
       })()}
     </Block>
     <Sec>Today’s meal log</Sec>{(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).length===0&&<Text style={[z.cap,{color:theme.muted}]}>No meals captured today.</Text>}
@@ -5698,6 +7049,8 @@ function ReflectScreen(){
   var[trendModal,setTrendModal]=useState(null); // {kind:'spend'|'protein'} for I8/I9
   var[editTx,setEditTx]=useState(null); // I15: tap a recurring row → open the matching tx
   var[refreshing,setRefreshing]=useState(false);
+  var[memberFilterId,setMemberFilterId]=useState(null);
+  var perms=useFamilyPermissions();
 
   useEffect(function(){refreshNudges&&refreshNudges();refreshRecurringTransactions&&refreshRecurringTransactions();},[]);
 
@@ -5811,7 +7164,15 @@ function ReflectScreen(){
   }).sort(function(a,b){return String(a.next_due_date).localeCompare(String(b.next_due_date));});
 
   var analyticsStart=analyticsPeriod==='week'?addDays(new Date(),-6):analyticsPeriod==='quarter'?addDays(new Date(),-89):addDays(new Date(),-29);
-  var analyticsTx=(transactions||[]).filter(function(t){return t.category!=='Income'&&toDate(t.date)>=startOfDay(analyticsStart);});
+  // "What you spend on" pie + daily spend bars react to the chip strip below.
+  var analyticsTx=(transactions||[]).filter(function(t){
+    if(t.category==='Income')return false;
+    if(toDate(t.date)<startOfDay(analyticsStart))return false;
+    if(memberFilterId&&(t.memberId||t.member_id)!==memberFilterId)return false;
+    return true;
+  });
+  var reflectFilteredMember=memberFilterId?(members||[]).find(function(m){return m.id===memberFilterId;}):null;
+  var reflectFilteredMemberName=reflectFilteredMember?(reflectFilteredMember.name||'this member').split(' ')[0]:null;
   var spendByCat={};analyticsTx.forEach(function(t){spendByCat[t.category||'Uncat']=(spendByCat[t.category||'Uncat']||0)+Number(t.amount||0);});
   var pieData=Object.keys(spendByCat).slice(0,6).map(function(c,i){return{name:c,amount:spendByCat[c],color:Object.values(CAT_COLORS)[i%Object.values(CAT_COLORS).length]||'#888',legendFontColor:'#333',legendFontSize:11};});
   var dayMap={};analyticsTx.forEach(function(t){var key=isoDate(t.date);dayMap[key]=(dayMap[key]||0)+Number(t.amount||0);});
@@ -5920,6 +7281,26 @@ function ReflectScreen(){
         </Block>
       </TouchableOpacity>
 
+      {/* Member chip strip — drill into one member's reflections. Top hero cards stay aggregate.
+          Permission gate: tier='member' can only pick "Whole family" or self; other taps alert.
+          Reflect mixes finance + wellness, so the gate covers the whole tab (per spec). */}
+      <View style={{marginTop:18}}>
+        <MemberChipStrip
+          members={members}
+          selectedId={memberFilterId}
+          onSelect={setMemberFilterId}
+          gate={function(nextId){
+            if(!nextId)return true;
+            if(perms.tier==='creator'||perms.tier==='co_admin')return true;
+            if(nextId===perms.currentMemberId)return true;
+            var target=(members||[]).find(function(m){return m.id===nextId;});
+            var targetName=target?(target.name||'this member').split(' ')[0]:'this member';
+            Alert.alert('No access',targetName+"'s reflections are private. Ask a family admin if you need this.");
+            return false;
+          }}
+        />
+      </View>
+
       {/* Phase B5: Activity this week — per-member minutes total, sorted descending. Mirrors Protein this week pattern. */}
       <Block style={{marginTop:12,padding:16}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
@@ -6003,7 +7384,7 @@ function ReflectScreen(){
       {historyList.length===0&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>No reflections for this date.</Text>}
 
       {/* What you spend on */}
-      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:8}}>What you spend on</Text>
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:8}}>{memberFilterId?(reflectFilteredMemberName||'Member')+'’s spending':'What you spend on'}</Text>
       <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
         {['week','month','quarter'].map(function(p){
           var sel=analyticsPeriod===p;
@@ -8243,9 +9624,26 @@ function AppInner(){
                 setFamilyId(fid);
                 setFamilyName(fn);
                 setIsAdmin(true);
-                setCurrentScreen('main_app');
+                setCurrentScreen('statement_upload_onboarding');
               }}
             />
+          </NavigationContainer>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    );
+  }
+
+  if(currentScreen==='statement_upload_onboarding'){
+    return (
+      <GestureHandlerRootView style={{flex:1}}>
+        <SafeAreaProvider>
+          <NavigationContainer ref={navRef}>
+            <StatusBar barStyle={theme.statusBar} backgroundColor={theme.background}/>
+            <AppContext.Provider value={{familyId:familyId,userId:user.id,currentUserName:currentUserName}}>
+              <StatementUploadOnboardingHost
+                onDone={function(){setCurrentScreen('main_app');}}
+              />
+            </AppContext.Provider>
           </NavigationContainer>
         </SafeAreaProvider>
       </GestureHandlerRootView>

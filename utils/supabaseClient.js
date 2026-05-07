@@ -76,8 +76,17 @@ const FUNCTIONS_BASE = SUPABASE_URL
   ? `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1`
   : '';
 
-export const EDGE_MEAL = `${FUNCTIONS_BASE}/meal-nutrient`;
+// EDGE_MEAL was historically pointed at slug `meal-nutrient` which never existed
+// in production — the actual deployed slug is `parse-meal-log`. The old AddMealModal
+// silently fell back to a foods-table client-side lookup because of this. Phase 6
+// (Prompt 4b) repoints EDGE_MEAL at the real slug so the vessel pipeline can work.
+export const EDGE_MEAL = `${FUNCTIONS_BASE}/parse-meal-log`;
 export const EDGE_NUDGE = `${FUNCTIONS_BASE}/generate-nudge`;
+export const EDGE_UPDATE_PORTION = `${FUNCTIONS_BASE}/update-portion-memory`;
+// Phase 6 statement upload (Phase B wires these into the UI):
+export const EDGE_PARSE_STATEMENT = `${FUNCTIONS_BASE}/parse-statement`;
+export const EDGE_FINALIZE_STATEMENT = `${FUNCTIONS_BASE}/finalize-statement-import`;
+export const EDGE_CLEANUP_STATEMENTS = `${FUNCTIONS_BASE}/cleanup-expired-statements`;
 
 // ─── Re-exports ──────────────────────────────────────────────────────────
 export { SUPABASE_URL, SUPABASE_ANON_KEY };
