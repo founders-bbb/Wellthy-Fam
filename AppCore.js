@@ -601,6 +601,16 @@ function buildActivityMessage(activity){
     return actor+' logged '+(data.meal_time||'meal');
   }
   if(activity.activity_type==='wellness'){
+    if(data.action==='deleted'){
+      // deleteWellnessRow writes {action:'deleted', log_type:'wellness'} for whole-row
+      // deletes (the row spans water/screen/sleep). If a future code path deletes a
+      // single metric and writes a more specific log_type, the chain below catches it.
+      var lt=data.log_type||'wellness';
+      if(lt==='sleep')return actor+' deleted a sleep log';
+      if(lt==='screen_time')return actor+' deleted a screen-time log';
+      if(lt==='water')return actor+' deleted a water log';
+      return actor+' deleted a wellness log';
+    }
     if(data.log_type==='sleep'){
       var sh=Number(data.sleep_hours);
       var sleepStr=isFinite(sh)&&sh>0?(' '+(sh===Math.floor(sh)?sh+'h':sh.toFixed(1)+'h')+' of sleep'):' sleep';
