@@ -11,6 +11,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 // B8: Haptics and gesture handler
 import * as Haptics from 'expo-haptics';
@@ -9076,15 +9077,42 @@ function AppInner(){
 
   // Register this device for push notifications
   async function registerPush(uid){
-    if(!Device.isDevice)return;
+    if(!Device.isDevice){console.log('[PUSH] not a physical device, skipping');return;}
     try{
+      if(Platform.OS==='android'){
+        await Notifications.setNotificationChannelAsync('default',{
+          name:'default',
+          importance:Notifications.AndroidImportance.DEFAULT,
+          vibrationPattern:[0,250,250,250],
+          lightColor:'#FF231F7C',
+        });
+      }
       var{status:ex}=await Notifications.getPermissionsAsync();
       var finalStatus=ex;
-      if(ex!=='granted'){var r=await Notifications.requestPermissionsAsync();finalStatus=r.status;}
-      if(finalStatus!=='granted')return;
-      var td=await Notifications.getExpoPushTokenAsync();
-      await supabase.from('push_tokens').upsert({user_id:uid,token:td.data,platform:Platform.OS,updated_at:new Date().toISOString()});
-    }catch(e){}
+      if(ex!=='granted'){
+        var r=await Notifications.requestPermissionsAsync();
+        finalStatus=r.status;
+      }
+      if(finalStatus!=='granted'){console.log('[PUSH] permission denied');return;}
+
+      var projectId=Constants.expoConfig?.extra?.eas?.projectId
+                   ||Constants.easConfig?.projectId;
+      if(!projectId){console.log('[PUSH] no projectId resolved; cannot register on standalone build');return;}
+
+      var td=await Notifications.getExpoPushTokenAsync({projectId:projectId});
+      console.log('[PUSH] got token:',(td.data||'').slice(0,30)+'...');
+
+      var up=await supabase.from('push_tokens').upsert({
+        user_id:uid,
+        token:td.data,
+        platform:Platform.OS,
+        updated_at:new Date().toISOString(),
+      },{onConflict:'token'});
+      if(up.error)console.log('[PUSH] upsert error:',up.error.message);
+      else console.log('[PUSH] token upserted for user',uid);
+    }catch(e){
+      console.log('[PUSH] register error:',e?.message||e);
+    }
   }
 
   function getMissingForToday(){
