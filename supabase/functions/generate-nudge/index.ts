@@ -1,9 +1,14 @@
 // ============================================================
 // FAMILY APP — generate-nudge v2 (Rules Engine)
 // ============================================================
-// PRODUCTION SOURCE OF TRUTH — pulled from Supabase 2026-05-07.
-// This is the live function in production. If your local file looks
-// different and simpler, your local file is STALE.
+// PRODUCTION SOURCE OF TRUTH — pulled from Supabase 2026-05-08.
+// Hot-fix v7.2 (Prompt 10 Phase 2):
+//   - Added recurringMonthlyTotal fetch from public.recurring_subscriptions.
+//   - Sums median_amount for rows where user_status != 'dismissed' and
+//     confidence >= 0.7. Activates the dormant c_recurring_visible rule
+//     that's been wired since v7 deploy.
+//   - No rule changes — the rule's trigger already gates on
+//     typeof ctx.recurringMonthlyTotal === 'number' && > 1000.
 // ============================================================
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
@@ -21,6 +26,14 @@ function fmt(n: any) { return Math.round(Number(n) || 0).toLocaleString('en-IN')
 // money to family). Spending math must exclude all three or the topCat /
 // weeklyExpenses figures lie about the user's actual outflows.
 const SPENDING_EXCLUDED_CATS = new Set(['Income', 'Cash', 'Transfer'])
+
+// Confidence floor for inclusion in recurringMonthlyTotal. Detector writes
+// rows with confidence ranging 0–1 based on (occurrence_count / 6) *
+// (1 - intervalSD/MAX_SD). 0.7 is roughly "4+ clean monthly hits" — a
+// quality bar that filters out noisy auto-detections so the nudge only
+// surfaces totals the user would recognize. Lower-confidence rows still
+// appear in the UI list (Phase 3) for user confirmation.
+const RECURRING_CONFIDENCE_THRESHOLD = 0.7
 
 // ── REFLECTION RULES (Phase 2 — replaces NUDGE_RULES) ────────
 //
@@ -140,11 +153,10 @@ const REFLECTION_RULES = [
     },
   },
   {
-    // Reserved slot for the subscription / EMI detector landing in Prompt 10.
-    // Trigger fail-closes against missing ctx.recurringMonthlyTotal so this
-    // rule never fires until the detector actually populates that field.
-    // DO NOT delete during a "remove dead code" pass — this is intentional
-    // forward-compatibility, paired with Prompt 10's planned context shape.
+    // ACTIVATED v7.2: ctx.recurringMonthlyTotal is now populated by buildContext
+    // (reads from public.recurring_subscriptions written by detect-recurring).
+    // The rule's trigger gates on it being a number > 1000. Was reserved/dormant
+    // in v7; live now.
     id: 'c_recurring_visible',
     domain: 'finance_subscription',
     type: 'cross_domain',
@@ -399,6 +411,9 @@ async function buildContext(supabase: any, userId: string, user: any, inline: an
       avgSleepHrs: null, sleepLoggedDays: 0,
       myWellness: [],
       topGoal: null, monthsToGoal: 0, hasEMI: false,
+      // Inline mode never has recurring data — fail-closed against the
+      // c_recurring_visible trigger which gates on typeof === 'number'.
+      recurringMonthlyTotal: null,
       memberCount: 1, membersNotLogging: [], familyName: '',
       recentNudges: [],
     }
@@ -412,7 +427,10 @@ async function buildContext(supabase: any, userId: string, user: any, inline: an
   // not logged for that day" (post-build #10 — see wellness_logged_distinction.sql).
   // We pull all members in the family because cross_domain rules in Phase 2 may
   // want to look at sibling/spouse data; Phase 1 only aggregates the current user.
-  const [t1, t2, m1, g1, mb1, fam1, w1] = await Promise.all([
+  // v7.2: added recurring_subscriptions read in the parallel fetch.
+  // Filters to confidence >= 0.7 and excludes dismissed rows so the nudge
+  // total mirrors what the user would see as "active recurring" in the UI.
+  const [t1, t2, m1, g1, mb1, fam1, w1, rs1] = await Promise.all([
     supabase.from('transactions').select('amount,category,date').eq('user_id', userId).gte('date', d7),
     supabase.from('transactions').select('amount,category,date').eq('user_id', userId).gte('date', d14).lt('date', d7),
     supabase.from('meals').select('protein,date').eq('user_id', userId).gte('date', d7),
@@ -420,11 +438,17 @@ async function buildContext(supabase: any, userId: string, user: any, inline: an
     user.family_id ? supabase.from('family_members').select('id,name,user_id').eq('family_id', user.family_id) : { data: [] },
     user.family_id ? supabase.from('families').select('family_name').eq('id', user.family_id).single() : { data: null },
     user.family_id ? supabase.from('wellness').select('member_id,date,screen_hrs,sleep_hours').eq('family_id', user.family_id).gte('date', d7) : { data: [] },
+    supabase.from('recurring_subscriptions')
+      .select('median_amount, confidence, user_status')
+      .eq('user_id', userId)
+      .neq('user_status', 'dismissed')
+      .gte('confidence', RECURRING_CONFIDENCE_THRESHOLD),
   ])
 
   const txThis = t1.data || [], txLast = t2.data || [], meals = m1.data || []
   const goals = g1.data || [], members = mb1.data || []
   const wellnessThisWeek = w1.data || []
+  const recurringRows = rs1.data || []
 
   // Resolve the family_members.id for this user. Reflections care about the
   // current user's data; wellness rows key on member_id (text), so we filter
@@ -485,6 +509,14 @@ async function buildContext(supabase: any, userId: string, user: any, inline: an
   const membersNotLogging = (members || [])
     .filter((m: any) => m.user_id && m.user_id !== userId).map((m: any) => m.name).slice(0, 2)
 
+  // v7.2: sum the median_amounts from the filtered recurring rows.
+  // Always returns a number (0 if no rows), so the c_recurring_visible
+  // trigger's typeof check passes; the > 1000 floor handles the
+  // "not enough recurring spend to mention" case.
+  const recurringMonthlyTotal = recurringRows.reduce(
+    (s: number, r: any) => s + Number(r.median_amount || 0), 0
+  )
+
   return {
     userId, userMemberId, firstName, qData, proteinTarget,
     dayOfWeek: now.getDay(), isStartOfMonth: now.getDate() <= 3,
@@ -496,6 +528,7 @@ async function buildContext(supabase: any, userId: string, user: any, inline: an
     // must guard against NULL before using these in arithmetic.
     avgScreenHrs, screenLoggedDays, avgSleepHrs, sleepLoggedDays, myWellness,
     topGoal, monthsToGoal, hasEMI,
+    recurringMonthlyTotal,
     memberCount: members.length, membersNotLogging,
     familyName: fam1.data?.family_name || '',
     recentNudges: [],
