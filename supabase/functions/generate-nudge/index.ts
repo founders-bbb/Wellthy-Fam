@@ -67,7 +67,7 @@ const REFLECTION_RULES = [
     priority: 70,
     trigger: (ctx: any) => ctx.weeklyMealsLogged >= 4 && ctx.avgProtein > 0,
     prompt: (ctx: any) =>
-      `Situation: ${ctx.firstName} averaged ${Math.round(ctx.avgProtein)}g protein this week across ${ctx.weeklyMealsLogged} meals. Their target is ${ctx.proteinTarget}g/day. Just observe — note the gap or the hit. No prescriptions, no foods to try. Two sentences max.`,
+      `Situation: ${ctx.firstName} averaged ${Math.round(ctx.avgProtein)}g protein this week across ${ctx.weeklyMealsLogged} meals. Their target is ${ctx.proteinTarget}g/day. Just observe, note the gap or the hit. No prescriptions, no foods to try. Two sentences max.`,
   },
   {
     // Bible Section 5: "celebrate actual behaviour, not aspirational behaviour."
@@ -122,7 +122,7 @@ const REFLECTION_RULES = [
       ctx.avgScreenHrs !== null && ctx.avgScreenHrs >= 7
       && ctx.weeklyMealsLogged < 3,
     prompt: (ctx: any) =>
-      `Situation: ${ctx.firstName} averaged ${ctx.avgScreenHrs.toFixed(1)}h on screens daily but logged only ${ctx.weeklyMealsLogged} meal${ctx.weeklyMealsLogged === 1 ? '' : 's'} this week. Reflect the connection — meal logging tends to drop on heavy-screen weeks. No judgment. One sentence.`,
+      `Situation: ${ctx.firstName} averaged ${ctx.avgScreenHrs.toFixed(1)}h on screens daily but logged only ${ctx.weeklyMealsLogged} meal${ctx.weeklyMealsLogged === 1 ? '' : 's'} this week. Reflect the connection. Meal logging tends to drop on heavy-screen weeks. No judgment. One sentence.`,
   },
   {
     id: 'c_lifestyle_sleep',
@@ -136,7 +136,7 @@ const REFLECTION_RULES = [
     },
     prompt: (ctx: any) => {
       const ls = ctx.spendByCat['Lifestyle'] || 0
-      return `Situation: ${ctx.firstName} spent ₹${fmt(ls)} on Lifestyle this week — about ${Math.round(ls/ctx.totalThisWeek*100)}% of their total. Sleep averaged ${ctx.avgSleepHrs.toFixed(1)}h. Late dinners and late nights tend to come together. One observation. Two sentences max.`
+      return `Situation: ${ctx.firstName} spent ₹${fmt(ls)} on Lifestyle this week, about ${Math.round(ls/ctx.totalThisWeek*100)}% of their total. Sleep averaged ${ctx.avgSleepHrs.toFixed(1)}h. Late dinners and late nights tend to come together. One observation. Two sentences max.`
     },
   },
   {
@@ -152,7 +152,7 @@ const REFLECTION_RULES = [
     trigger: (ctx: any) =>
       typeof ctx.recurringMonthlyTotal === 'number' && ctx.recurringMonthlyTotal > 1000,
     prompt: (ctx: any) =>
-      `Situation: ${ctx.firstName}'s recurring monthly subscriptions and EMIs add up to ₹${fmt(ctx.recurringMonthlyTotal)}. Surface the total once. Don't list items — they can see them. One sentence.`,
+      `Situation: ${ctx.firstName}'s recurring monthly subscriptions and EMIs add up to ₹${fmt(ctx.recurringMonthlyTotal)}. Surface the total once. Don't list items, they can see them. One sentence.`,
   },
 
   // ─────────────────────────────────────────────────────────
@@ -213,13 +213,22 @@ const REFLECTION_RULES = [
     },
   },
   {
+    // Hot-fix 2026-05-08: this rule was breaking character in production when
+    // q35_purpose was short or non-meaningful (e.g. "finance and wellness").
+    // The model would refuse the task and ask the developer for more data.
+    // Fixes: (1) only fire when purpose is a real sentence (>= 25 chars),
+    // (2) include concrete weekly numbers so the model has data to anchor on,
+    // (3) explicit guardrail against the "you said you would" scolding pattern.
     id: 'a_purpose_connection',
     domain: 'mindset',
     type: 'aspirational',
     priority: 55,
-    trigger: (ctx: any) => !!ctx.qData.q35_purpose,
+    trigger: (ctx: any) =>
+      typeof ctx.qData.q35_purpose === 'string'
+      && ctx.qData.q35_purpose.trim().length >= 25
+      && ctx.totalThisWeek > 0,
     prompt: (ctx: any) =>
-      `Situation: ${ctx.firstName} once shared their reason: "${ctx.qData.q35_purpose}". Connect today's behavior — any specific from this week — back to that purpose. One sentence. Personal, grounded, never preachy.`,
+      `Situation: ${ctx.firstName} once shared their reason for being here: "${ctx.qData.q35_purpose}". This week they spent ₹${fmt(ctx.totalThisWeek)} total${ctx.topCat ? `, mostly on ${ctx.topCat} (₹${fmt(ctx.topCatAmt)})` : ''}${ctx.weeklyMealsLogged ? ` and logged ${ctx.weeklyMealsLogged} meal${ctx.weeklyMealsLogged === 1 ? '' : 's'}` : ''}. Connect one specific thing from this week back to that purpose. Do not say "you said you would" or anything that sounds like calling them out. Personal, grounded, never preachy. One sentence.`,
   },
 ]
 
@@ -342,19 +351,28 @@ async function processUser(supabase: any, user: any, inline: any) {
   const nudgeText = await callClaude(prompt, recentTexts)
   if (!nudgeText) return { user_id: userId, skipped: 'Claude returned empty' }
 
+  // Defensive post-process: even with system prompt forbidding em dashes,
+  // the model occasionally mirrors them from rule prompts or training priors.
+  // Belt-and-suspenders. Replace em/en dashes with comma+space; collapse any
+  // double-spaces that may result. See nudge_character_bible.md grammar rules.
+  const cleanedText = nudgeText
+    .replace(/\s*[—–]\s*/g, ', ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+
   const { data: nudge, error } = await supabase.from('nudges').insert({
     user_id: userId, domain, type: ruleId,
     nudge_type: nudgeTypeStr,
-    nudge_text: nudgeText, message: nudgeText,
+    nudge_text: cleanedText, message: cleanedText,
     sent_at: new Date().toISOString(),
   }).select().single()
   if (error) throw error
 
   const { data: tok } = await supabase.from('push_tokens').select('token').eq('user_id', userId).maybeSingle()
   let pushSent = false
-  if (tok?.token) pushSent = await sendPush(tok.token, nudgeText, nudgeTypeStr, domain)
+  if (tok?.token) pushSent = await sendPush(tok.token, cleanedText, nudgeTypeStr, domain)
 
-  return { user_id: userId, nudge_id: nudge.id, rule: ruleId, domain, text: nudgeText, push_sent: pushSent }
+  return { user_id: userId, nudge_id: nudge.id, rule: ruleId, domain, text: cleanedText, push_sent: pushSent }
 }
 
 async function buildContext(supabase: any, userId: string, user: any, inline: any) {
@@ -506,6 +524,7 @@ WHAT YOU NEVER DO
 - Open with a number.
 - Use AI-tells: "I notice that," "it's important to," "please remember," "as a reminder."
 - Say "I" at all. You have no ego, no identity. You just observe.
+- Never narrate your own writing process. Never ask the operator for more data. If a situation is sparse, write the shortest honest reflection you can from what's there. Never break the fourth wall.
 - Moralise about food, body, or personal spending.
 - Compare this family to other families.
 - Make certain predictions ("if you continue at this rate, you will...").
