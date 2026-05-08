@@ -515,7 +515,7 @@ function calcDayCompletion(familyId,date,transactions,meals,wellness){
   var hasLunch=mealOf('lunch');
   var hasDinner=mealOf('dinner');
   var dayWell=(wellness||[]).filter(function(w){return w.family_id===familyId && w.date===iso;});
-  var hasScreen=dayWell.some(function(w){return (w.screenHrs||0)>0 || (w.screen_hrs||0)>0;});
+  var hasScreen=dayWell.some(function(w){return w.screenHrs!=null || w.screen_hrs!=null;});
   var hasMeal=hasBreakfast||hasLunch||hasDinner; // kept for backwards-compat consumers
   var hasWater=dayWell.some(function(w){return (w.water||0)>0;}); // kept for opt-in display
   var completedItems=[hasTx,hasBreakfast,hasLunch,hasDinner,hasScreen];
@@ -541,7 +541,7 @@ function calcStreakCompletion(familyId,date,meals,wellness){
   if(!mealOf('lunch'))return false;
   if(!mealOf('dinner'))return false;
   var dayWell=(wellness||[]).filter(function(w){return w.family_id===familyId && w.date===iso;});
-  return dayWell.some(function(w){return (w.screenHrs||0)>0 || (w.screen_hrs||0)>0;});
+  return dayWell.some(function(w){return w.screenHrs!=null || w.screen_hrs!=null;});
 }
 function getCompletionColor(percent){
   if(percent>=100)return '#0F6E56';
@@ -670,7 +670,9 @@ async function uploadPhotoToStorage(bucket,uri,userId,prefix){
     if(mime.indexOf('png')>=0)inferredExt='png';
     else if(mime.indexOf('webp')>=0)inferredExt='webp';
     else if(mime.indexOf('heic')>=0)inferredExt='heic';
-    var fileName=(prefix||'photo')+'_'+(userId||'user')+'_'+Date.now()+'.'+inferredExt;
+    // Folder prefix = userId so storage RLS policies (storage.foldername(name)[1] = auth.uid())
+    // can match. meal-photos and transaction-photos buckets follow the same pattern as bank-statements.
+    var fileName=(userId||'user')+'/'+(prefix||'photo')+'_'+Date.now()+'.'+inferredExt;
     var upload=await supabase.storage.from(bucket).upload(fileName,blob,{contentType:mime||'image/jpeg',upsert:false});
     if(upload.error)throw upload.error;
     return fileName;
@@ -1355,7 +1357,7 @@ function DayDetailModal({visible,date,onClose,onChangeDate,onEditTransaction,onE
           return <TouchableOpacity key={w.id||((w.memberId||'m')+'_'+w.date)} activeOpacity={0.7} onPress={function(){haptic('light');if(w.screenHrs||w.screen_hrs){onAddScreen&&onAddScreen(toDate(w.date));}else if((w.water||0)>0){onAddWater&&onAddWater(toDate(w.date));}else{onAddScreen&&onAddScreen(toDate(w.date));}}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:10,borderBottomWidth:isLast?0:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
             <View style={{flex:1}}>
               <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>{w.memberName||'Member'}</Text>
-              <Caps color={theme.muted} style={{marginTop:2}}>{waterTrackingEnabled?'Water: '+formatWaterFromLitres(w.water||0)+' · ':''}Screen: {w.screenHrs||0}h</Caps>
+              <Caps color={theme.muted} style={{marginTop:2}}>{waterTrackingEnabled?'Water: '+formatWaterFromLitres(w.water||0)+' · ':''}Screen: {(w.screenHrs!=null||w.screen_hrs!=null)?(w.screenHrs??w.screen_hrs)+'h':'\u2014'}</Caps>
             </View>
             <Caps color={theme.primary}>Edit ›</Caps>
           </TouchableOpacity>;
@@ -5732,7 +5734,7 @@ function HomeScreen(){
     var hasLunch=hadMeal('lunch');
     var hasDinner=hadMeal('dinner');
     var dayWell=(wellness||[]).filter(function(w){return w.family_id===familyId&&w.date===tISO;});
-    var hasScreen=dayWell.some(function(w){return (w.screenHrs||0)>0||(w.screen_hrs||0)>0;});
+    var hasScreen=dayWell.some(function(w){return w.screenHrs!=null||w.screen_hrs!=null;});
     var missing=[];
     if(!hasTx)missing.push({key:'today-finance',label:'Capture an expense or income',tab:'Finance',action:'open_tx'});
     if(!hasBreakfast)missing.push({key:'today-breakfast',label:'Note breakfast',tab:'Wellness',action:'open_meal',mealType:'breakfast'});
@@ -5792,7 +5794,7 @@ function HomeScreen(){
   var yMealTypes={};yMeals.forEach(function(m){var t=(m.mealTime||'').toLowerCase();yMealTypes[t]=true;});
   var yWellness=wellness.filter(function(w){return w.date===yISO;});
   var yAnyWater=yWellness.some(function(w){return(w.water||0)>0;});
-  var yAnyScreen=yWellness.some(function(w){return(w.screenHrs||0)>0;});
+  var yAnyScreen=yWellness.some(function(w){return w.screenHrs!=null;});
   var yUnconfirmed=transactions.filter(function(t){return!t.confirmed&&isoDate(t.date)===yISO;}).length;
   var catchup=[];
   if(yUnconfirmed>0)catchup.push({key:'tx',label:'Confirm '+yUnconfirmed+' entr'+(yUnconfirmed>1?'ies':'y'),tab:'Finance',action:'open_tx'});
@@ -7376,7 +7378,7 @@ function WellnessScreen(){
         </View>;
       });
     })()}
-    <Sec>Time on screens today</Sec>{(memberFilterId?members.filter(function(m){return m.id===memberFilterId;}):members).map(function(m){var w=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});var hrs=w?w.screenHrs||0:0;var under=hrs<=4;return<TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){haptic('light');setScreenDate(new Date());setShowScreen(true);}} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}><Text style={[z.txM,{color:theme.text}]}>{m.name}</Text><View style={z.row}><Text style={[z.fv,{color:hrs===0?'#888':under?'#085041':'#E24B4A'}]}>{hrs>0?hrs+' hrs':'—'}</Text>{w&&<TouchableOpacity onPress={function(){deleteWellnessRow(w);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity>}</View></View>{hrs>0&&<Bar pct={Math.min((hrs/4)*100,100)} color={under?'#0F6E56':'#E24B4A'}/>}</TouchableOpacity>;})}
+    <Sec>Time on screens today</Sec>{(memberFilterId?members.filter(function(m){return m.id===memberFilterId;}):members).map(function(m){var w=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});var hrs=w?(w.screenHrs!=null?w.screenHrs:(w.screen_hrs!=null?w.screen_hrs:null)):null;var hasLog=hrs!=null;var under=hasLog&&hrs<=4;return<TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){haptic('light');setScreenDate(new Date());setShowScreen(true);}} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}><Text style={[z.txM,{color:theme.text}]}>{m.name}</Text><View style={z.row}><Text style={[z.fv,{color:!hasLog||hrs===0?'#888':under?'#085041':'#E24B4A'}]}>{hasLog?hrs+' hrs':'\u2014'}</Text>{w&&<TouchableOpacity onPress={function(){deleteWellnessRow(w);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity>}</View></View>{hasLog&&<Bar pct={Math.min((hrs/4)*100,100)} color={under?'#0F6E56':'#E24B4A'}/>}</TouchableOpacity>;})}
     {/* W14: Insight card jumps to Reflect protein trend */}
     {totalProtein>0&&<TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_protein_trend',nonce:Date.now()});navigation.navigate('Reflect');}} style={z.insight}><Text style={z.insightTx}>Your family ate {totalProtein}g of protein today. {totalProtein>=totalProteinTarget?'Everyone close to target.':'One egg or some paneer would close the gap.'} {'›'}</Text></TouchableOpacity>}
     <View style={{height:32}}/></ScrollView></View>);
