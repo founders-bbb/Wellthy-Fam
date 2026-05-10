@@ -6702,7 +6702,7 @@ function FinanceScreen(){
           <TouchableOpacity style={{marginTop:8,alignSelf:'flex-start'}} onPress={function(){dismissRecurringSubscription&&dismissRecurringSubscription(s.id);}}><Text style={[z.cap,{color:'#E24B4A',fontWeight:'500'}]}>Not recurring</Text></TouchableOpacity>
         </View>;
       })}
-    </View>:<Text style={z.cap}>No recurring subscriptions detected yet. We watch your spending patterns over a few months and surface what looks like monthly outflows here.</Text>}
+    </View>:<Text style={[z.cap,{color:theme.muted}]}>No recurring subscriptions detected yet. We watch your spending patterns over a few months and surface what looks like monthly outflows here.</Text>}
 
     <Sec>Repeating entries</Sec>
     {(recurringTransactions||[]).map(function(r){
