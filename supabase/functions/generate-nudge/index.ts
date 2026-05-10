@@ -1,14 +1,17 @@
 // ============================================================
 // FAMILY APP — generate-nudge v2 (Rules Engine)
 // ============================================================
-// PRODUCTION SOURCE OF TRUTH — pulled from Supabase 2026-05-08.
-// Hot-fix v7.2 (Prompt 10 Phase 2):
-//   - Added recurringMonthlyTotal fetch from public.recurring_subscriptions.
-//   - Sums median_amount for rows where user_status != 'dismissed' and
-//     confidence >= 0.7. Activates the dormant c_recurring_visible rule
-//     that's been wired since v7 deploy.
-//   - No rule changes — the rule's trigger already gates on
-//     typeof ctx.recurringMonthlyTotal === 'number' && > 1000.
+// PRODUCTION SOURCE OF TRUTH — pulled from Supabase 2026-05-10.
+// Hot-fix v7.3 (Prompt 10 Phase 2 + fallback prompt hardening):
+//   - v7.2 unchanged: recurringMonthlyTotal fetch from
+//     public.recurring_subscriptions. Activates c_recurring_visible.
+//   - v7.3: rewrote the no-rule-fired fallback prompt. The old version
+//     said "Use any specific number from their data if helpful" which
+//     contradicted the system prompt's "never ask for data" guardrail
+//     when no data existed. Two May 2026 cron runs (May 9 + May 10)
+//     produced fourth-wall breaks — model used "I" and asked the
+//     operator for data. The new fallback removes the trapdoor and
+//     explicitly forbids questions and number references.
 // ============================================================
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
@@ -351,7 +354,7 @@ async function processUser(supabase: any, user: any, inline: any) {
     ? byType[chosenType].sort((a: any, b: any) => b.priority - a.priority)[0]
     : null
   const prompt = chosen ? chosen.prompt(ctx)
-    : `Situation: ${ctx.firstName} has been logging consistently. Write ONE simple reflection in 1-2 sentences. Not a nudge, not advice, just a quiet observation about their relationship with money or wellness today. Use any specific number from their data if helpful. Better to say nothing than to be generic.`
+    : `Situation: ${ctx.firstName} hasn't surfaced a specific pattern this week, just steady presence. Write ONE quiet observation about showing up, consistency, or the relationship with money or wellness in general. Two sentences max. Do not mention numbers, data, streaks, or specifics from any source. Do not ask any questions. Never write "I" or refer to yourself. If you cannot say something true and warm in two sentences without numbers, write a single sentence about presence or showing up.`
   const domain = chosen?.domain || 'family'
   const ruleId = chosen?.id || 'fallback'
   // Default fallback type is 'pattern' — the most neutral, observational stance.
