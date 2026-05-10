@@ -5308,13 +5308,19 @@ function NewPromiseModal({visible,onClose,onCreated}){
       var commitmentRows=allParticipantIds.map(function(mid){
         var member=(members||[]).find(function(m){return m.id===mid;});
         var c=commitments[mid]||{};
+        var ctype=c.type||'custom';
+        var ctarget=null;
+        if(ctype==='screen_under_target'){
+          var hrs=c.targetHours;
+          ctarget={target_hours:(typeof hrs==='number'&&hrs>0&&hrs<=24)?hrs:4};
+        }
         return {
           promise_id:newPromise.id,
           member_id:mid,
           user_id:member?member.user_id:null,
           commitment_text:(c.text||'').trim(),
-          commitment_type:c.type||'custom',
-          commitment_target:null,
+          commitment_type:ctype,
+          commitment_target:ctarget,
         };
       });
       var commitsRes=await supabase.from('promise_commitments')
@@ -5398,13 +5404,46 @@ function NewPromiseModal({visible,onClose,onCreated}){
               var name=member?member.name:'Member';
               var c=commitments[mid]||{text:'',type:'custom'};
               var err=filterError[mid];
+              var typeOpts=[
+                {key:'custom',label:'Just check in'},
+                {key:'meal_log_days',label:'Daily meal logging'},
+                {key:'screen_under_target',label:'Screen under target'},
+              ];
               return <View key={mid} style={{marginBottom:16}}>
                 <Text style={[z.txM,{color:theme.text,marginBottom:4}]}>{name}</Text>
+
+                <Text style={[z.cap,{color:theme.muted,marginBottom:6}]}>How will we track this?</Text>
+                <View style={[z.row,{flexWrap:'wrap',gap:6,marginBottom:8}]}>
+                  {typeOpts.map(function(opt){
+                    var sel=(c.type||'custom')===opt.key;
+                    return <TouchableOpacity key={opt.key}
+                      style={[z.chip,sel&&z.chipSel]}
+                      onPress={function(){setCommitmentField(mid,'type',opt.key);}}>
+                      <Text style={[z.chipTx,sel&&z.chipSelTx]}>{opt.label}</Text>
+                    </TouchableOpacity>;
+                  })}
+                </View>
+
+                {c.type==='screen_under_target'&&<View style={{marginBottom:8}}>
+                  <Inp label="Hours per day (default 4)"
+                    value={c.targetHours!=null?String(c.targetHours):''}
+                    onChangeText={function(v){
+                      var n=v===''?null:Number(v);
+                      setCommitmentField(mid,'targetHours',isNaN(n)?null:n);
+                    }}
+                    placeholder="4"
+                    keyboardType="numeric"/>
+                </View>}
+
                 <Inp
                   label={"What they'll do"}
                   value={c.text}
                   onChangeText={function(v){setCommitmentField(mid,'text',v);}}
-                  placeholder={"I'll log dinners every night"}
+                  placeholder={
+                    c.type==='meal_log_days'?"I'll log dinners every night":
+                    c.type==='screen_under_target'?"I'll keep screen time under 4 hours":
+                    "I'll be there when it matters"
+                  }
                   maxLength={240}
                   multiline
                 />
