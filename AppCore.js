@@ -677,7 +677,11 @@ function buildActivityMessage(activity){
     return actor+' updated a promise';
   }
   if(activity.activity_type==='promise_reflection'){
-    return actor+' reflected on '+data.title;
+    var feltText=data.felt==='good'?'felt good about'
+      :data.felt==='mixed'?'had mixed feelings about'
+      :data.felt==='not_great'?'reflected on'
+      :'reflected on';
+    return actor+' '+feltText+' "'+data.title+'"';
   }
   return actor+' has a new update';
 }
@@ -5176,7 +5180,8 @@ function TransactionCommentsModal({visible,onClose,transaction}){
 function NewPromiseModal({visible,onClose,onCreated}){
   var theme=useThemeColors();
   var{familyId,members,userId,currentUserName,logActivity,
-      refreshPromises,refreshPromiseCommitments}=useApp();
+      refreshPromises,refreshPromiseCommitments,
+      promises,promiseCommitments}=useApp();
 
   var[step,setStep]=useState(1);
   var[selectedMemberIds,setSelectedMemberIds]=useState([]);
@@ -5261,6 +5266,54 @@ function NewPromiseModal({visible,onClose,onCreated}){
       setFilterError(errors);
       haptic('error');
       return;
+    }
+
+    // Phase C: pair-already-active UX guard. If the user is trying to
+    // make a Promise with someone they already have an active Promise
+    // with, surface a confirmation step. The DB constraint (one active
+    // pair) catches the worst case, but this gives the user a chance
+    // to back out and refine the existing one instead.
+    if(promiseCommitments&&promises&&selfMember){
+      var activePromisesGuard=(promises||[]).filter(function(p){
+        return p.status==='active';
+      });
+      var conflictPromise=null;
+      var conflictMemberName=null;
+
+      for(var pi=0;pi<activePromisesGuard.length&&!conflictPromise;pi++){
+        var ap=activePromisesGuard[pi];
+        var apCommitMembers=(promiseCommitments||[])
+          .filter(function(pc){return pc.promise_id===ap.id;})
+          .map(function(pc){return pc.member_id;});
+
+        if(apCommitMembers.indexOf(selfMember.id)>=0){
+          for(var si=0;si<selectedMemberIds.length;si++){
+            if(apCommitMembers.indexOf(selectedMemberIds[si])>=0){
+              conflictPromise=ap;
+              var cm=(members||[]).find(function(m){
+                return m.id===selectedMemberIds[si];
+              });
+              conflictMemberName=cm?cm.name:'them';
+              break;
+            }
+          }
+        }
+      }
+
+      if(conflictPromise){
+        var confirmed=await new Promise(function(resolve){
+          Alert.alert(
+            'Already a promise here',
+            'You and '+conflictMemberName+' already have "'
+              +conflictPromise.title+'" running. Make a new one anyway?',
+            [
+              {text:'Cancel',style:'cancel',onPress:function(){resolve(false);}},
+              {text:'Make another',onPress:function(){resolve(true);}}
+            ]
+          );
+        });
+        if(!confirmed)return;
+      }
     }
 
     setSaving(true);
@@ -5660,6 +5713,139 @@ function PromiseDetailModal({promise,onClose}){
           <TouchableOpacity style={{marginTop:16,alignSelf:'center'}} onPress={onClose}>
             <Text style={[z.cap,{color:theme.muted}]}>Close</Text>
           </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </View>
+  </Modal>;
+}
+
+function PromiseReflectionModal({promise,onClose,onSubmitted}){
+  var theme=useThemeColors();
+  var{userId,currentUserName,logActivity,refreshPromiseReflections}=useApp();
+  var[felt,setFelt]=useState(null);
+  var[note,setNote]=useState('');
+  var[saving,setSaving]=useState(false);
+
+  if(!promise)return null;
+
+  var statusFraming=promise.status==='complete'
+    ?'You both kept your word.'
+    :promise.status==='wound_down'
+    ?'It wrapped up. How did it feel?'
+    :'You set it aside. That counts too.';
+
+  async function submit(){
+    if(!felt||saving)return;
+    setSaving(true);
+    try{
+      var r=await supabase.from('promise_reflections').insert({
+        promise_id:promise.id,
+        user_id:userId,
+        felt:felt,
+        note:(note||'').trim()||null,
+      });
+      if(r.error)throw r.error;
+
+      if(logActivity){
+        await logActivity('promise_reflection',{
+          user_name:currentUserName||'Someone',
+          title:promise.title,
+          felt:felt,
+        },promise.id);
+      }
+
+      if(refreshPromiseReflections)await refreshPromiseReflections();
+      haptic('success');
+      if(onSubmitted)onSubmitted();
+      onClose();
+    }catch(e){
+      haptic('error');
+      showFriendlyError('Could not save',e);
+    }finally{
+      setSaving(false);
+    }
+  }
+
+  function skip(){
+    // Skip writes nothing. Bootstrap will surface again next open
+    // until the reflection exists or 7 days have passed since
+    // status change.
+    onClose();
+  }
+
+  var feltOptions=[
+    {key:'good',label:'Good'},
+    {key:'mixed',label:'Mixed'},
+    {key:'not_great',label:'Not great'},
+  ];
+
+  return <Modal visible={!!promise} animationType="slide" transparent onRequestClose={skip}>
+    <View style={z.modalWrap}>
+      <View style={[z.modal,{backgroundColor:theme.surface,maxHeight:'70%'}]}>
+        <View style={{flexDirection:'row',justifyContent:'flex-end',paddingBottom:4}}>
+          <TouchableOpacity onPress={skip}
+            style={{padding:8,marginRight:-8,marginTop:-8}}
+            hitSlop={{top:12,bottom:12,left:12,right:12}}>
+            <Text style={{fontSize:24,color:theme.muted,lineHeight:24}}>×</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView>
+          <Text style={[z.h1,{color:theme.text}]}>{promise.title}</Text>
+          <Text style={[z.cap,{marginBottom:16,color:theme.muted}]}>{statusFraming}</Text>
+
+          <Text style={[z.body,{color:theme.text,marginBottom:8}]}>How did it feel?</Text>
+          <View style={[z.row,{gap:8,marginBottom:16}]}>
+            {feltOptions.map(function(opt){
+              var sel=felt===opt.key;
+              return <TouchableOpacity key={opt.key}
+                style={{
+                  flex:1,padding:12,borderRadius:8,
+                  borderWidth:1,
+                  borderColor:sel?theme.primary:'#E0E0DB',
+                  backgroundColor:sel?theme.primary:'transparent',
+                  alignItems:'center'
+                }}
+                onPress={function(){setFelt(opt.key);}}>
+                <Text style={{
+                  color:sel?'#fff':theme.text,
+                  fontWeight:'500'
+                }}>{opt.label}</Text>
+              </TouchableOpacity>;
+            })}
+          </View>
+
+          <Text style={[z.body,{color:theme.text,marginBottom:8}]}>
+            {"Anything you'd want to remember? (optional)"}
+          </Text>
+          <Inp
+            value={note}
+            onChangeText={setNote}
+            placeholder="A line or two, no pressure"
+            maxLength={280}
+            multiline/>
+
+          <View style={[z.row,{gap:8,marginTop:20}]}>
+            <TouchableOpacity
+              style={{flex:1,padding:12,alignItems:'center'}}
+              onPress={skip}
+              disabled={saving}>
+              <Text style={{color:theme.muted,fontWeight:'500'}}>Skip for now</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                flex:2,padding:12,borderRadius:8,
+                backgroundColor:theme.primary,
+                alignItems:'center',
+                opacity:(felt&&!saving)?1:0.5
+              }}
+              disabled={!felt||saving}
+              onPress={submit}>
+              <Text style={{color:'#fff',fontWeight:'500'}}>
+                {saving?'Saving...':'Save reflection'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </View>
     </View>
@@ -8410,7 +8596,7 @@ function FamilyScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,promiseSnapshots,refreshPromises,refreshPromiseCommitments}=useApp();
+  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,promiseSnapshots,promiseReflections,refreshPromises,refreshPromiseCommitments}=useApp();
   var now=new Date();var today=isoDate(now);
   var monday=mondayOfWeek(now);
   var[inviteSheet,setInviteSheet]=useState(null); // B7: holds the member whose invite modal is open
@@ -8419,6 +8605,48 @@ function FamilyScreen(){
   var[activeSharedGoal,setActiveSharedGoal]=useState(null);
   var[showNewPromise,setShowNewPromise]=useState(false);
   var[activePromiseDetail,setActivePromiseDetail]=useState(null);
+  var[pendingReflection,setPendingReflection]=useState(null);
+
+  // Phase D: surface a reflection sheet when a Promise has
+  // transitioned in the last 7 days AND the user was a participant
+  // AND no reflection from this user exists yet. One at a time —
+  // if multiple Promises ended, we show the most recent first;
+  // user can skip and the next one appears next open.
+  useEffect(function(){
+    if(!promises||!promiseCommitments||!userId)return;
+    if(pendingReflection)return;
+
+    var sevenDaysAgo=new Date(Date.now()-7*86400000);
+
+    var candidates=(promises||[])
+      .filter(function(p){
+        return['complete','wound_down','cancelled'].indexOf(p.status)>=0;
+      })
+      .filter(function(p){
+        var updated=new Date(p.updated_at);
+        return updated>=sevenDaysAgo;
+      })
+      .filter(function(p){
+        return(promiseCommitments||[]).some(function(c){
+          return c.promise_id===p.id&&c.user_id===userId;
+        });
+      })
+      .filter(function(p){
+        return!(promiseReflections||[]).some(function(r){
+          return r.promise_id===p.id&&r.user_id===userId;
+        });
+      })
+      .sort(function(a,b){
+        return new Date(b.updated_at)-new Date(a.updated_at);
+      });
+
+    if(candidates.length>0){
+      var t=setTimeout(function(){
+        setPendingReflection(candidates[0]);
+      },600);
+      return function(){clearTimeout(t);};
+    }
+  },[promises,promiseCommitments,promiseReflections,userId]);
   var[showRename,setShowRename]=useState(false); // FA2
   var[memberDetail,setMemberDetail]=useState(null); // FA5/FA6/FA7/FA8/FA11/FA16
   var[scoreScope,setScoreScope]=useState(null); // {scope:'family'|'member', member:...} for FA4/FA14/FA6
@@ -8536,6 +8764,7 @@ function FamilyScreen(){
     <SharedGoalModal visible={showSharedGoalModal} onClose={function(){setShowSharedGoalModal(false);setActiveSharedGoal(null);}} goal={activeSharedGoal}/>
     <NewPromiseModal visible={showNewPromise} onClose={function(){setShowNewPromise(false);}} onCreated={function(){}}/>
     <PromiseDetailModal promise={activePromiseDetail} onClose={function(){setActivePromiseDetail(null);}}/>
+    <PromiseReflectionModal promise={pendingReflection} onClose={function(){setPendingReflection(null);}} onSubmitted={function(){}}/>
     <RenameFamilyModal visible={showRename} onClose={function(){setShowRename(false);}} familyId={familyId} currentName={familyName} onRenamed={function(newName){setFamilyName&&setFamilyName(newName);}}/>
     <MemberDetailModal visible={!!memberDetail} member={memberDetail} onClose={function(){setMemberDetail(null);}}
       onJumpProtein={function(m){setMemberDetail(null);setQuickAction&&setQuickAction({action:'focus_member',memberName:m.name,nonce:Date.now()});navigation.navigate('Wellness');}}
