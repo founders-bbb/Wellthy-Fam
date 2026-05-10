@@ -5199,6 +5199,14 @@ function NewPromiseModal({visible,onClose,onCreated}){
     }
   },[visible]);
 
+  useEffect(function(){
+    if(endDate<=startDate){
+      var d=new Date(startDate);
+      d.setDate(d.getDate()+1);
+      setEndDate(d);
+    }
+  },[startDate]);
+
   var otherMembers=(members||[]).filter(function(m){return m.user_id!==userId;});
   var selfMember=(members||[]).find(function(m){return m.user_id===userId;});
   var allParticipantIds=selfMember
@@ -5227,14 +5235,13 @@ function NewPromiseModal({visible,onClose,onCreated}){
 
   function canAdvance(){
     if(step===1)return selectedMemberIds.length>=1;
-    if(step===2)return true;
-    if(step===3){
+    if(step===2){
       return allParticipantIds.every(function(mid){
         var c=commitments[mid];
         return c&&c.text&&c.text.length>=4&&c.text.length<=240;
       });
     }
-    if(step===4){
+    if(step===3){
       var diff=(endDate-startDate)/86400000;
       return diff>=0&&diff<=90;
     }
@@ -5347,9 +5354,16 @@ function NewPromiseModal({visible,onClose,onCreated}){
   return <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
     <View style={z.modalWrap}>
       <View style={[z.modal,{backgroundColor:theme.surface,maxHeight:'90%'}]}>
+        <View style={{flexDirection:'row',justifyContent:'flex-end',paddingBottom:4}}>
+          <TouchableOpacity onPress={onClose}
+            style={{padding:8,marginRight:-8,marginTop:-8}}
+            hitSlop={{top:12,bottom:12,left:12,right:12}}>
+            <Text style={{fontSize:24,color:theme.muted,lineHeight:24}}>×</Text>
+          </TouchableOpacity>
+        </View>
         <ScrollView style={{flexGrow:0}}>
           <Text style={[z.h1,{color:theme.text}]}>Make a promise</Text>
-          <Text style={[z.cap,{marginBottom:16}]}>Step {step} of 5</Text>
+          <Text style={[z.cap,{marginBottom:16}]}>Step {step} of 3</Text>
 
           {step===1&&<View>
             <Text style={[z.body,{color:theme.text,marginBottom:12}]}>{"Who's in this with you?"}</Text>
@@ -5364,10 +5378,8 @@ function NewPromiseModal({visible,onClose,onCreated}){
               })}
             </View>
             {otherMembers.length===0&&<Text style={[z.cap,{color:theme.muted,marginTop:8}]}>No other family members yet. Add someone to the family first.</Text>}
-          </View>}
 
-          {step===2&&<View>
-            <Text style={[z.body,{color:theme.text,marginBottom:12}]}>Want a starting point?</Text>
+            <Text style={[z.body,{color:theme.text,marginTop:20,marginBottom:12}]}>Want a starting point?</Text>
             {templates.map(function(t){
               var sel=template===t.key;
               return <TouchableOpacity key={t.key}
@@ -5378,7 +5390,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
             })}
           </View>}
 
-          {step===3&&<View>
+          {step===2&&<View>
             <Text style={[z.body,{color:theme.text,marginBottom:4}]}>{"What you'll each do"}</Text>
             <Text style={[z.cap,{color:theme.muted,marginBottom:12}]}>{"Promises are reciprocal. Both of you write what you'll do, not what you want from the other."}</Text>
             {allParticipantIds.map(function(mid){
@@ -5401,16 +5413,14 @@ function NewPromiseModal({visible,onClose,onCreated}){
             })}
           </View>}
 
-          {step===4&&<View>
-            <Text style={[z.body,{color:theme.text,marginBottom:12}]}>For how long?</Text>
+          {step===3&&<View>
+            <Text style={[z.body,{color:theme.text,marginBottom:12}]}>When + name</Text>
             <DateField label="Start date" value={startDate} onChange={setStartDate}/>
-            <DateField label="End date" value={endDate} onChange={setEndDate}/>
-            <Text style={[z.cap,{color:theme.muted,marginTop:8}]}>Up to 90 days.</Text>
-          </View>}
-
-          {step===5&&<View>
-            <Text style={[z.body,{color:theme.text,marginBottom:12}]}>Give it a name (optional)</Text>
-            <Inp label="Name" value={title} onChangeText={setTitle}
+            <DateField label="End date" value={endDate} onChange={setEndDate}
+              minimumDate={(function(){var d=new Date(startDate);d.setDate(d.getDate()+1);return d;})()}
+              maximumDate={(function(){var d=new Date(startDate);d.setDate(d.getDate()+90);return d;})()}/>
+            <Text style={[z.cap,{color:theme.muted,marginTop:8,marginBottom:16}]}>Up to 90 days.</Text>
+            <Inp label="Name (optional)" value={title} onChangeText={setTitle}
               placeholder="Headphones month" maxLength={80}/>
             <Text style={[z.cap,{color:theme.muted,marginTop:12}]}>
               {selectedMemberIds.some(function(mid){
@@ -5422,13 +5432,9 @@ function NewPromiseModal({visible,onClose,onCreated}){
 
           <View style={{flexDirection:'row',gap:8,marginTop:20}}>
             {step>1&&<View style={{flex:1}}><SecondaryButton full onPress={function(){setStep(step-1);}}>Back</SecondaryButton></View>}
-            {step<5&&<View style={{flex:1}}><PrimaryButton full disabled={!canAdvance()} onPress={function(){setStep(step+1);}}>Next</PrimaryButton></View>}
-            {step===5&&<View style={{flex:1}}><PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving...':'Send to family'}</PrimaryButton></View>}
+            {step<3&&<View style={{flex:1}}><PrimaryButton full disabled={!canAdvance()} onPress={function(){setStep(step+1);}}>Next</PrimaryButton></View>}
+            {step===3&&<View style={{flex:1}}><PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving...':'Send to family'}</PrimaryButton></View>}
           </View>
-
-          <TouchableOpacity style={{marginTop:12,alignSelf:'center'}} onPress={onClose}>
-            <Text style={[z.cap,{color:theme.muted}]}>Close</Text>
-          </TouchableOpacity>
         </ScrollView>
       </View>
     </View>
