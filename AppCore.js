@@ -5443,7 +5443,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
 
 function PromiseDetailModal({promise,onClose}){
   var theme=useThemeColors();
-  var{members,userId,currentUserName,promiseCommitments,
+  var{members,userId,currentUserName,promiseCommitments,promiseSnapshots,
       logActivity,refreshPromises,refreshPromiseCommitments}=useApp();
   var[busy,setBusy]=useState(false);
 
@@ -5558,16 +5558,48 @@ function PromiseDetailModal({promise,onClose}){
             var member=(members||[]).find(function(m){return m.id===c.member_id;});
             var name=member?member.name:'Member';
             var isMine=c.user_id===userId;
+
+            var snaps=(promiseSnapshots||[]).filter(function(s){return s.commitment_id===c.id;});
+            snaps.sort(function(a,b){return a.snapshot_date<b.snapshot_date?1:-1;});
+            var snap=snaps[0]||null;
+
+            var isManualOnly=c.commitment_type==='custom'||!snap||snap.progress_target===null;
+
             return <View key={c.id} style={[z.card,{marginBottom:8}]}>
               <Text style={[z.txM,{color:theme.text}]}>{name}</Text>
               <Text style={[z.body,{color:theme.text,marginVertical:4}]}>{c.commitment_text}</Text>
-              {c.manually_marked_done
-                ?<Text style={[z.cap,{color:theme.primary,fontWeight:'500'}]}>
-                    Marked done{c.manually_marked_done_at?' on '+displayDate(c.manually_marked_done_at):''}
-                  </Text>
-                :(isMine&&promise.status==='active'
-                  ?<View style={{marginTop:6,alignSelf:'flex-start'}}><SecondaryButton onPress={function(){markCommitmentDone(c.id);}} disabled={busy}>Mark this done</SecondaryButton></View>
-                  :<Text style={[z.cap,{color:theme.muted}]}>In progress</Text>)
+              {isManualOnly
+                ?(c.manually_marked_done
+                  ?<Text style={[z.cap,{color:theme.primary,fontWeight:'500'}]}>
+                      Marked done{c.manually_marked_done_at?' on '+displayDate(c.manually_marked_done_at):''}
+                    </Text>
+                  :(isMine&&promise.status==='active'
+                    ?<View style={{marginTop:6,alignSelf:'flex-start'}}><SecondaryButton onPress={function(){markCommitmentDone(c.id);}} disabled={busy}>Mark this done</SecondaryButton></View>
+                    :<Text style={[z.cap,{color:theme.muted}]}>In progress</Text>))
+                :(function(){
+                    var pctProgress=snap.progress_target>0
+                      ?Math.min(1,snap.progress_value/snap.progress_target)
+                      :0;
+                    var startD=new Date(promise.start_date+'T00:00:00Z');
+                    var endD=new Date(promise.end_date+'T00:00:00Z');
+                    var nowD=new Date();
+                    var totalMs=endD-startD;
+                    var elapsedMs=Math.max(0,Math.min(totalMs,nowD-startD));
+                    var pctElapsed=totalMs>0?elapsedMs/totalMs:0;
+                    var atRisk=pctElapsed>0.5&&pctProgress<0.5;
+                    var barColor=atRisk?theme.accent:theme.primary;
+
+                    return <View>
+                      <View style={{height:8,backgroundColor:'#E8E5DD',borderRadius:4,marginTop:4,overflow:'hidden'}}>
+                        <View style={{height:8,width:(pctProgress*100)+'%',backgroundColor:barColor}}/>
+                      </View>
+                      <Text style={[z.cap,{color:theme.muted,marginTop:4}]}>
+                        {snap.progress_value} of {snap.progress_target}
+                        {snap.is_on_track===true?' · on track':''}
+                        {snap.is_on_track===false?' · catching up':''}
+                      </Text>
+                    </View>;
+                  })()
               }
             </View>;
           })}
@@ -8339,7 +8371,7 @@ function FamilyScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,refreshPromises,refreshPromiseCommitments}=useApp();
+  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,promiseSnapshots,refreshPromises,refreshPromiseCommitments}=useApp();
   var now=new Date();var today=isoDate(now);
   var monday=mondayOfWeek(now);
   var[inviteSheet,setInviteSheet]=useState(null); // B7: holds the member whose invite modal is open
@@ -8552,10 +8584,18 @@ function FamilyScreen(){
 
       <Sec>Promises in motion</Sec>
       {(promises||[]).filter(function(p){return p.status==='active';}).length>0
-        ?(promises||[]).filter(function(p){return p.status==='active';}).slice(0,5).map(function(p){
+        ?(function(){
+          function latestSnapshot(commitmentId){
+            var snaps=(promiseSnapshots||[]).filter(function(s){return s.commitment_id===commitmentId;});
+            if(snaps.length===0)return null;
+            snaps.sort(function(a,b){return a.snapshot_date<b.snapshot_date?1:-1;});
+            return snaps[0];
+          }
+          return (promises||[]).filter(function(p){return p.status==='active';}).slice(0,5).map(function(p){
             var pCommits=(promiseCommitments||[]).filter(function(c){return c.promise_id===p.id;});
             var totalDays=Math.max(1,Math.ceil((new Date(p.end_date)-new Date(p.start_date))/86400000));
             var elapsedDays=Math.max(0,Math.min(totalDays,Math.ceil((new Date()-new Date(p.start_date))/86400000)));
+            var pctElapsed=totalDays>0?elapsedDays/totalDays:0;
             return <TouchableOpacity key={p.id} style={[z.card,{backgroundColor:theme.surface,borderColor:theme.border,marginBottom:8}]}
               onPress={function(){setActivePromiseDetail(p);}}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
@@ -8568,18 +8608,40 @@ function FamilyScreen(){
               {pCommits.slice(0,4).map(function(c){
                 var member=(members||[]).find(function(m){return m.id===c.member_id;});
                 var name=member?member.name:'Member';
-                var preview=c.commitment_text&&c.commitment_text.length>60
+                var text=c.commitment_text&&c.commitment_text.length>60
                   ?c.commitment_text.slice(0,57)+'...'
                   :(c.commitment_text||'');
-                return <View key={c.id} style={{marginBottom:4}}>
-                  <Text style={[z.body,{color:theme.text}]}>
-                    {name}{': "'}{preview}{'"'}
+                var snap=latestSnapshot(c.id);
+
+                if(c.commitment_type==='custom'||!snap||snap.progress_target===null){
+                  return <View key={c.id} style={{marginBottom:6}}>
+                    <Text style={[z.body,{color:theme.text}]}>{name}{': "'}{text}{'"'}</Text>
+                    {c.manually_marked_done
+                      ?<Text style={[z.cap,{color:theme.primary}]}>marked done</Text>
+                      :<Text style={[z.cap,{color:theme.muted}]}>in progress</Text>}
+                  </View>;
+                }
+
+                var pctProgress=snap.progress_target>0
+                  ?Math.min(1,snap.progress_value/snap.progress_target)
+                  :0;
+                var atRisk=pctElapsed>0.5&&pctProgress<0.5;
+                var barColor=atRisk?theme.accent:theme.primary;
+
+                return <View key={c.id} style={{marginBottom:6}}>
+                  <Text style={[z.body,{color:theme.text}]}>{name}{': "'}{text}{'"'}</Text>
+                  <View style={{height:6,backgroundColor:'#E8E5DD',borderRadius:3,marginTop:4,overflow:'hidden'}}>
+                    <View style={{height:6,width:(pctProgress*100)+'%',backgroundColor:barColor}}/>
+                  </View>
+                  <Text style={[z.cap,{color:theme.muted,marginTop:2}]}>
+                    {snap.progress_value} of {snap.progress_target}
+                    {atRisk?' · catching up':''}
                   </Text>
-                  {c.manually_marked_done&&<Text style={[z.cap,{color:theme.primary}]}>marked done</Text>}
                 </View>;
               })}
             </TouchableOpacity>;
-          })
+          });
+        })()
         :<Text style={[z.cap,{color:theme.muted}]}>No promises yet. The first one starts when you make it with someone.</Text>
       }
       <View style={{alignSelf:'flex-start',marginTop:8,marginBottom:16}}>
@@ -9382,6 +9444,7 @@ function AppInner(){
   var[sharedGoalContributions,setSharedGoalContributions]=useState([]);
   var[promises,setPromises]=useState([]);
   var[promiseCommitments,setPromiseCommitments]=useState([]);
+  var[promiseSnapshots,setPromiseSnapshots]=useState([]);
   var[promiseReflections,setPromiseReflections]=useState([]);
   var[activityFeed,setActivityFeed]=useState([]);
   var[customCategories,setCustomCategories]=useState([]);
@@ -9618,6 +9681,232 @@ function AppInner(){
       await refreshTransactions(family);
       await refreshRecurringTransactions(family);
     }catch(e){console.log('[RECURRING AUTO CREATE ERROR]',e);}
+  }
+
+  // Promises Phase B evaluator. Runs once per active Promise per day
+  // at app open. Reads existing tables (meals, wellness,
+  // shared_goal_contributions) and writes promise_progress_snapshots
+  // rows. If today >= end_date, also handles auto-transition to
+  // complete or wound_down.
+  //
+  // Backfills any missing days from start_date to today, so a 7-day
+  // gap (user didn't open the app for a week) produces a complete
+  // history on next open.
+  //
+  // Per-type formulas match PROMISES_SPEC §6 with one deviation:
+  // the spec says wellness.screen_time_minutes; the actual column
+  // is wellness.screen_hrs (hours, not minutes). Used screen_hrs.
+  // family_score_pct is stubbed (null progress) pending formula
+  // clarification — see comment inline.
+  async function evaluatePromiseProgress(fid){
+    var family=fid||familyId;
+    if(!family||!userId)return;
+
+    try{
+      var promRes=await supabase.from('promises')
+        .select('*')
+        .eq('family_id',family)
+        .eq('status','active');
+      if(promRes.error){console.log('[EVALUATOR] promises fetch error',promRes.error);return;}
+      var activePromises=promRes.data||[];
+      if(activePromises.length===0)return;
+
+      var promiseIds=activePromises.map(function(p){return p.id;});
+      var commRes=await supabase.from('promise_commitments')
+        .select('*')
+        .in('promise_id',promiseIds);
+      if(commRes.error){console.log('[EVALUATOR] commitments fetch error',commRes.error);return;}
+      var commitments=commRes.data||[];
+
+      var commIds=commitments.map(function(c){return c.id;});
+      var snapRes=commIds.length>0
+        ?await supabase.from('promise_progress_snapshots')
+            .select('commitment_id, snapshot_date')
+            .in('commitment_id',commIds)
+        :{data:[]};
+      var existingSnaps={};
+      (snapRes.data||[]).forEach(function(s){
+        existingSnaps[s.commitment_id+'-'+s.snapshot_date]=true;
+      });
+
+      var todayISO=isoDate(new Date());
+      var todayDate=new Date(todayISO+'T00:00:00Z');
+      var rowsToInsert=[];
+
+      for(var i=0;i<activePromises.length;i++){
+        var p=activePromises[i];
+        var pCommits=commitments.filter(function(c){return c.promise_id===p.id;});
+        if(pCommits.length===0)continue;
+
+        var startDate=new Date(p.start_date+'T00:00:00Z');
+        var endDate=new Date(p.end_date+'T00:00:00Z');
+        var walkUntil=todayDate<endDate?todayDate:endDate;
+
+        var srcMeals=[],srcWellness=[],srcContribs=[];
+        var memberIds=pCommits.map(function(c){return c.member_id;}).filter(Boolean);
+        var userIds=pCommits.map(function(c){return c.user_id;}).filter(Boolean);
+
+        if(memberIds.length>0){
+          var mealRes=await supabase.from('meals')
+            .select('member_id, date')
+            .in('member_id',memberIds)
+            .gte('date',p.start_date)
+            .lte('date',isoDate(walkUntil));
+          srcMeals=mealRes.data||[];
+
+          var wellRes=await supabase.from('wellness')
+            .select('member_id, date, screen_hrs')
+            .in('member_id',memberIds)
+            .gte('date',p.start_date)
+            .lte('date',isoDate(walkUntil));
+          srcWellness=wellRes.data||[];
+        }
+        if(userIds.length>0){
+          var contribRes=await supabase.from('shared_goal_contributions')
+            .select('user_id, amount, contributed_at')
+            .in('user_id',userIds)
+            .gte('contributed_at',p.start_date)
+            .lte('contributed_at',isoDate(walkUntil)+'T23:59:59Z');
+          srcContribs=contribRes.data||[];
+        }
+
+        var d=new Date(startDate);
+        while(d<=walkUntil){
+          var dateISO=isoDate(d);
+          var elapsedDays=Math.floor((d-startDate)/86400000)+1;
+
+          for(var j=0;j<pCommits.length;j++){
+            var c=pCommits[j];
+            var key=c.id+'-'+dateISO;
+            if(existingSnaps[key])continue;
+
+            var progressValue=null;
+            var progressTarget=null;
+            var isOnTrack=null;
+            var meta=null;
+
+            if(c.commitment_type==='meal_log_days'){
+              var memberMealDays={};
+              srcMeals.forEach(function(m){
+                if(m.member_id===c.member_id&&m.date<=dateISO){
+                  memberMealDays[m.date]=true;
+                }
+              });
+              progressValue=Object.keys(memberMealDays).length;
+              progressTarget=elapsedDays;
+              isOnTrack=progressTarget>0
+                ?(progressValue/progressTarget>=0.8)
+                :true;
+            }
+            else if(c.commitment_type==='screen_under_target'){
+              var targetHrs=(c.commitment_target&&c.commitment_target.target_hours)||4;
+              var underCount=0;
+              srcWellness.forEach(function(w){
+                if(w.member_id===c.member_id&&w.date<=dateISO
+                   &&w.screen_hrs!==null&&Number(w.screen_hrs)<=targetHrs){
+                  underCount++;
+                }
+              });
+              progressValue=underCount;
+              progressTarget=elapsedDays;
+              isOnTrack=progressTarget>0
+                ?(progressValue/progressTarget>=0.8)
+                :true;
+              meta={target_hours:targetHrs};
+            }
+            else if(c.commitment_type==='contribution_amount'){
+              var sumAmt=0;
+              srcContribs.forEach(function(cb){
+                if(cb.user_id===c.user_id&&cb.contributed_at<=dateISO+'T23:59:59Z'){
+                  sumAmt+=Number(cb.amount||0);
+                }
+              });
+              progressValue=sumAmt;
+              progressTarget=(c.commitment_target&&c.commitment_target.target_amount)||null;
+              isOnTrack=progressTarget!==null&&progressTarget>0
+                ?(progressValue>=progressTarget)
+                :null;
+            }
+            else if(c.commitment_type==='family_score_pct'){
+              // STUB: spec says "average % of weekly target hit" but
+              // family_scores has no weekly_target column. Punted to
+              // null until formula is clarified. See PROMISES_SPEC §6.
+              progressValue=null;
+              progressTarget=null;
+              isOnTrack=null;
+            }
+            else {
+              // commitment_type === 'custom' — relies on manually_marked_done.
+              progressValue=c.manually_marked_done?1:0;
+              progressTarget=1;
+              isOnTrack=c.manually_marked_done;
+            }
+
+            rowsToInsert.push({
+              commitment_id:c.id,
+              snapshot_date:dateISO,
+              progress_value:progressValue,
+              progress_target:progressTarget,
+              is_on_track:isOnTrack,
+              meta:meta,
+            });
+          }
+
+          d=new Date(d.getTime()+86400000);
+        }
+      }
+
+      if(rowsToInsert.length>0){
+        var insRes=await supabase.from('promise_progress_snapshots')
+          .insert(rowsToInsert);
+        if(insRes.error)console.log('[EVALUATOR] snapshot insert error',insRes.error);
+      }
+
+      for(var k=0;k<activePromises.length;k++){
+        var ap=activePromises[k];
+        var apEnd=new Date(ap.end_date+'T00:00:00Z');
+        if(todayDate<apEnd)continue;
+
+        var apCommits=commitments.filter(function(c){return c.promise_id===ap.id;});
+        var allOnTrack=true;
+        for(var m=0;m<apCommits.length;m++){
+          var cm=apCommits[m];
+          if(cm.commitment_type==='custom'){
+            if(!cm.manually_marked_done){allOnTrack=false;break;}
+            continue;
+          }
+          var lastSnapRes=await supabase.from('promise_progress_snapshots')
+            .select('is_on_track')
+            .eq('commitment_id',cm.id)
+            .order('snapshot_date',{ascending:false})
+            .limit(1).maybeSingle();
+          if(lastSnapRes.error){allOnTrack=false;break;}
+          if(!lastSnapRes.data||lastSnapRes.data.is_on_track!==true){
+            allOnTrack=false;break;
+          }
+        }
+
+        var newStatus=allOnTrack?'complete':'wound_down';
+        var transRes=await supabase.from('promises').update({
+          status:newStatus,
+          updated_at:new Date().toISOString(),
+        }).eq('id',ap.id);
+
+        if(!transRes.error&&logActivity){
+          await logActivity('promise',{
+            user_name:'Wellthy',
+            action:newStatus==='complete'?'completed':'wound_down',
+            title:ap.title,
+          },ap.id);
+        }
+      }
+
+      if(refreshPromises)await refreshPromises(family);
+      if(refreshPromiseCommitments)await refreshPromiseCommitments(family);
+
+    }catch(e){
+      console.log('[EVALUATOR] unexpected error',e);
+    }
   }
 
   // Register this device for push notifications
@@ -10052,7 +10341,7 @@ function AppInner(){
       if(event==='SIGNED_OUT'){
         setFamilyId(null);setFamilyName('');setCurrentUserName('');setUserCreatedAt(null);setOnboarded(false);
         setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
-        setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setPromises([]);setPromiseCommitments([]);setPromiseReflections([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
+        setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setPromises([]);setPromiseCommitments([]);setPromiseSnapshots([]);setPromiseReflections([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
         setScores([]);setStreaks([]);setIsAdmin(false);setShowSettings(false);setShowQuestionnaire(false);setQuickAction(null);
         setTodayNudge(null);setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setRecurringSubscriptions([]);setNotificationEnabled(true);setWaterTrackingEnabled(false);setSilentHoursEnabled(true);setSilentHoursStart('22:00');setSilentHoursEnd('08:00');
         setCurrentUser(null);
@@ -10132,7 +10421,7 @@ function AppInner(){
     if(!user){
       setFamilyId(null);setFamilyName('');setCurrentUserName('');setUserCreatedAt(null);setOnboarded(false);
       setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
-      setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setPromises([]);setPromiseCommitments([]);setPromiseReflections([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
+      setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setPromises([]);setPromiseCommitments([]);setPromiseSnapshots([]);setPromiseReflections([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
       setScores([]);setStreaks([]);setIsAdmin(false);setQuickAction(null);
       setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setRecurringSubscriptions([]);setShowQuestionnaire(false);
       return;
@@ -10400,6 +10689,18 @@ function AppInner(){
     return r.data||[];
   }
 
+  async function refreshPromiseSnapshots(fid){
+    var family=fid||familyId;
+    if(!family)return[];
+    // RLS scopes through parent commitment → parent promise → family.
+    var r=await supabase.from('promise_progress_snapshots')
+      .select('*')
+      .order('snapshot_date',{ascending:false});
+    if(r.error){console.log('[PROMISE SNAPSHOTS FETCH ERROR]',r.error);return[];}
+    setPromiseSnapshots(r.data||[]);
+    return r.data||[];
+  }
+
   async function refreshPromiseReflections(fid){
     var family=fid||familyId;
     if(!family)return[];
@@ -10523,6 +10824,7 @@ function AppInner(){
           refreshSharedGoalContributions(familyId),
           refreshPromises(familyId),
           refreshPromiseCommitments(familyId),
+          refreshPromiseSnapshots(familyId),
           refreshPromiseReflections(familyId),
           refreshActivityFeed(familyId),
           refreshCustomCategories(familyId),
@@ -10549,6 +10851,7 @@ function AppInner(){
     }
     refreshRecurringTransactions(familyId).catch(function(e){console.log('[RECURRING FETCH ERROR]',e);});
     checkAndCreateRecurringTransactions(familyId).catch(function(e){console.log('[RECURRING AUTO CHECK ERROR]',e);});
+    evaluatePromiseProgress(familyId).catch(function(e){console.log('[PROMISE EVALUATOR ERROR]',e);});
     var ch=supabase.channel('fam_'+familyId)
       .on('postgres_changes',{event:'*',schema:'public',table:'family_members',filter:'family_id=eq.'+familyId},function(){refreshMembers(familyId).catch(function(e){console.log('[REALTIME MEMBERS ERROR]',e);});})
       .on('postgres_changes',{event:'*',schema:'public',table:'family_invites',filter:'family_id=eq.'+familyId},function(){refreshMembers(familyId).catch(function(e){console.log('[REALTIME INVITES ERROR]',e);});})
@@ -10701,6 +11004,7 @@ function AppInner(){
     recurringSubscriptions:recurringSubscriptions,
     promises:promises,
     promiseCommitments:promiseCommitments,
+    promiseSnapshots:promiseSnapshots,
     promiseReflections:promiseReflections,
     transactionComments:transactionComments,
     sharedGoals:sharedGoals,
@@ -10741,6 +11045,7 @@ function AppInner(){
     dismissRecurringSubscription:dismissRecurringSubscription,
     refreshPromises:refreshPromises,
     refreshPromiseCommitments:refreshPromiseCommitments,
+    refreshPromiseSnapshots:refreshPromiseSnapshots,
     refreshPromiseReflections:refreshPromiseReflections,
     refreshTransactionComments:refreshTransactionComments,
     refreshSharedGoals:refreshSharedGoals,
