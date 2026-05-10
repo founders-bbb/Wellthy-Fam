@@ -454,6 +454,21 @@ function monthKey(d){var dt=toDate(d);return dt.getFullYear()+'-'+String(dt.getM
 function clamp(n,min,max){return Math.max(min,Math.min(max,n));}
 function getMemberForUser(members,userId){return(members||[]).find(function(m){return m.userId===userId;})||null;}
 
+// Promises feature: resolve a family_members row to a display name.
+// Names live on users.name (family_members.name is often null), so
+// walk: family_members.name -> memberProfiles[user_id].name (from
+// users.name) -> currentUserName for self -> 'Member'.
+function resolveMemberName(member,memberProfiles,userId,currentUserName){
+  if(!member)return'Member';
+  if(member.name)return member.name;
+  if(member.user_id&&memberProfiles&&memberProfiles[member.user_id]
+     &&memberProfiles[member.user_id].name){
+    return memberProfiles[member.user_id].name;
+  }
+  if(member.user_id===userId&&currentUserName)return currentUserName;
+  return'Member';
+}
+
 // Promises feature: stick-filter checks for transactional/punitive
 // language in commitment text. Returns an error message string if
 // the text matches a forbidden pattern, null otherwise.
@@ -5179,7 +5194,8 @@ function TransactionCommentsModal({visible,onClose,transaction}){
 
 function InvitationConfirmModal({commitment,promise,onClose}){
   var theme=useThemeColors();
-  var{members,editAndConfirmPromiseCommitment}=useApp();
+  var{members,editAndConfirmPromiseCommitment,memberProfiles,userId,currentUserName}=useApp();
+  function rname(m){return resolveMemberName(m,memberProfiles,userId,currentUserName);}
   var[text,setText]=useState('');
   var[ctype,setCtype]=useState('custom');
   var[targetHours,setTargetHours]=useState(null);
@@ -5199,7 +5215,7 @@ function InvitationConfirmModal({commitment,promise,onClose}){
   var creator=(members||[]).find(function(m){
     return m.user_id===promise.created_by;
   });
-  var creatorName=creator?creator.name:'Someone';
+  var creatorName=creator?rname(creator):'Someone';
 
   async function save(){
     if(saving)return;
@@ -5302,7 +5318,8 @@ function NewPromiseModal({visible,onClose,onCreated}){
   var theme=useThemeColors();
   var{familyId,members,userId,currentUserName,logActivity,
       refreshPromises,refreshPromiseCommitments,
-      promises,promiseCommitments}=useApp();
+      promises,promiseCommitments,memberProfiles}=useApp();
+  function rname(m){return resolveMemberName(m,memberProfiles,userId,currentUserName);}
 
   var[step,setStep]=useState(1);
   var[selectedMemberIds,setSelectedMemberIds]=useState([]);
@@ -5333,13 +5350,17 @@ function NewPromiseModal({visible,onClose,onCreated}){
     }
   },[startDate]);
 
-  var otherMembers=(members||[]).filter(function(m){return m.user_id!==userId;});
+  var otherMembers=(members||[]).filter(function(m){
+    if(!userId)return false;
+    return m.user_id!==userId;
+  });
   var selfMember=(members||[]).find(function(m){return m.user_id===userId;});
   var allParticipantIds=selfMember
     ?[selfMember.id].concat(selectedMemberIds)
     :selectedMemberIds.slice();
 
   function toggleMember(mid){
+    if(selfMember&&mid===selfMember.id)return;
     if(selectedMemberIds.indexOf(mid)>=0){
       setSelectedMemberIds(selectedMemberIds.filter(function(x){return x!==mid;}));
     } else {
@@ -5459,10 +5480,10 @@ function NewPromiseModal({visible,onClose,onCreated}){
         }
       }catch(e){console.log('[MINOR CHECK ERROR]',e);}
 
-      var defaultTitle=(selfMember?selfMember.name:'Someone')+' & '
+      var defaultTitle=rname(selfMember)+' & '
         +((members||[]).filter(function(m){
             return selectedMemberIds.indexOf(m.id)>=0;
-          }).map(function(m){return m.name;}).join(' & '))
+          }).map(rname).join(' & '))
         +"'s promise";
       var promisePayload={
         family_id:familyId,
@@ -5558,7 +5579,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
                 return <TouchableOpacity key={m.id}
                   style={[z.chip,sel&&z.chipSel]}
                   onPress={function(){toggleMember(m.id);}}>
-                  <Text style={[z.chipTx,sel&&z.chipSelTx]}>{m.name}</Text>
+                  <Text style={[z.chipTx,sel&&z.chipSelTx]}>{rname(m)}</Text>
                 </TouchableOpacity>;
               })}
             </View>
@@ -5580,7 +5601,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
             <Text style={[z.cap,{color:theme.muted,marginBottom:12}]}>{"Promises are reciprocal. Both of you write what you'll do, not what you want from the other."}</Text>
             {allParticipantIds.map(function(mid){
               var member=(members||[]).find(function(m){return m.id===mid;});
-              var name=member?member.name:'Member';
+              var name=rname(member);
               var c=commitments[mid]||{text:'',type:'custom'};
               var err=filterError[mid];
               var typeOpts=[
@@ -5662,7 +5683,8 @@ function NewPromiseModal({visible,onClose,onCreated}){
 function PromiseDetailModal({promise,onClose}){
   var theme=useThemeColors();
   var{members,userId,currentUserName,promiseCommitments,promiseSnapshots,
-      logActivity,refreshPromises,refreshPromiseCommitments}=useApp();
+      logActivity,refreshPromises,refreshPromiseCommitments,memberProfiles}=useApp();
+  function rname(m){return resolveMemberName(m,memberProfiles,userId,currentUserName);}
   var[busy,setBusy]=useState(false);
 
   if(!promise)return null;
@@ -5774,7 +5796,7 @@ function PromiseDetailModal({promise,onClose}){
 
           {commitments.map(function(c){
             var member=(members||[]).find(function(m){return m.id===c.member_id;});
-            var name=member?member.name:'Member';
+            var name=rname(member);
             var isMine=c.user_id===userId;
 
             var snaps=(promiseSnapshots||[]).filter(function(s){return s.commitment_id===c.id;});
@@ -8736,7 +8758,8 @@ function FamilyScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,promiseSnapshots,promiseReflections,refreshPromises,refreshPromiseCommitments,confirmPromiseCommitment,declinePromiseCommitment}=useApp();
+  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,promiseSnapshots,promiseReflections,refreshPromises,refreshPromiseCommitments,confirmPromiseCommitment,declinePromiseCommitment,memberProfiles,currentUserName}=useApp();
+  function rname(m){return resolveMemberName(m,memberProfiles,userId,currentUserName);}
   var now=new Date();var today=isoDate(now);
   var monday=mondayOfWeek(now);
   var[inviteSheet,setInviteSheet]=useState(null); // B7: holds the member whose invite modal is open
@@ -9006,7 +9029,7 @@ function FamilyScreen(){
             var p=(promises||[]).find(function(pp){return pp.id===c.promise_id;});
             if(!p)return null;
             var creator=(members||[]).find(function(m){return m.user_id===p.created_by;});
-            var creatorName=creator?creator.name:'Someone';
+            var creatorName=creator?rname(creator):'Someone';
             return <View key={c.id} style={[z.card,{marginBottom:8,borderWidth:1,borderColor:theme.primary}]}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}>
                 <View style={{flex:1}}>
@@ -9088,7 +9111,7 @@ function FamilyScreen(){
               </Text>
               {pCommits.slice(0,4).map(function(c){
                 var member=(members||[]).find(function(m){return m.id===c.member_id;});
-                var name=member?member.name:'Member';
+                var name=rname(member);
                 var text=c.commitment_text&&c.commitment_text.length>60
                   ?c.commitment_text.slice(0,57)+'...'
                   :(c.commitment_text||'');
