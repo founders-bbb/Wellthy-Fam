@@ -5349,7 +5349,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
         start_date:isoDate(startDate),
         end_date:isoDate(endDate),
         status:'active',
-        visibility:involvesMinor?'participants_plus_admin':'participants_only',
+        visibility:involvesMinor?'participants_plus_admin':'family',
         involves_minor:involvesMinor,
         created_by:userId,
       };
