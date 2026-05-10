@@ -453,6 +453,31 @@ function addDays(d,days){var dt=toDate(d);dt.setDate(dt.getDate()+days);return d
 function monthKey(d){var dt=toDate(d);return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');}
 function clamp(n,min,max){return Math.max(min,Math.min(max,n));}
 function getMemberForUser(members,userId){return(members||[]).find(function(m){return m.userId===userId;})||null;}
+
+// Promises feature: stick-filter checks for transactional/punitive
+// language in commitment text. Returns an error message string if
+// the text matches a forbidden pattern, null otherwise.
+function checkPromiseStickFilter(text){
+  if(!text)return null;
+  var t=text.toLowerCase();
+  // Conditional / transactional
+  if(/\bif you\b.*\b(i'?ll|i will)\b/.test(t)){
+    return "Try writing it as \"I'll ____ and you'll ____\" - promises read sideways, not as deals.";
+  }
+  // Threat
+  if(/\bor else\b|\botherwise i'?ll\b|\botherwise i will\b|\bunless you\b/.test(t)){
+    return "Promises here only describe what you'll do - not what happens if it doesn't.";
+  }
+  // Withdrawal / punishment
+  if(/\btake away\b|\bwon'?t let you\b|\bno more\b|\bstop your\b/.test(t)){
+    return "Promises only add. They don't take things away.";
+  }
+  // Coercion
+  if(/\byou better\b|\byou have to\b|\byou must\b/.test(t)){
+    return "Try framing it as something you're each choosing.";
+  }
+  return null;
+}
 function canModifyMemberData(isAdmin,members,userId,memberId){
   if(isAdmin)return true;
   var member=(members||[]).find(function(m){return m.id===memberId;});
@@ -643,6 +668,17 @@ function buildActivityMessage(activity){
   if(activity.activity_type==='statement_import')return actor+' imported '+(data.imported_count||0)+' transactions from '+(data.bank_name||'a statement');
   if(activity.activity_type==='shared_goal_contribution')return actor+' contributed ₹'+fmt(data.amount||0)+' to '+(data.goal_name||'a goal');
   if(activity.activity_type==='family')return actor+' joined the family';
+  if(activity.activity_type==='promise'){
+    if(data.action==='created')return actor+' started a promise: '+data.title;
+    if(data.action==='completed')return data.title+' wrapped up, both kept their word';
+    if(data.action==='wound_down')return data.title+' wrapped up';
+    if(data.action==='cancelled')return data.title+' was set aside';
+    if(data.action==='paused')return data.title+' is paused for now';
+    return actor+' updated a promise';
+  }
+  if(activity.activity_type==='promise_reflection'){
+    return actor+' reflected on '+data.title;
+  }
   return actor+' has a new update';
 }
 
@@ -5137,6 +5173,422 @@ function TransactionCommentsModal({visible,onClose,transaction}){
   </ModalSheet>;
 }
 
+function NewPromiseModal({visible,onClose,onCreated}){
+  var theme=useThemeColors();
+  var{familyId,members,userId,currentUserName,logActivity,
+      refreshPromises,refreshPromiseCommitments}=useApp();
+
+  var[step,setStep]=useState(1);
+  var[selectedMemberIds,setSelectedMemberIds]=useState([]);
+  var[template,setTemplate]=useState('');
+  var[commitments,setCommitments]=useState({});
+  var[startDate,setStartDate]=useState(new Date());
+  var[endDate,setEndDate]=useState(function(){
+    var d=new Date();d.setDate(d.getDate()+30);return d;
+  });
+  var[title,setTitle]=useState('');
+  var[saving,setSaving]=useState(false);
+  var[filterError,setFilterError]=useState({});
+
+  useEffect(function(){
+    if(visible){
+      setStep(1);setSelectedMemberIds([]);setTemplate('');setCommitments({});
+      setStartDate(new Date());
+      var d=new Date();d.setDate(d.getDate()+30);setEndDate(d);
+      setTitle('');setFilterError({});
+    }
+  },[visible]);
+
+  var otherMembers=(members||[]).filter(function(m){return m.user_id!==userId;});
+  var selfMember=(members||[]).find(function(m){return m.user_id===userId;});
+  var allParticipantIds=selfMember
+    ?[selfMember.id].concat(selectedMemberIds)
+    :selectedMemberIds.slice();
+
+  function toggleMember(mid){
+    if(selectedMemberIds.indexOf(mid)>=0){
+      setSelectedMemberIds(selectedMemberIds.filter(function(x){return x!==mid;}));
+    } else {
+      setSelectedMemberIds(selectedMemberIds.concat([mid]));
+    }
+  }
+
+  function setCommitmentField(mid,field,value){
+    var next=Object.assign({},commitments);
+    next[mid]=Object.assign({text:'',type:'custom'},next[mid]||{});
+    next[mid][field]=value;
+    setCommitments(next);
+    if(field==='text'&&filterError[mid]){
+      var nextErrors=Object.assign({},filterError);
+      delete nextErrors[mid];
+      setFilterError(nextErrors);
+    }
+  }
+
+  function canAdvance(){
+    if(step===1)return selectedMemberIds.length>=1;
+    if(step===2)return true;
+    if(step===3){
+      return allParticipantIds.every(function(mid){
+        var c=commitments[mid];
+        return c&&c.text&&c.text.length>=4&&c.text.length<=240;
+      });
+    }
+    if(step===4){
+      var diff=(endDate-startDate)/86400000;
+      return diff>=0&&diff<=90;
+    }
+    return true;
+  }
+
+  async function save(){
+    if(saving)return;
+
+    var errors={};var hasErrors=false;
+    allParticipantIds.forEach(function(mid){
+      var text=commitments[mid]&&commitments[mid].text;
+      var err=checkPromiseStickFilter(text);
+      if(err){errors[mid]=err;hasErrors=true;}
+    });
+    if(hasErrors){
+      setFilterError(errors);
+      haptic('error');
+      return;
+    }
+
+    setSaving(true);
+    try{
+      var involvesMinor=false;
+      try{
+        var participantUserIds=(members||[])
+          .filter(function(m){return allParticipantIds.indexOf(m.id)>=0&&m.user_id;})
+          .map(function(m){return m.user_id;});
+        if(participantUserIds.length>0){
+          var dobRes=await supabase.from('users').select('id, dob')
+            .in('id',participantUserIds);
+          if(dobRes.data){
+            var now=new Date();
+            involvesMinor=dobRes.data.some(function(u){
+              if(!u.dob)return false;
+              var dob=new Date(u.dob);
+              var ageYears=(now-dob)/(365.25*86400000);
+              return ageYears<18;
+            });
+          }
+        }
+      }catch(e){console.log('[MINOR CHECK ERROR]',e);}
+
+      var defaultTitle=(selfMember?selfMember.name:'Someone')+' & '
+        +((members||[]).filter(function(m){
+            return selectedMemberIds.indexOf(m.id)>=0;
+          }).map(function(m){return m.name;}).join(' & '))
+        +"'s promise";
+      var promisePayload={
+        family_id:familyId,
+        title:(title||'').trim()||defaultTitle,
+        start_date:isoDate(startDate),
+        end_date:isoDate(endDate),
+        status:'active',
+        visibility:involvesMinor?'participants_plus_admin':'participants_only',
+        involves_minor:involvesMinor,
+        created_by:userId,
+      };
+      var insRes=await supabase.from('promises').insert(promisePayload)
+        .select().single();
+      if(insRes.error)throw insRes.error;
+      var newPromise=insRes.data;
+
+      var commitmentRows=allParticipantIds.map(function(mid){
+        var member=(members||[]).find(function(m){return m.id===mid;});
+        var c=commitments[mid]||{};
+        return {
+          promise_id:newPromise.id,
+          member_id:mid,
+          user_id:member?member.user_id:null,
+          commitment_text:(c.text||'').trim(),
+          commitment_type:c.type||'custom',
+          commitment_target:null,
+        };
+      });
+      var commitsRes=await supabase.from('promise_commitments')
+        .insert(commitmentRows);
+      if(commitsRes.error)throw commitsRes.error;
+
+      if(logActivity){
+        await logActivity('promise',{
+          user_name:currentUserName||'Someone',
+          action:'created',
+          title:newPromise.title,
+          promise_id:newPromise.id,
+        },newPromise.id);
+      }
+
+      if(refreshPromises)await refreshPromises();
+      if(refreshPromiseCommitments)await refreshPromiseCommitments();
+      haptic('success');
+      if(onCreated)onCreated(newPromise);
+      onClose();
+    }catch(e){
+      haptic('error');
+      showFriendlyError('Could not create promise',e);
+    }finally{
+      setSaving(false);
+    }
+  }
+
+  var templates=[
+    {key:'parent_child',label:'Parent and child'},
+    {key:'child_first',label:'Child writes first'},
+    {key:'partners',label:'Partners'},
+    {key:'whole_family',label:'Whole family'},
+    {key:'custom',label:"Write our own"},
+  ];
+
+  return <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <View style={z.modalWrap}>
+      <View style={[z.modal,{backgroundColor:theme.surface,maxHeight:'90%'}]}>
+        <ScrollView style={{flexGrow:0}}>
+          <Text style={[z.h1,{color:theme.text}]}>Make a promise</Text>
+          <Text style={[z.cap,{marginBottom:16}]}>Step {step} of 5</Text>
+
+          {step===1&&<View>
+            <Text style={[z.body,{color:theme.text,marginBottom:12}]}>{"Who's in this with you?"}</Text>
+            <View style={[z.row,{flexWrap:'wrap',gap:6}]}>
+              {otherMembers.map(function(m){
+                var sel=selectedMemberIds.indexOf(m.id)>=0;
+                return <TouchableOpacity key={m.id}
+                  style={[z.chip,sel&&z.chipSel]}
+                  onPress={function(){toggleMember(m.id);}}>
+                  <Text style={[z.chipTx,sel&&z.chipSelTx]}>{m.name}</Text>
+                </TouchableOpacity>;
+              })}
+            </View>
+            {otherMembers.length===0&&<Text style={[z.cap,{color:theme.muted,marginTop:8}]}>No other family members yet. Add someone to the family first.</Text>}
+          </View>}
+
+          {step===2&&<View>
+            <Text style={[z.body,{color:theme.text,marginBottom:12}]}>Want a starting point?</Text>
+            {templates.map(function(t){
+              var sel=template===t.key;
+              return <TouchableOpacity key={t.key}
+                style={[z.card,{marginBottom:8,borderColor:sel?theme.primary:'#E0E0DB'}]}
+                onPress={function(){setTemplate(t.key);}}>
+                <Text style={[z.txM,{color:theme.text}]}>{t.label}</Text>
+              </TouchableOpacity>;
+            })}
+          </View>}
+
+          {step===3&&<View>
+            <Text style={[z.body,{color:theme.text,marginBottom:4}]}>{"What you'll each do"}</Text>
+            <Text style={[z.cap,{color:theme.muted,marginBottom:12}]}>{"Promises are reciprocal. Both of you write what you'll do, not what you want from the other."}</Text>
+            {allParticipantIds.map(function(mid){
+              var member=(members||[]).find(function(m){return m.id===mid;});
+              var name=member?member.name:'Member';
+              var c=commitments[mid]||{text:'',type:'custom'};
+              var err=filterError[mid];
+              return <View key={mid} style={{marginBottom:16}}>
+                <Text style={[z.txM,{color:theme.text,marginBottom:4}]}>{name}</Text>
+                <Inp
+                  label={"What they'll do"}
+                  value={c.text}
+                  onChangeText={function(v){setCommitmentField(mid,'text',v);}}
+                  placeholder={"I'll log dinners every night"}
+                  maxLength={240}
+                  multiline
+                />
+                {err&&<Text style={[z.cap,{color:'#BA7517',marginTop:4}]}>{err}</Text>}
+              </View>;
+            })}
+          </View>}
+
+          {step===4&&<View>
+            <Text style={[z.body,{color:theme.text,marginBottom:12}]}>For how long?</Text>
+            <DateField label="Start date" value={startDate} onChange={setStartDate}/>
+            <DateField label="End date" value={endDate} onChange={setEndDate}/>
+            <Text style={[z.cap,{color:theme.muted,marginTop:8}]}>Up to 90 days.</Text>
+          </View>}
+
+          {step===5&&<View>
+            <Text style={[z.body,{color:theme.text,marginBottom:12}]}>Give it a name (optional)</Text>
+            <Inp label="Name" value={title} onChangeText={setTitle}
+              placeholder="Headphones month" maxLength={80}/>
+            <Text style={[z.cap,{color:theme.muted,marginTop:12}]}>
+              {selectedMemberIds.some(function(mid){
+                var m=(members||[]).find(function(mm){return mm.id===mid;});
+                return m&&m.user_id;
+              })?'Family will see this in the activity feed.':''}
+            </Text>
+          </View>}
+
+          <View style={{flexDirection:'row',gap:8,marginTop:20}}>
+            {step>1&&<View style={{flex:1}}><SecondaryButton full onPress={function(){setStep(step-1);}}>Back</SecondaryButton></View>}
+            {step<5&&<View style={{flex:1}}><PrimaryButton full disabled={!canAdvance()} onPress={function(){setStep(step+1);}}>Next</PrimaryButton></View>}
+            {step===5&&<View style={{flex:1}}><PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving...':'Send to family'}</PrimaryButton></View>}
+          </View>
+
+          <TouchableOpacity style={{marginTop:12,alignSelf:'center'}} onPress={onClose}>
+            <Text style={[z.cap,{color:theme.muted}]}>Close</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </View>
+  </Modal>;
+}
+
+function PromiseDetailModal({promise,onClose}){
+  var theme=useThemeColors();
+  var{members,userId,currentUserName,promiseCommitments,
+      logActivity,refreshPromises,refreshPromiseCommitments}=useApp();
+  var[busy,setBusy]=useState(false);
+
+  if(!promise)return null;
+
+  var commitments=(promiseCommitments||[]).filter(function(c){
+    return c.promise_id===promise.id;
+  });
+
+  async function markCommitmentDone(commitmentId){
+    if(busy)return;
+    setBusy(true);
+    try{
+      var r=await supabase.from('promise_commitments').update({
+        manually_marked_done:true,
+        manually_marked_done_at:new Date().toISOString(),
+      }).eq('id',commitmentId);
+      if(r.error)throw r.error;
+      haptic('success');
+      if(refreshPromiseCommitments)await refreshPromiseCommitments();
+    }catch(e){
+      haptic('error');
+      showFriendlyError('Could not mark done',e);
+    }finally{setBusy(false);}
+  }
+
+  async function pausePromise(){
+    Alert.alert(
+      'Pause this promise',
+      'Pause until you both want to pick it back up?',
+      [
+        {text:'Cancel',style:'cancel'},
+        {text:'Pause',onPress:async function(){
+          if(busy)return;
+          setBusy(true);
+          try{
+            var r=await supabase.from('promises').update({
+              status:'paused',
+              updated_at:new Date().toISOString(),
+            }).eq('id',promise.id);
+            if(r.error)throw r.error;
+            if(logActivity){
+              await logActivity('promise',{
+                user_name:currentUserName||'Someone',
+                action:'paused',
+                title:promise.title,
+              },promise.id);
+            }
+            haptic('success');
+            if(refreshPromises)await refreshPromises();
+            onClose();
+          }catch(e){
+            haptic('error');
+            showFriendlyError('Could not pause',e);
+          }finally{setBusy(false);}
+        }}
+      ]
+    );
+  }
+
+  async function cancelPromise(){
+    Alert.alert(
+      'Set this aside',
+      'Cancel this promise, both of you, no questions asked?',
+      [
+        {text:'Keep going',style:'cancel'},
+        {text:'Set aside',style:'destructive',onPress:async function(){
+          if(busy)return;
+          setBusy(true);
+          try{
+            var r=await supabase.from('promises').update({
+              status:'cancelled',
+              updated_at:new Date().toISOString(),
+            }).eq('id',promise.id);
+            if(r.error)throw r.error;
+            if(logActivity){
+              await logActivity('promise',{
+                user_name:currentUserName||'Someone',
+                action:'cancelled',
+                title:promise.title,
+              },promise.id);
+            }
+            haptic('success');
+            if(refreshPromises)await refreshPromises();
+            onClose();
+          }catch(e){
+            haptic('error');
+            showFriendlyError('Could not cancel',e);
+          }finally{setBusy(false);}
+        }}
+      ]
+    );
+  }
+
+  var statusLabel=promise.status==='active'?'Active'
+    :promise.status==='paused'?'Paused'
+    :promise.status==='complete'?'Complete'
+    :promise.status==='wound_down'?'Wrapped up'
+    :promise.status==='cancelled'?'Set aside':promise.status;
+
+  return <Modal visible={!!promise} animationType="slide" transparent onRequestClose={onClose}>
+    <View style={z.modalWrap}>
+      <View style={[z.modal,{backgroundColor:theme.surface,maxHeight:'85%'}]}>
+        <ScrollView>
+          <Text style={[z.h1,{color:theme.text}]}>{promise.title}</Text>
+          <Text style={[z.cap,{color:theme.muted,marginBottom:4}]}>
+            {displayDate(promise.start_date)} to {displayDate(promise.end_date)}
+          </Text>
+          <Text style={[z.cap,{marginBottom:16,color:theme.primary}]}>{statusLabel}</Text>
+
+          {commitments.map(function(c){
+            var member=(members||[]).find(function(m){return m.id===c.member_id;});
+            var name=member?member.name:'Member';
+            var isMine=c.user_id===userId;
+            return <View key={c.id} style={[z.card,{marginBottom:8}]}>
+              <Text style={[z.txM,{color:theme.text}]}>{name}</Text>
+              <Text style={[z.body,{color:theme.text,marginVertical:4}]}>{c.commitment_text}</Text>
+              {c.manually_marked_done
+                ?<Text style={[z.cap,{color:theme.primary,fontWeight:'500'}]}>
+                    Marked done{c.manually_marked_done_at?' on '+displayDate(c.manually_marked_done_at):''}
+                  </Text>
+                :(isMine&&promise.status==='active'
+                  ?<View style={{marginTop:6,alignSelf:'flex-start'}}><SecondaryButton onPress={function(){markCommitmentDone(c.id);}} disabled={busy}>Mark this done</SecondaryButton></View>
+                  :<Text style={[z.cap,{color:theme.muted}]}>In progress</Text>)
+              }
+            </View>;
+          })}
+
+          {promise.status==='active'&&<View style={{flexDirection:'row',gap:8,marginTop:16}}>
+            <View style={{flex:1}}><SecondaryButton full onPress={pausePromise} disabled={busy}>Pause this for now</SecondaryButton></View>
+            <TouchableOpacity
+              style={{flex:1,padding:12,alignItems:'center',justifyContent:'center'}}
+              onPress={cancelPromise}
+              disabled={busy}>
+              <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:'#E24B4A'}}>Set this aside</Text>
+            </TouchableOpacity>
+          </View>}
+
+          <Text style={[z.cap,{marginTop:16,color:theme.muted}]}>
+            Visible to participants{promise.involves_minor?' and family admin':''}.
+          </Text>
+
+          <TouchableOpacity style={{marginTop:16,alignSelf:'center'}} onPress={onClose}>
+            <Text style={[z.cap,{color:theme.muted}]}>Close</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </View>
+  </Modal>;
+}
+
 function SharedGoalModal({visible,onClose,goal}){
   var theme=useThemeColors();
   var{familyId,userId,currentUserName,refreshSharedGoals,refreshSharedGoalContributions,sharedGoalContributions,logActivity}=useApp();
@@ -7881,13 +8333,15 @@ function FamilyScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings}=useApp();
+  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,refreshPromises,refreshPromiseCommitments}=useApp();
   var now=new Date();var today=isoDate(now);
   var monday=mondayOfWeek(now);
   var[inviteSheet,setInviteSheet]=useState(null); // B7: holds the member whose invite modal is open
   var[showInvitePicker,setShowInvitePicker]=useState(false); // Phase 2.5.A: "+ Invite" → picker sheet
   var[showSharedGoalModal,setShowSharedGoalModal]=useState(false);
   var[activeSharedGoal,setActiveSharedGoal]=useState(null);
+  var[showNewPromise,setShowNewPromise]=useState(false);
+  var[activePromiseDetail,setActivePromiseDetail]=useState(null);
   var[showRename,setShowRename]=useState(false); // FA2
   var[memberDetail,setMemberDetail]=useState(null); // FA5/FA6/FA7/FA8/FA11/FA16
   var[scoreScope,setScoreScope]=useState(null); // {scope:'family'|'member', member:...} for FA4/FA14/FA6
@@ -8003,6 +8457,8 @@ function FamilyScreen(){
       })()}
     </ModalSheet>
     <SharedGoalModal visible={showSharedGoalModal} onClose={function(){setShowSharedGoalModal(false);setActiveSharedGoal(null);}} goal={activeSharedGoal}/>
+    <NewPromiseModal visible={showNewPromise} onClose={function(){setShowNewPromise(false);}} onCreated={function(){}}/>
+    <PromiseDetailModal promise={activePromiseDetail} onClose={function(){setActivePromiseDetail(null);}}/>
     <RenameFamilyModal visible={showRename} onClose={function(){setShowRename(false);}} familyId={familyId} currentName={familyName} onRenamed={function(newName){setFamilyName&&setFamilyName(newName);}}/>
     <MemberDetailModal visible={!!memberDetail} member={memberDetail} onClose={function(){setMemberDetail(null);}}
       onJumpProtein={function(m){setMemberDetail(null);setQuickAction&&setQuickAction({action:'focus_member',memberName:m.name,nonce:Date.now()});navigation.navigate('Wellness');}}
@@ -8087,6 +8543,42 @@ function FamilyScreen(){
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>Nothing’s happened in your family yet.</Text>
         <Caps color={theme.muted} style={{marginTop:6}}>Capture a meal or money entry and it’ll show up here.</Caps>
       </Block>}
+
+      <Sec>Promises in motion</Sec>
+      {(promises||[]).filter(function(p){return p.status==='active';}).length>0
+        ?(promises||[]).filter(function(p){return p.status==='active';}).slice(0,5).map(function(p){
+            var pCommits=(promiseCommitments||[]).filter(function(c){return c.promise_id===p.id;});
+            var totalDays=Math.max(1,Math.ceil((new Date(p.end_date)-new Date(p.start_date))/86400000));
+            var elapsedDays=Math.max(0,Math.min(totalDays,Math.ceil((new Date()-new Date(p.start_date))/86400000)));
+            return <TouchableOpacity key={p.id} style={[z.card,{backgroundColor:theme.surface,borderColor:theme.border,marginBottom:8}]}
+              onPress={function(){setActivePromiseDetail(p);}}>
+              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+                <Text style={[z.txM,{color:theme.text,flex:1,paddingRight:8}]}>{p.title}</Text>
+                <Text style={[z.cap,{color:theme.primary}]}>Active</Text>
+              </View>
+              <Text style={[z.cap,{color:theme.muted,marginTop:2,marginBottom:8}]}>
+                {displayDate(p.start_date)} to {displayDate(p.end_date)} {'·'} {elapsedDays} of {totalDays} days
+              </Text>
+              {pCommits.slice(0,4).map(function(c){
+                var member=(members||[]).find(function(m){return m.id===c.member_id;});
+                var name=member?member.name:'Member';
+                var preview=c.commitment_text&&c.commitment_text.length>60
+                  ?c.commitment_text.slice(0,57)+'...'
+                  :(c.commitment_text||'');
+                return <View key={c.id} style={{marginBottom:4}}>
+                  <Text style={[z.body,{color:theme.text}]}>
+                    {name}{': "'}{preview}{'"'}
+                  </Text>
+                  {c.manually_marked_done&&<Text style={[z.cap,{color:theme.primary}]}>marked done</Text>}
+                </View>;
+              })}
+            </TouchableOpacity>;
+          })
+        :<Text style={[z.cap,{color:theme.muted}]}>No promises yet. The first one starts when you make it with someone.</Text>
+      }
+      <View style={{alignSelf:'flex-start',marginTop:8,marginBottom:16}}>
+        <PrimaryButton onPress={function(){setShowNewPromise(true);}}>+ New promise</PrimaryButton>
+      </View>
 
       {/* Shared goal — single accent block per design. Tap → SharedGoalModal (view/edit/contribute). Multi-goal management lives on Finance tab. */}
       {featuredSharedGoal?(function(){
@@ -8882,6 +9374,9 @@ function AppInner(){
   var[transactionComments,setTransactionComments]=useState([]);
   var[sharedGoals,setSharedGoals]=useState([]);
   var[sharedGoalContributions,setSharedGoalContributions]=useState([]);
+  var[promises,setPromises]=useState([]);
+  var[promiseCommitments,setPromiseCommitments]=useState([]);
+  var[promiseReflections,setPromiseReflections]=useState([]);
   var[activityFeed,setActivityFeed]=useState([]);
   var[customCategories,setCustomCategories]=useState([]);
   var[userProfile,setUserProfile]=useState(null);
@@ -9551,7 +10046,7 @@ function AppInner(){
       if(event==='SIGNED_OUT'){
         setFamilyId(null);setFamilyName('');setCurrentUserName('');setUserCreatedAt(null);setOnboarded(false);
         setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
-        setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
+        setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setPromises([]);setPromiseCommitments([]);setPromiseReflections([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
         setScores([]);setStreaks([]);setIsAdmin(false);setShowSettings(false);setShowQuestionnaire(false);setQuickAction(null);
         setTodayNudge(null);setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setRecurringSubscriptions([]);setNotificationEnabled(true);setWaterTrackingEnabled(false);setSilentHoursEnabled(true);setSilentHoursStart('22:00');setSilentHoursEnd('08:00');
         setCurrentUser(null);
@@ -9631,7 +10126,7 @@ function AppInner(){
     if(!user){
       setFamilyId(null);setFamilyName('');setCurrentUserName('');setUserCreatedAt(null);setOnboarded(false);
       setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
-      setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
+      setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setPromises([]);setPromiseCommitments([]);setPromiseReflections([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
       setScores([]);setStreaks([]);setIsAdmin(false);setQuickAction(null);
       setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setRecurringSubscriptions([]);setShowQuestionnaire(false);
       return;
@@ -9878,6 +10373,37 @@ function AppInner(){
     return r.data||[];
   }
 
+  async function refreshPromises(fid){
+    var family=fid||familyId;
+    if(!family)return[];
+    var r=await supabase.from('promises').select('*')
+      .eq('family_id',family)
+      .order('created_at',{ascending:false});
+    if(r.error){console.log('[PROMISES FETCH ERROR]',r.error);return[];}
+    setPromises(r.data||[]);
+    return r.data||[];
+  }
+
+  async function refreshPromiseCommitments(fid){
+    var family=fid||familyId;
+    if(!family)return[];
+    // RLS already scopes by family via parent promise.
+    var r=await supabase.from('promise_commitments').select('*');
+    if(r.error){console.log('[PROMISE COMMITMENTS FETCH ERROR]',r.error);return[];}
+    setPromiseCommitments(r.data||[]);
+    return r.data||[];
+  }
+
+  async function refreshPromiseReflections(fid){
+    var family=fid||familyId;
+    if(!family)return[];
+    var r=await supabase.from('promise_reflections').select('*')
+      .order('created_at',{ascending:false});
+    if(r.error){console.log('[PROMISE REFLECTIONS FETCH ERROR]',r.error);return[];}
+    setPromiseReflections(r.data||[]);
+    return r.data||[];
+  }
+
   async function refreshActivityFeed(fid){
     var family=(fid||familyId);
     if(!family)return[];
@@ -9989,6 +10515,9 @@ function AppInner(){
           refreshTransactionComments(familyId),
           refreshSharedGoals(familyId),
           refreshSharedGoalContributions(familyId),
+          refreshPromises(familyId),
+          refreshPromiseCommitments(familyId),
+          refreshPromiseReflections(familyId),
           refreshActivityFeed(familyId),
           refreshCustomCategories(familyId),
           refreshUserProfile(user&&user.id),
@@ -10164,6 +10693,9 @@ function AppInner(){
     nudgeHistory:nudgeHistory,
     recurringTransactions:recurringTransactions,
     recurringSubscriptions:recurringSubscriptions,
+    promises:promises,
+    promiseCommitments:promiseCommitments,
+    promiseReflections:promiseReflections,
     transactionComments:transactionComments,
     sharedGoals:sharedGoals,
     sharedGoalContributions:sharedGoalContributions,
@@ -10201,6 +10733,9 @@ function AppInner(){
     refreshRecurringTransactions:refreshRecurringTransactions,
     refreshRecurringSubscriptions:refreshRecurringSubscriptions,
     dismissRecurringSubscription:dismissRecurringSubscription,
+    refreshPromises:refreshPromises,
+    refreshPromiseCommitments:refreshPromiseCommitments,
+    refreshPromiseReflections:refreshPromiseReflections,
     refreshTransactionComments:refreshTransactionComments,
     refreshSharedGoals:refreshSharedGoals,
     refreshSharedGoalContributions:refreshSharedGoalContributions,
