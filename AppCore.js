@@ -6687,9 +6687,9 @@ function FinanceScreen(){
     {((financeGoals||[]).length===0&&(financeSharedGoals||[]).length===0)&&<Text style={[z.cap,{color:theme.muted}]}>No money goals yet. The first one starts below.</Text>}
     <View style={{alignSelf:'flex-start'}}><PrimaryButton onPress={function(){setGoalContext('Finance');setShowGoal(true);}}>+ New money goal</PrimaryButton></View>
 
-    {(recurringSubscriptions||[]).length>0&&<View>
+    {(recurringSubscriptions||[]).length>0?<View>
       <Sec>Monthly recurring</Sec>
-      <Text style={[z.cap,{color:theme.muted,marginBottom:8}]}>Auto-detected from your statement uploads. Tap "Not recurring" if it isn't.</Text>
+      <Text style={[z.cap,{color:theme.muted,marginBottom:8}]}>We watch for monthly outflows that look like subscriptions. Tap 'Not recurring' if we got it wrong.</Text>
       {(recurringSubscriptions||[]).map(function(s){
         var d=Number(s.median_interval_days||30);
         var freq=d<=10?'weekly':d<=20?'biweekly':d<=45?'monthly':d<=120?'quarterly':'yearly';
@@ -6702,7 +6702,7 @@ function FinanceScreen(){
           <TouchableOpacity style={{marginTop:8,alignSelf:'flex-start'}} onPress={function(){dismissRecurringSubscription&&dismissRecurringSubscription(s.id);}}><Text style={[z.cap,{color:'#E24B4A',fontWeight:'500'}]}>Not recurring</Text></TouchableOpacity>
         </View>;
       })}
-    </View>}
+    </View>:<Text style={z.cap}>No recurring subscriptions detected yet. We watch your spending patterns over a few months and surface what looks like monthly outflows here.</Text>}
 
     <Sec>Repeating entries</Sec>
     {(recurringTransactions||[]).map(function(r){
