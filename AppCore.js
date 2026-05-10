@@ -461,11 +461,11 @@ function getMemberForUser(members,userId){return(members||[]).find(function(m){r
 function resolveMemberName(member,memberProfiles,userId,currentUserName){
   if(!member)return'Member';
   if(member.name)return member.name;
-  if(member.user_id&&memberProfiles&&memberProfiles[member.user_id]
-     &&memberProfiles[member.user_id].name){
-    return memberProfiles[member.user_id].name;
+  if(member.userId&&memberProfiles&&memberProfiles[member.userId]
+     &&memberProfiles[member.userId].name){
+    return memberProfiles[member.userId].name;
   }
-  if(member.user_id===userId&&currentUserName)return currentUserName;
+  if(member.userId===userId&&currentUserName)return currentUserName;
   return'Member';
 }
 
@@ -5213,7 +5213,7 @@ function InvitationConfirmModal({commitment,promise,onClose}){
   if(!commitment||!promise)return null;
 
   var creator=(members||[]).find(function(m){
-    return m.user_id===promise.created_by;
+    return m.userId===promise.created_by;
   });
   var creatorName=creator?rname(creator):'Someone';
 
@@ -5352,9 +5352,9 @@ function NewPromiseModal({visible,onClose,onCreated}){
 
   var otherMembers=(members||[]).filter(function(m){
     if(!userId)return false;
-    return m.user_id!==userId;
+    return m.userId!==userId;
   });
-  var selfMember=(members||[]).find(function(m){return m.user_id===userId;});
+  var selfMember=(members||[]).find(function(m){return m.userId===userId;});
   var allParticipantIds=selfMember
     ?[selfMember.id].concat(selectedMemberIds)
     :selectedMemberIds.slice();
@@ -5463,8 +5463,8 @@ function NewPromiseModal({visible,onClose,onCreated}){
       var involvesMinor=false;
       try{
         var participantUserIds=(members||[])
-          .filter(function(m){return allParticipantIds.indexOf(m.id)>=0&&m.user_id;})
-          .map(function(m){return m.user_id;});
+          .filter(function(m){return allParticipantIds.indexOf(m.id)>=0&&m.userId;})
+          .map(function(m){return m.userId;});
         if(participantUserIds.length>0){
           var dobRes=await supabase.from('users').select('id, dob')
             .in('id',participantUserIds);
@@ -5516,7 +5516,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
         return {
           promise_id:newPromise.id,
           member_id:mid,
-          user_id:member?member.user_id:null,
+          user_id:member?member.userId:null,
           commitment_text:(c.text||'').trim(),
           commitment_type:ctype,
           commitment_target:ctarget,
@@ -5664,7 +5664,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
             <Text style={[z.cap,{color:theme.muted,marginTop:12}]}>
               {selectedMemberIds.some(function(mid){
                 var m=(members||[]).find(function(mm){return mm.id===mid;});
-                return m&&m.user_id;
+                return m&&m.userId;
               })?'Family will see this in the activity feed.':''}
             </Text>
           </View>}
@@ -9028,7 +9028,7 @@ function FamilyScreen(){
           {myPendingCommitments.map(function(c){
             var p=(promises||[]).find(function(pp){return pp.id===c.promise_id;});
             if(!p)return null;
-            var creator=(members||[]).find(function(m){return m.user_id===p.created_by;});
+            var creator=(members||[]).find(function(m){return m.userId===p.created_by;});
             var creatorName=creator?rname(creator):'Someone';
             return <View key={c.id} style={[z.card,{marginBottom:8,borderWidth:1,borderColor:theme.primary}]}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}>
