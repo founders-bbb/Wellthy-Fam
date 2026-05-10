@@ -5177,6 +5177,127 @@ function TransactionCommentsModal({visible,onClose,transaction}){
   </ModalSheet>;
 }
 
+function InvitationConfirmModal({commitment,promise,onClose}){
+  var theme=useThemeColors();
+  var{members,editAndConfirmPromiseCommitment}=useApp();
+  var[text,setText]=useState('');
+  var[ctype,setCtype]=useState('custom');
+  var[targetHours,setTargetHours]=useState(null);
+  var[saving,setSaving]=useState(false);
+
+  useEffect(function(){
+    if(commitment){
+      setText(commitment.commitment_text||'');
+      setCtype(commitment.commitment_type||'custom');
+      var t=commitment.commitment_target&&commitment.commitment_target.target_hours;
+      setTargetHours(typeof t==='number'?t:null);
+    }
+  },[commitment]);
+
+  if(!commitment||!promise)return null;
+
+  var creator=(members||[]).find(function(m){
+    return m.user_id===promise.created_by;
+  });
+  var creatorName=creator?creator.name:'Someone';
+
+  async function save(){
+    if(saving)return;
+    var trimmed=(text||'').trim();
+    if(trimmed.length<4){haptic('error');return;}
+    var stickErr=checkPromiseStickFilter(trimmed);
+    if(stickErr){
+      Alert.alert('Try again',stickErr);
+      return;
+    }
+    setSaving(true);
+    try{
+      var newTarget=null;
+      if(ctype==='screen_under_target'){
+        var hrs=targetHours;
+        newTarget={target_hours:(typeof hrs==='number'&&hrs>0&&hrs<=24)?hrs:4};
+      }
+      var ok=await editAndConfirmPromiseCommitment(commitment.id,trimmed,ctype,newTarget);
+      if(ok){onClose();}
+    }finally{
+      setSaving(false);
+    }
+  }
+
+  return <Modal visible={!!commitment} animationType="slide" transparent onRequestClose={onClose}>
+    <View style={z.modalWrap}>
+      <View style={[z.modal,{backgroundColor:theme.surface,maxHeight:'85%'}]}>
+        <View style={{flexDirection:'row',justifyContent:'flex-end',paddingBottom:4}}>
+          <TouchableOpacity onPress={onClose}
+            style={{padding:8,marginRight:-8,marginTop:-8}}
+            hitSlop={{top:12,bottom:12,left:12,right:12}}>
+            <Text style={{fontSize:24,color:theme.muted,lineHeight:24}}>×</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView>
+          <Text style={[z.h1,{color:theme.text}]}>{promise.title}</Text>
+          <Text style={[z.cap,{marginBottom:4}]}>{displayDate(promise.start_date)} to {displayDate(promise.end_date)}</Text>
+          <Text style={[z.cap,{marginBottom:16,color:theme.muted}]}>
+            {creatorName} suggested this for you. Edit if you want to make it your own.
+          </Text>
+
+          <Text style={[z.cap,{color:theme.muted,marginBottom:6}]}>How will we track this?</Text>
+          <View style={[z.row,{flexWrap:'wrap',gap:6,marginBottom:8}]}>
+            {[
+              {key:'custom',label:'Just check in'},
+              {key:'meal_log_days',label:'Daily meal logging'},
+              {key:'screen_under_target',label:'Screen under target'},
+            ].map(function(opt){
+              var sel=ctype===opt.key;
+              return <TouchableOpacity key={opt.key}
+                style={[z.chip,sel&&z.chipSel]}
+                onPress={function(){setCtype(opt.key);}}>
+                <Text style={[z.chipTx,sel&&z.chipSelTx]}>{opt.label}</Text>
+              </TouchableOpacity>;
+            })}
+          </View>
+
+          {ctype==='screen_under_target'&&<View style={{marginBottom:8}}>
+            <Inp label="Hours per day (default 4)"
+              value={targetHours!=null?String(targetHours):''}
+              onChangeText={function(v){
+                var n=v===''?null:Number(v);
+                setTargetHours(isNaN(n)?null:n);
+              }}
+              placeholder="4"
+              keyboardType="numeric"/>
+          </View>}
+
+          <Inp
+            label={"What you'll do"}
+            value={text}
+            onChangeText={setText}
+            placeholder={
+              ctype==='meal_log_days'?"I'll log dinners every night":
+              ctype==='screen_under_target'?"I'll keep screen time under 4 hours":
+              "I'll be there when it matters"
+            }
+            maxLength={240}
+            multiline/>
+
+          <View style={{flexDirection:'row',gap:8,marginTop:20}}>
+            <TouchableOpacity
+              style={{flex:1,padding:12,alignItems:'center'}}
+              onPress={onClose}
+              disabled={saving}>
+              <Text style={{color:theme.muted,fontWeight:'500'}}>Cancel</Text>
+            </TouchableOpacity>
+            <View style={{flex:2}}>
+              <PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving...':'Confirm'}</PrimaryButton>
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    </View>
+  </Modal>;
+}
+
 function NewPromiseModal({visible,onClose,onCreated}){
   var theme=useThemeColors();
   var{familyId,members,userId,currentUserName,logActivity,
@@ -5367,6 +5488,10 @@ function NewPromiseModal({visible,onClose,onCreated}){
           var hrs=c.targetHours;
           ctarget={target_hours:(typeof hrs==='number'&&hrs>0&&hrs<=24)?hrs:4};
         }
+        // Creator's own commitment is auto-confirmed; everyone else
+        // gets 'pending' until they confirm/edit/decline from the
+        // "Promises waiting on you" section.
+        var isSelf=selfMember&&mid===selfMember.id;
         return {
           promise_id:newPromise.id,
           member_id:mid,
@@ -5374,6 +5499,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
           commitment_text:(c.text||'').trim(),
           commitment_type:ctype,
           commitment_target:ctarget,
+          commitment_status:isSelf?'confirmed':'pending',
         };
       });
       var commitsRes=await supabase.from('promise_commitments')
@@ -5525,7 +5651,7 @@ function NewPromiseModal({visible,onClose,onCreated}){
           <View style={{flexDirection:'row',gap:8,marginTop:20}}>
             {step>1&&<View style={{flex:1}}><SecondaryButton full onPress={function(){setStep(step-1);}}>Back</SecondaryButton></View>}
             {step<3&&<View style={{flex:1}}><PrimaryButton full disabled={!canAdvance()} onPress={function(){setStep(step+1);}}>Next</PrimaryButton></View>}
-            {step===3&&<View style={{flex:1}}><PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving...':'Send to family'}</PrimaryButton></View>}
+            {step===3&&<View style={{flex:1}}><PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving...':'Send invitations'}</PrimaryButton></View>}
           </View>
         </ScrollView>
       </View>
@@ -5659,13 +5785,27 @@ function PromiseDetailModal({promise,onClose}){
 
             return <View key={c.id} style={[z.card,{marginBottom:8}]}>
               <Text style={[z.txM,{color:theme.text}]}>{name}</Text>
+              {c.commitment_status!=='confirmed'&&<View style={{
+                alignSelf:'flex-start',
+                paddingVertical:2,paddingHorizontal:8,
+                borderRadius:10,marginVertical:4,
+                backgroundColor:c.commitment_status==='pending'?'#FCEBC4':'#EAE6DD'
+              }}>
+                <Text style={{
+                  fontSize:11,
+                  color:c.commitment_status==='pending'?'#8A6B14':'#6B5E52',
+                  fontWeight:'500'
+                }}>
+                  {c.commitment_status==='pending'?'waiting':'declined'}
+                </Text>
+              </View>}
               <Text style={[z.body,{color:theme.text,marginVertical:4}]}>{c.commitment_text}</Text>
               {isManualOnly
                 ?(c.manually_marked_done
                   ?<Text style={[z.cap,{color:theme.primary,fontWeight:'500'}]}>
                       Marked done{c.manually_marked_done_at?' on '+displayDate(c.manually_marked_done_at):''}
                     </Text>
-                  :(isMine&&promise.status==='active'
+                  :(isMine&&promise.status==='active'&&c.commitment_status==='confirmed'
                     ?<View style={{marginTop:6,alignSelf:'flex-start'}}><SecondaryButton onPress={function(){markCommitmentDone(c.id);}} disabled={busy}>Mark this done</SecondaryButton></View>
                     :<Text style={[z.cap,{color:theme.muted}]}>In progress</Text>))
                 :(function(){
@@ -8596,7 +8736,7 @@ function FamilyScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,promiseSnapshots,promiseReflections,refreshPromises,refreshPromiseCommitments}=useApp();
+  var{familyId,familyName,setFamilyName,members,transactions,meals,wellness,scores,streaks,isAdmin,userId,sharedGoals,sharedGoalContributions,activityFeed,refreshSharedGoals,refreshSharedGoalContributions,refreshActivityFeed,refreshTransactions,refreshMeals,refreshWellness,refreshMembers,setQuickAction,openSettings,promises,promiseCommitments,promiseSnapshots,promiseReflections,refreshPromises,refreshPromiseCommitments,confirmPromiseCommitment,declinePromiseCommitment}=useApp();
   var now=new Date();var today=isoDate(now);
   var monday=mondayOfWeek(now);
   var[inviteSheet,setInviteSheet]=useState(null); // B7: holds the member whose invite modal is open
@@ -8606,6 +8746,7 @@ function FamilyScreen(){
   var[showNewPromise,setShowNewPromise]=useState(false);
   var[activePromiseDetail,setActivePromiseDetail]=useState(null);
   var[pendingReflection,setPendingReflection]=useState(null);
+  var[editingCommitment,setEditingCommitment]=useState(null);
 
   // Phase D: surface a reflection sheet when a Promise has
   // transitioned in the last 7 days AND the user was a participant
@@ -8765,6 +8906,10 @@ function FamilyScreen(){
     <NewPromiseModal visible={showNewPromise} onClose={function(){setShowNewPromise(false);}} onCreated={function(){}}/>
     <PromiseDetailModal promise={activePromiseDetail} onClose={function(){setActivePromiseDetail(null);}}/>
     <PromiseReflectionModal promise={pendingReflection} onClose={function(){setPendingReflection(null);}} onSubmitted={function(){}}/>
+    <InvitationConfirmModal
+      commitment={editingCommitment}
+      promise={editingCommitment?(promises||[]).find(function(p){return p.id===editingCommitment.promise_id;}):null}
+      onClose={function(){setEditingCommitment(null);}}/>
     <RenameFamilyModal visible={showRename} onClose={function(){setShowRename(false);}} familyId={familyId} currentName={familyName} onRenamed={function(newName){setFamilyName&&setFamilyName(newName);}}/>
     <MemberDetailModal visible={!!memberDetail} member={memberDetail} onClose={function(){setMemberDetail(null);}}
       onJumpProtein={function(m){setMemberDetail(null);setQuickAction&&setQuickAction({action:'focus_member',memberName:m.name,nonce:Date.now()});navigation.navigate('Wellness');}}
@@ -8849,6 +8994,74 @@ function FamilyScreen(){
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>Nothing’s happened in your family yet.</Text>
         <Caps color={theme.muted} style={{marginTop:6}}>Capture a meal or money entry and it’ll show up here.</Caps>
       </Block>}
+
+      {(function(){
+        var myPendingCommitments=(promiseCommitments||[]).filter(function(c){
+          return c.user_id===userId&&c.commitment_status==='pending';
+        });
+        if(myPendingCommitments.length===0)return null;
+        return <View>
+          <Sec>Promises waiting on you</Sec>
+          {myPendingCommitments.map(function(c){
+            var p=(promises||[]).find(function(pp){return pp.id===c.promise_id;});
+            if(!p)return null;
+            var creator=(members||[]).find(function(m){return m.user_id===p.created_by;});
+            var creatorName=creator?creator.name:'Someone';
+            return <View key={c.id} style={[z.card,{marginBottom:8,borderWidth:1,borderColor:theme.primary}]}>
+              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}>
+                <View style={{flex:1}}>
+                  <Text style={[z.txM,{color:theme.text}]}>{p.title}</Text>
+                  <Text style={[z.cap,{color:theme.muted,marginTop:2}]}>
+                    from {creatorName} {'·'} {displayDate(p.start_date)} to {displayDate(p.end_date)}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[z.body,{color:theme.text,marginTop:8}]}>
+                {'"'}{c.commitment_text}{'"'}
+              </Text>
+              <View style={{flexDirection:'row',gap:8,marginTop:12}}>
+                <TouchableOpacity
+                  style={{flex:1,padding:10,borderRadius:8,
+                          backgroundColor:theme.primary,alignItems:'center'}}
+                  onPress={function(){
+                    Alert.alert('Confirm this?',
+                      'Take this on as written. You can mark it done later or edit if needed.',
+                      [
+                        {text:'Cancel',style:'cancel'},
+                        {text:'Confirm',onPress:function(){
+                          if(confirmPromiseCommitment)confirmPromiseCommitment(c.id);
+                        }}
+                      ]
+                    );
+                  }}>
+                  <Text style={{color:'#fff',fontWeight:'500',fontSize:13}}>Confirm</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{flex:1,padding:10,borderRadius:8,
+                          borderWidth:1,borderColor:theme.primary,alignItems:'center'}}
+                  onPress={function(){setEditingCommitment(c);}}>
+                  <Text style={{color:theme.primary,fontWeight:'500',fontSize:13}}>Edit & confirm</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{flex:1,padding:10,alignItems:'center'}}
+                  onPress={function(){
+                    Alert.alert('Decline?',
+                      'You can pass on this one. The promise still goes ahead for whoever confirms.',
+                      [
+                        {text:'Cancel',style:'cancel'},
+                        {text:'Decline',style:'destructive',onPress:function(){
+                          if(declinePromiseCommitment)declinePromiseCommitment(c.id);
+                        }}
+                      ]
+                    );
+                  }}>
+                  <Text style={{color:theme.muted,fontWeight:'500',fontSize:13}}>Decline</Text>
+                </TouchableOpacity>
+              </View>
+            </View>;
+          })}
+        </View>;
+      })()}
 
       <Sec>Promises in motion</Sec>
       {(promises||[]).filter(function(p){return p.status==='active';}).length>0
@@ -10045,6 +10258,9 @@ function AppInner(){
 
           for(var j=0;j<pCommits.length;j++){
             var c=pCommits[j];
+            // Skip pending and declined commitments. Only confirmed
+            // ones count for evaluator and auto-transition.
+            if(c.commitment_status!=='confirmed')continue;
             var key=c.id+'-'+dateISO;
             if(existingSnaps[key])continue;
 
@@ -10139,6 +10355,7 @@ function AppInner(){
         var allOnTrack=true;
         for(var m=0;m<apCommits.length;m++){
           var cm=apCommits[m];
+          if(cm.commitment_status!=='confirmed')continue;
           if(cm.commitment_type==='custom'){
             if(!cm.manually_marked_done){allOnTrack=false;break;}
             continue;
@@ -10957,6 +11174,44 @@ function AppInner(){
     return r.data||[];
   }
 
+  async function confirmPromiseCommitment(commitmentId){
+    if(!commitmentId)return false;
+    var r=await supabase.from('promise_commitments').update({
+      commitment_status:'confirmed',
+    }).eq('id',commitmentId).eq('user_id',userId);
+    if(r.error){haptic('error');showFriendlyError('Could not confirm',r.error);return false;}
+    haptic('success');
+    if(refreshPromiseCommitments)await refreshPromiseCommitments();
+    return true;
+  }
+
+  async function editAndConfirmPromiseCommitment(commitmentId,newText,newType,newTarget){
+    if(!commitmentId)return false;
+    var update={
+      commitment_text:(newText||'').trim(),
+      commitment_status:'confirmed',
+    };
+    if(newType)update.commitment_type=newType;
+    if(newTarget!==undefined)update.commitment_target=newTarget;
+    var r=await supabase.from('promise_commitments').update(update)
+      .eq('id',commitmentId).eq('user_id',userId);
+    if(r.error){haptic('error');showFriendlyError('Could not save',r.error);return false;}
+    haptic('success');
+    if(refreshPromiseCommitments)await refreshPromiseCommitments();
+    return true;
+  }
+
+  async function declinePromiseCommitment(commitmentId){
+    if(!commitmentId)return false;
+    var r=await supabase.from('promise_commitments').update({
+      commitment_status:'declined',
+    }).eq('id',commitmentId).eq('user_id',userId);
+    if(r.error){haptic('error');showFriendlyError('Could not decline',r.error);return false;}
+    haptic('light');
+    if(refreshPromiseCommitments)await refreshPromiseCommitments();
+    return true;
+  }
+
   async function refreshPromiseSnapshots(fid){
     var family=fid||familyId;
     if(!family)return[];
@@ -11315,6 +11570,9 @@ function AppInner(){
     refreshPromiseCommitments:refreshPromiseCommitments,
     refreshPromiseSnapshots:refreshPromiseSnapshots,
     refreshPromiseReflections:refreshPromiseReflections,
+    confirmPromiseCommitment:confirmPromiseCommitment,
+    editAndConfirmPromiseCommitment:editAndConfirmPromiseCommitment,
+    declinePromiseCommitment:declinePromiseCommitment,
     refreshTransactionComments:refreshTransactionComments,
     refreshSharedGoals:refreshSharedGoals,
     refreshSharedGoalContributions:refreshSharedGoalContributions,
