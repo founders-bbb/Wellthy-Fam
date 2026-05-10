@@ -6176,7 +6176,7 @@ function FinanceScreen(){
   var ins=useSafeAreaInsets();
   var theme=useThemeColors();
   var navigation=useNavigation();
-  var{familyId,familyName,members,userId,isAdmin,transactions,meals,wellness,goals,sharedGoals,recurringTransactions,transactionComments,quickAction,setQuickAction,refreshTransactions,upsertTransactionLocal,removeTransactionLocal,refreshRecurringTransactions,refreshSharedGoals,refreshSharedGoalContributions,refreshMeals,refreshWellness,logActivity,currentUserName}=useApp();
+  var{familyId,familyName,members,userId,isAdmin,transactions,meals,wellness,goals,sharedGoals,recurringTransactions,recurringSubscriptions,transactionComments,quickAction,setQuickAction,refreshTransactions,upsertTransactionLocal,removeTransactionLocal,refreshRecurringTransactions,refreshRecurringSubscriptions,dismissRecurringSubscription,refreshSharedGoals,refreshSharedGoalContributions,refreshMeals,refreshWellness,logActivity,currentUserName}=useApp();
   var[showTx,setShowTx]=useState(false);var[showGoal,setShowGoal]=useState(false);var[editGoal,setEditGoal]=useState(null);var[showSharedGoalModal,setShowSharedGoalModal]=useState(false);var[activeSharedGoal,setActiveSharedGoal]=useState(null);var[goalContext,setGoalContext]=useState('Finance');
   var[editTx,setEditTx]=useState(null);
   var[selectedTxForComments,setSelectedTxForComments]=useState(null);
@@ -6219,6 +6219,7 @@ function FinanceScreen(){
     }catch(e){console.log('[FINANCE PENDING REVIEWS ERROR]',e);}
   }
   useEffect(function(){loadPendingReviews();},[userId]);
+  useEffect(function(){refreshRecurringSubscriptions&&refreshRecurringSubscriptions();},[userId]);
   useEffect(function(){
     var t=setTimeout(function(){setDebouncedSearch(searchText);},250);
     return function(){clearTimeout(t);};
@@ -6250,6 +6251,7 @@ function FinanceScreen(){
       await Promise.all([
         refreshTransactions&&refreshTransactions(),
         refreshRecurringTransactions&&refreshRecurringTransactions(),
+        refreshRecurringSubscriptions&&refreshRecurringSubscriptions(),
         refreshSharedGoals&&refreshSharedGoals(),
         refreshSharedGoalContributions&&refreshSharedGoalContributions(),
       ].filter(Boolean));
@@ -6684,6 +6686,23 @@ function FinanceScreen(){
     <Sec>What you’re building toward</Sec>{[].concat((financeGoals||[]).map(function(g){var gt=(g.goal_type||((g.is_shared||g.goal_scope==='shared')?'shared':'personal'));return{kind:gt==='shared'?'shared':'personal',id:g.id,name:g.name,current:Number(g.current||0),target:Number(g.target||0),category:g.category||'General',raw:g,source:'goals'};}),(financeSharedGoals||[]).map(function(g){return{kind:'shared',id:g.id,name:g.goal_name,current:Number(g.current_amount||0),target:Number(g.target_amount||0),category:g.category||'General',raw:g,source:'shared_goals'};})).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return<TouchableOpacity key={g.kind+'-'+g.source+'-'+g.id} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]} onPress={function(){if(g.kind==='personal'){setEditGoal(g.raw);}else{setActiveSharedGoal(g.raw);setShowSharedGoalModal(true);}}} onLongPress={function(){if(g.kind==='shared'){haptic('medium');setGoalQuickAdd(g);}}} delayLongPress={350}><View style={[z.row,{justifyContent:'space-between',alignItems:'center'}]}><View style={{flex:1,paddingRight:8}}><View style={[z.row,{alignItems:'center',flexWrap:'wrap'}]}><Text style={[z.txM,{color:theme.text}]}>{g.name}</Text>{g.kind==='shared'&&<View style={z.goalFamilyBadge}><Text style={z.goalFamilyBadgeTx}>Family</Text></View>}{g.kind==='personal'&&<View style={[z.goalFamilyBadge,{backgroundColor:'#F2F2EE'}]}><Text style={[z.goalFamilyBadgeTx,{color:'#555'}]}>Personal</Text></View>}</View><Text style={[z.cap,{marginTop:4}]}>{g.category||'General'}</Text></View><Text style={[z.fv,{color:g.kind==='shared'?'#0F6E56':'#BA7517'}]}>{Math.min(pct,999)}%</Text></View><Text style={[z.cap,{marginVertical:6}]}>{fmt(g.current)} / {fmt(g.target)} progress</Text><Bar pct={Math.min(pct,100)} color={g.kind==='shared'?'#0F6E56':'#EF9F27'}/><Text style={[z.cap,{marginTop:4}]}>{g.kind==='shared'?'Tap to edit · Long-press to add a contribution':'Tap to edit goal'}</Text></TouchableOpacity>;})}
     {((financeGoals||[]).length===0&&(financeSharedGoals||[]).length===0)&&<Text style={[z.cap,{color:theme.muted}]}>No money goals yet. The first one starts below.</Text>}
     <View style={{alignSelf:'flex-start'}}><PrimaryButton onPress={function(){setGoalContext('Finance');setShowGoal(true);}}>+ New money goal</PrimaryButton></View>
+
+    {(recurringSubscriptions||[]).length>0&&<View>
+      <Sec>Monthly recurring</Sec>
+      <Text style={[z.cap,{color:theme.muted,marginBottom:8}]}>Auto-detected from your statement uploads. Tap "Not recurring" if it isn't.</Text>
+      {(recurringSubscriptions||[]).map(function(s){
+        var d=Number(s.median_interval_days||30);
+        var freq=d<=10?'weekly':d<=20?'biweekly':d<=45?'monthly':d<=120?'quarterly':'yearly';
+        return <View key={s.id} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}>
+          <View style={[z.row,{justifyContent:'space-between'}]}>
+            <Text style={[z.txM,{color:theme.text,flex:1,paddingRight:8}]}>{s.display_name}</Text>
+            <Text style={[z.fv,{color:theme.text}]}>{'₹'}{fmt(s.median_amount||0)}</Text>
+          </View>
+          <Text style={[z.cap,{color:theme.muted}]}>{freq} · seen {s.occurrence_count||0} times · confidence {Math.round((s.confidence||0)*100)}%</Text>
+          <TouchableOpacity style={{marginTop:8,alignSelf:'flex-start'}} onPress={function(){dismissRecurringSubscription&&dismissRecurringSubscription(s.id);}}><Text style={[z.cap,{color:'#E24B4A',fontWeight:'500'}]}>Not recurring</Text></TouchableOpacity>
+        </View>;
+      })}
+    </View>}
 
     <Sec>Repeating entries</Sec>
     {(recurringTransactions||[]).map(function(r){
@@ -8886,6 +8905,7 @@ function AppInner(){
   var[nudgeHistory,setNudgeHistory]=useState([]);
   var[dismissedNudgeIds,setDismissedNudgeIds]=useState([]);
   var[recurringTransactions,setRecurringTransactions]=useState([]);
+  var[recurringSubscriptions,setRecurringSubscriptions]=useState([]);
   var[notificationEnabled,setNotificationEnabled]=useState(true);
   var[waterTrackingEnabled,setWaterTrackingEnabled]=useState(false);
   // Silent Hours: HH:MM strings stored on users.silent_hours_{enabled,start,end}.
@@ -9033,6 +9053,28 @@ function AppInner(){
     if(r.error)throw r.error;
     setRecurringTransactions(r.data||[]);
     return r.data||[];
+  }
+
+  async function refreshRecurringSubscriptions(){
+    if(!userId)return[];
+    var r=await supabase.from('recurring_subscriptions')
+      .select('*')
+      .eq('user_id',userId)
+      .neq('user_status','dismissed')
+      .order('confidence',{ascending:false});
+    if(r.error){console.log('[RECURRING SUBS FETCH ERROR]',r.error);return[];}
+    setRecurringSubscriptions(r.data||[]);
+    return r.data||[];
+  }
+
+  async function dismissRecurringSubscription(id){
+    var r=await supabase.from('recurring_subscriptions')
+      .update({user_status:'dismissed',updated_at:new Date().toISOString()})
+      .eq('id',id);
+    if(r.error){haptic('error');showFriendlyError('Could not dismiss',r.error);return false;}
+    haptic('light');
+    await refreshRecurringSubscriptions();
+    return true;
   }
 
   async function checkAndCreateRecurringTransactions(fid){
@@ -9511,7 +9553,7 @@ function AppInner(){
         setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
         setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
         setScores([]);setStreaks([]);setIsAdmin(false);setShowSettings(false);setShowQuestionnaire(false);setQuickAction(null);
-        setTodayNudge(null);setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setNotificationEnabled(true);setWaterTrackingEnabled(false);setSilentHoursEnabled(true);setSilentHoursStart('22:00');setSilentHoursEnd('08:00');
+        setTodayNudge(null);setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setRecurringSubscriptions([]);setNotificationEnabled(true);setWaterTrackingEnabled(false);setSilentHoursEnabled(true);setSilentHoursStart('22:00');setSilentHoursEnd('08:00');
         setCurrentUser(null);
       }
       if(event==='SIGNED_IN' && session && session.user && session.user.id){
@@ -9591,7 +9633,7 @@ function AppInner(){
       setMembers([]);setTransactions([]);setMeals([]);setGoals([]);setWellness([]);setActivities([]);
       setTransactionComments([]);setSharedGoals([]);setSharedGoalContributions([]);setActivityFeed([]);setCustomCategories([]);setUserProfile(null);setMemberProfiles({});
       setScores([]);setStreaks([]);setIsAdmin(false);setQuickAction(null);
-      setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setShowQuestionnaire(false);
+      setNudgeHistory([]);setDismissedNudgeIds([]);setRecurringTransactions([]);setRecurringSubscriptions([]);setShowQuestionnaire(false);
       return;
     }
     (async function(){
@@ -10121,6 +10163,7 @@ function AppInner(){
     todayNudge:todayNudge,
     nudgeHistory:nudgeHistory,
     recurringTransactions:recurringTransactions,
+    recurringSubscriptions:recurringSubscriptions,
     transactionComments:transactionComments,
     sharedGoals:sharedGoals,
     sharedGoalContributions:sharedGoalContributions,
@@ -10156,6 +10199,8 @@ function AppInner(){
     dismissedNudgeIds:dismissedNudgeIds,
     refreshTodayNudge:fetchTodayNudge,
     refreshRecurringTransactions:refreshRecurringTransactions,
+    refreshRecurringSubscriptions:refreshRecurringSubscriptions,
+    dismissRecurringSubscription:dismissRecurringSubscription,
     refreshTransactionComments:refreshTransactionComments,
     refreshSharedGoals:refreshSharedGoals,
     refreshSharedGoalContributions:refreshSharedGoalContributions,
