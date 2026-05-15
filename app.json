@@ -7,13 +7,24 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FAF1DC"
+    },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.wellthyfam.ios"
+      "bundleIdentifier": "app.wellthyfam.ios",
+      "icon": "./assets/icon.png"
     },
     "android": {
       "edgeToEdgeEnabled": true,
-      "package": "app.wellthyfam.android"
+      "package": "app.wellthyfam.android",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FAF1DC"
+      }
     },
     "plugins": [
       "@react-native-community/datetimepicker",
