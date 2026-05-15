@@ -9305,7 +9305,7 @@ function WellnessScreen(){
           haptic('light');
         }} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>+</Text></TouchableOpacity>
       </View>
-      <Caps color={theme.muted} style={{marginBottom:14,textAlign:'center'}}>Range: {LIMITS.wellness.screenTargetMinH}h to {LIMITS.wellness.screenTargetMaxH}h · Adjust by 0.5h</Caps>
+      <V5Caps color={theme.muted} style={{marginBottom:14,textAlign:'center'}}>Range: {LIMITS.wellness.screenTargetMinH}h to {LIMITS.wellness.screenTargetMaxH}h · Adjust by 0.5h</V5Caps>
       {Platform.OS==='android'?<View style={{marginBottom:14,paddingVertical:14,paddingHorizontal:14,borderRadius:12,backgroundColor:theme.surfaceElevated,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
           <View style={{flex:1,marginRight:10}}>
@@ -9322,9 +9322,9 @@ function WellnessScreen(){
             thumbColor="#fff"
           />
         </View>
-        <Caps color={theme.muted} style={{marginTop:10}}>Coming soon — requires app update with the Android usage-stats native module. The toggle persists your preference now; auto-ingest activates once the native bridge ships.</Caps>
+        <V5Caps color={theme.muted} style={{marginTop:10}}>Coming soon — requires app update with the Android usage-stats native module. The toggle persists your preference now; auto-ingest activates once the native bridge ships.</V5Caps>
       </View>:null}
-      <PrimaryButton full onPress={function(){setEditScreenTarget(false);}}>Done</PrimaryButton>
+      <V5Button variant="primary" full onPress={function(){setEditScreenTarget(false);}}>Done</V5Button>
     </ModalSheet>
     <AddGoalModal visible={showGoal} onClose={function(){setShowGoal(false);}} defaultGoalType="personal" defaultCategory="Health" contextLabel="Wellness"/>
     {editGoal&&<EditGoalModal visible={true} onClose={function(){setEditGoal(null);}} goal={editGoal} familyId={familyId}/>}
@@ -9338,38 +9338,35 @@ function WellnessScreen(){
     <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
-    {/* Header */}
-    <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',paddingTop:8,marginBottom:14}}>
-      <View style={{flex:1,marginRight:12}}>
-        <Caps>Today · {new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</Caps>
-        <Text style={{fontFamily:FF.serif,fontSize:30,letterSpacing:-0.8,color:theme.text,marginTop:6}}>Wellness</Text>
-      </View>
-      <TouchableOpacity onPress={function(){setShowCalendar(true);}} style={{width:40,height:40,borderRadius:9999,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center'}}>
-        <CalendarIcon size={20} color={theme.text}/>
-      </TouchableOpacity>
-    </View>
+    {/* Header — V5PageTitle (Reflect pattern: static kicker + static title + icon-button trailing) */}
+    <V5PageTitle
+      kicker={'Today · '+new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'})}
+      title="Wellness"
+      serif
+      trailing={<V5IconBtn onPress={function(){setShowCalendar(true);}}><CalendarIcon size={18} color={theme.text}/></V5IconBtn>}
+    />
 
     {/* Phase 2.3.A v2: Protein Today hero — per-member numbers above each ring (no family-aggregate stat).
         Sibling-pattern overlay so per-ring taps don't bubble to the hero's tap-to-log-meal handler. */}
     <View style={{position:'relative'}}>
       <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowMeal(true);}}>
-        <Block bg={theme.primary} style={{padding:22}}>
-          <Caps color="rgba(255,255,255,0.7)">Protein today</Caps>
+        <V5Card tone="primary" padding={22}>
+          <V5Caps color="rgba(255,255,255,0.7)">Protein today</V5Caps>
           {/* Spacer reserved for the absolute-positioned ring row sibling below */}
           <View style={{height:96,marginTop:22}}/>
           <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:18}}>
             <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{members.length} member{members.length===1?'':'s'}</Text>
             <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>Tap to log meal</Text>
           </View>
-        </Block>
+        </V5Card>
       </TouchableOpacity>
       {/* Ring row — sibling overlay. Y offset = padding(22) + caps(~16) + gap(22) = 60. Spacer height (96) accounts for aboveLabel + ring + name. */}
       <View style={{position:'absolute',left:22,right:22,top:60,height:96,justifyContent:'center'}} pointerEvents="box-none">
         {(function(){
           var memberCount=familyProteinToday.length;
-          if(memberCount===0)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</Caps>;
+          if(memberCount===0)return <V5Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</V5Caps>;
           var allZero=familyProteinToday.every(function(x){return (Number(x.current)||0)===0;});
-          if(allZero)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Today's progress will appear as meals are logged</Caps>;
+          if(allZero)return <V5Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Today's progress will appear as meals are logged</V5Caps>;
           var ringDiameter=memberCount<=4?56:(memberCount===5?52:(memberCount===6?48:44));
           var ringStroke=memberCount<=5?4:3.5;
           var useScroll=memberCount>=7;
@@ -9417,10 +9414,10 @@ function WellnessScreen(){
         Pencil + InfoIcon as sibling row (top-right) so taps don't bubble to the hero's tap-to-log-screen-time handler. */}
     <View style={{position:'relative',marginTop:12}}>
       <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowScreen(true);}}>
-        <Block bg={theme.accent} style={{padding:22}}>
+        <V5Card tone="accent" padding={22}>
           {/* Label changed to YESTERDAY — screen time is end-of-day; you can't know
               today's full total until today is over. Card reads from yesterdayW. */}
-          <Caps color="rgba(255,255,255,0.7)">Time on screens yesterday</Caps>
+          <V5Caps color="rgba(255,255,255,0.7)">Time on screens yesterday</V5Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54,marginTop:10,height:54}}>{(function(){
             // "Logged" rows have screen_hrs IS NOT NULL after the wellness_logged_distinction
             // migration. NULL = not logged. Sum only over logged rows.
@@ -9438,13 +9435,13 @@ function WellnessScreen(){
             <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{members.length} member{members.length===1?'':'s'}</Text>
             <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>Tap to log screen time</Text>
           </View>
-        </Block>
+        </V5Card>
       </TouchableOpacity>
       {/* Ring row sibling — Y offset = padding(22) + caps(~16) + gap(10) + big-number lineHeight(54) + gap(22) ≈ 124. Height 96. */}
       <View style={{position:'absolute',left:22,right:22,top:124,height:96,justifyContent:'center'}} pointerEvents="box-none">
         {(function(){
           var memberCount=(members||[]).length;
-          if(memberCount===0)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</Caps>;
+          if(memberCount===0)return <V5Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</V5Caps>;
           var screenTarget=Number(screenTargetHrs)||2;
           var familyScreenYesterday=(members||[]).map(function(m){
             var wellRow=yesterdayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||yesterdayW.find(function(w){return w.memberName===m.name;});
@@ -9454,7 +9451,7 @@ function WellnessScreen(){
             return{member:m,target:screenTarget,current:current};
           });
           var allMissing=familyScreenYesterday.every(function(x){return x.current===null;});
-          if(allMissing)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Yesterday's screen time not logged yet — tap to add</Caps>;
+          if(allMissing)return <V5Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Yesterday's screen time not logged yet — tap to add</V5Caps>;
           var ringDiameter=memberCount<=4?56:(memberCount===5?52:(memberCount===6?48:44));
           var ringStroke=memberCount<=5?4:3.5;
           var useScroll=memberCount>=7;
@@ -9526,8 +9523,8 @@ function WellnessScreen(){
         olive protein cards). No streaks, no scores, no comparisons. */}
     <View style={{position:'relative',marginTop:12}}>
       <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setShowSleep(true);}}>
-        <Block bg="#3F5269" style={{padding:22}}>
-          <Caps color="rgba(255,255,255,0.7)">Time asleep last night</Caps>
+        <V5Card padding={22} border={false} style={{backgroundColor:'#3F5269'}}>
+          <V5Caps color="rgba(255,255,255,0.7)">Time asleep last night</V5Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54,marginTop:10,height:54}}>{(function(){
             var loggedRows=yesterdayW.filter(function(w){return w.sleep_hours!==null&&typeof w.sleep_hours!=='undefined';});
             if(loggedRows.length===0)return 'Not logged yet';
@@ -9542,12 +9539,12 @@ function WellnessScreen(){
             <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{members.length} member{members.length===1?'':'s'}</Text>
             <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>Tap to log sleep</Text>
           </View>
-        </Block>
+        </V5Card>
       </TouchableOpacity>
       <View style={{position:'absolute',left:22,right:22,top:124,height:96,justifyContent:'center'}} pointerEvents="box-none">
         {(function(){
           var memberCount=(members||[]).length;
-          if(memberCount===0)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</Caps>;
+          if(memberCount===0)return <V5Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>No members yet</V5Caps>;
           var familySleep=(members||[]).map(function(m){
             var wellRow=yesterdayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||yesterdayW.find(function(w){return w.memberName===m.name;});
             var raw=wellRow?wellRow.sleep_hours:null;
@@ -9555,7 +9552,7 @@ function WellnessScreen(){
             return{member:m,target:sleepTargetFor(m),current:current};
           });
           var allMissing=familySleep.every(function(x){return x.current===null;});
-          if(allMissing)return <Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Last night's sleep not logged yet — tap to add</Caps>;
+          if(allMissing)return <V5Caps color="rgba(255,255,255,0.7)" style={{textAlign:'center'}}>Last night's sleep not logged yet — tap to add</V5Caps>;
           var ringDiameter=memberCount<=4?56:(memberCount===5?52:(memberCount===6?48:44));
           var useScroll=memberCount>=7;
           var rings=familySleep.map(function(item){
@@ -9604,7 +9601,7 @@ function WellnessScreen(){
     </View>
 
     {/* Phase 2.3.C: Member chip strip + hint — moved above More Details divider per spec resulting order. */}
-    {members.length>0&&<Caps color={theme.muted} style={{marginTop:18,marginBottom:8,textAlign:'center'}}>Tap to focus on one member · Long-press for their detail</Caps>}
+    {members.length>0&&<V5Caps color={theme.muted} style={{marginTop:18,marginBottom:8,textAlign:'center'}}>Tap to focus on one member · Long-press for their detail</V5Caps>}
     {members.length>0&&<View style={{marginBottom:14,marginHorizontal:-20}}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:20,gap:10}}>
         <TouchableOpacity onPress={function(){haptic('light');setMemberFilterId(null);}} style={{alignItems:'center',width:72}}>
@@ -9634,30 +9631,32 @@ function WellnessScreen(){
         narrow screens via flexWrap — keeps all four discoverable per spec C.5
         (no scrollable row, since that hides options). */}
     <View style={[z.row,{gap:8,marginTop:4,flexWrap:'wrap',rowGap:8}]}>
-      <View style={{flexBasis:'48%',flexGrow:1}}><PrimaryButton full onPress={function(){haptic('light');setShowMeal(true);}}>+ Meal</PrimaryButton></View>
-      <View style={{flexBasis:'48%',flexGrow:1}}><SecondaryButton full onPress={function(){haptic('light');setShowScreen(true);}}>+ Screen</SecondaryButton></View>
-      <View style={{flexBasis:'48%',flexGrow:1}}><SecondaryButton full onPress={function(){haptic('light');setShowSleep(true);}}>+ Sleep</SecondaryButton></View>
+      <View style={{flexBasis:'48%',flexGrow:1}}><V5Button variant="primary" full onPress={function(){haptic('light');setShowMeal(true);}}>+ Meal</V5Button></View>
+      <View style={{flexBasis:'48%',flexGrow:1}}><V5Button variant="secondary" full onPress={function(){haptic('light');setShowScreen(true);}}>+ Screen</V5Button></View>
+      <View style={{flexBasis:'48%',flexGrow:1}}><V5Button variant="secondary" full onPress={function(){haptic('light');setShowSleep(true);}}>+ Sleep</V5Button></View>
+      {/* + Activity kept inline — hierarchical primary-soft tonal pair (Family Decline precedent) */}
       <View style={{flexBasis:'48%',flexGrow:1}}><TouchableOpacity activeOpacity={0.8} onPress={function(){haptic('light');setShowActivity(true);}} style={{height:48,borderRadius:12,paddingHorizontal:14,alignItems:'center',justifyContent:'center',backgroundColor:theme.primaryLight}}><Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:theme.primary,letterSpacing:0.1}}>+ Activity</Text></TouchableOpacity></View>
     </View>
 
     {/* Phase 2.3.E: Body goals — moved alongside action buttons per spec. */}
-    <Sec>Body goals you’ve set</Sec>
-    {wellnessGoals.slice(0,5).map(function(g){var pct=g.target>0?Math.round((Number(g.current||0)/Number(g.target||1))*100):0;return <TouchableOpacity key={g.id} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]} onPress={function(){haptic('light');setEditGoal(g);}}><View style={[z.row,{justifyContent:'space-between'}]}><Text style={[z.txM,{color:theme.text}]}>{g.name}</Text><Text style={[z.fv,{color:pct>=100?'#0F6E56':'#BA7517'}]}>{pct}%</Text></View><Text style={[z.cap,{color:theme.muted}]}>{g.category||'Wellness'} · {fmt(g.current||0)} / {fmt(g.target||0)}</Text><Bar pct={Math.min(pct,100)} color={pct>=100?'#0F6E56':'#EF9F27'}/></TouchableOpacity>;})}
+    <View style={{marginTop:18,marginBottom:10}}>
+      <V5SectionH title="Body goals you’ve set"/>
+    </View>
+    {wellnessGoals.slice(0,5).map(function(g){var pct=g.target>0?Math.round((Number(g.current||0)/Number(g.target||1))*100):0;return <TouchableOpacity key={g.id} onPress={function(){haptic('light');setEditGoal(g);}}><V5Card style={{marginBottom:8}}><View style={[z.row,{justifyContent:'space-between'}]}><Text style={[z.txM,{color:theme.text}]}>{g.name}</Text><Text style={[z.fv,{color:pct>=100?'#0F6E56':'#BA7517'}]}>{pct}%</Text></View><Text style={[z.cap,{color:theme.muted}]}>{g.category||'Wellness'} · {fmt(g.current||0)} / {fmt(g.target||0)}</Text><V5Progress value={Math.min(pct,100)} color={pct>=100?'#0F6E56':'#EF9F27'}/></V5Card></TouchableOpacity>;})}
     {wellnessGoals.length===0&&<Text style={[z.cap,{color:theme.muted}]}>No body goals yet.</Text>}
-    <View style={{alignSelf:'flex-start',marginBottom:6}}><PrimaryButton onPress={function(){setShowGoal(true);}}>+ New body goal</PrimaryButton></View>
+    <View style={{alignSelf:'flex-start',marginBottom:6}}><V5Button variant="primary" onPress={function(){setShowGoal(true);}}>+ New body goal</V5Button></View>
 
     {/* More details divider */}
     <View style={{flexDirection:'row',alignItems:'center',marginTop:24,marginBottom:14}}>
       <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
-      <Caps color={theme.muted} style={{marginHorizontal:12}}>More details</Caps>
+      <V5Caps color={theme.muted} style={{marginHorizontal:12}}>More details</V5Caps>
       <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
     </View>
 
     {/* Protein this week — moved below More Details divider per spec resulting order #7. */}
-    <Block style={{marginTop:0,padding:16}}>
-      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Protein this week</Text>
-        <Caps>g / day avg</Caps>
+    <V5Card padding={16}>
+      <View style={{marginBottom:12}}>
+        <V5SectionH title="Protein this week" sub="g / day avg"/>
       </View>
       {(memberFilterId?familyProteinToday.filter(function(x){return x.member.id===memberFilterId;}):familyProteinToday).map(function(item,i,arr){
         var m=item.member;
@@ -9665,18 +9664,18 @@ function WellnessScreen(){
         var ok=weekAvg>=item.target;
         return <TouchableOpacity key={'pw_'+m.id} activeOpacity={0.7} onPress={function(){haptic('light');setMemberDetail(m);}} style={{marginBottom:i<arr.length-1?12:0}}>
           <View style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:6}}>
-            <Avatar name={m.name||'?'} color={SLOTS[i%5].bg} size={22}/>
+            <V5Avatar name={m.name||'?'} color={SLOTS[i%5].bg} size={22}/>
             <Text style={{flex:1,fontFamily:FF.sans,fontSize:14,fontWeight:'500',color:theme.text}}>{m.name}</Text>
             <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:13,color:ok?theme.primary:theme.accent}}>{weekAvg}g</Text>
-            <Caps color={theme.muted}>/ {item.target}</Caps>
+            <V5Caps color={theme.muted}>/ {item.target}</V5Caps>
           </View>
-          <Progress value={item.target>0?Math.min((weekAvg/item.target)*100,100):0} color={ok?theme.primary:theme.accent}/>
+          <V5Progress value={item.target>0?Math.min((weekAvg/item.target)*100,100):0} color={ok?theme.primary:theme.accent}/>
         </TouchableOpacity>;
       })}
-    </Block>
+    </V5Card>
 
     {/* Phase 2.4-cleanup A6: Water target card — unnested from inside the protein target card and placed as its own sibling directly below "Protein this week". */}
-    <View style={[z.card,{marginTop:12,backgroundColor:theme.card,borderColor:theme.border}]}>
+    <V5Card style={{marginTop:12}}>
       <View style={[z.row,{justifyContent:'space-between',alignItems:'center',marginBottom:6}]}>
         <Text style={[z.sub,{color:theme.text}]}>Your water target today</Text>
         <Text style={[z.fv,{color:theme.text}]}>{Number(waterTargetLitres||2.5).toFixed(1)} L</Text>
@@ -9699,23 +9698,22 @@ function WellnessScreen(){
         }} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>+</Text></TouchableOpacity>
       </View>
       <Text style={[z.cap,{marginTop:8,color:theme.textSecondary}]}>You'll be asked at end of day if you hit your target. No more glass-by-glass logging.</Text>
-    </View>
+    </V5Card>
 
     {/* Phase 2.4-cleanup A5: Protein target card — slimmed to just the per-user target row (water target extracted, duplicate per-member bars deleted per A7). */}
-    <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setShowMeal(true);}} style={[z.card,{marginTop:12,backgroundColor:theme.card,borderColor:theme.border}]}>
-      <Text style={[z.sub,{color:theme.text}]}>Your protein target today</Text>
-      <Text style={[z.fv,{marginTop:4,color:theme.text}]}>{currentUserProteinTargets.regular}g (Regular) | {currentUserProteinTargets.active}g (Active/Gym)</Text>
-      <Text style={[z.cap,{marginTop:4,color:theme.textSecondary}]}>Today: {todayProteinForCurrentUser}g</Text>
-      <Bar pct={currentUserProteinTargets.active>0?Math.min((todayProteinForCurrentUser/currentUserProteinTargets.active)*100,100):0} color={theme.success}/>
+    <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setShowMeal(true);}} style={{marginTop:12}}>
+      <V5Card>
+        <Text style={[z.sub,{color:theme.text}]}>Your protein target today</Text>
+        <Text style={[z.fv,{marginTop:4,color:theme.text}]}>{currentUserProteinTargets.regular}g (Regular) | {currentUserProteinTargets.active}g (Active/Gym)</Text>
+        <Text style={[z.cap,{marginTop:4,color:theme.textSecondary}]}>Today: {todayProteinForCurrentUser}g</Text>
+        <V5Progress value={currentUserProteinTargets.active>0?Math.min((todayProteinForCurrentUser/currentUserProteinTargets.active)*100,100):0} color={theme.success}/>
+      </V5Card>
     </TouchableOpacity>
 
     {/* What was eaten today — summary by meal type. Moved here from upper position per spec resulting order #11. */}
-    <Block style={{marginTop:12,padding:16}}>
+    <V5Card style={{marginTop:12}} padding={16}>
       <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>What was eaten today</Text>
-        <TouchableOpacity onPress={function(){haptic('light');setShowMeal(true);}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
-          <Caps color={theme.primary}>+ Log meal</Caps>
-        </TouchableOpacity>
+        <V5SectionH title="What was eaten today" action="+ Log meal" onAction={function(){haptic('light');setShowMeal(true);}}/>
       </View>
       {(function(){
         var typeOrder=['breakfast','lunch','dinner','snack'];
@@ -9738,8 +9736,8 @@ function WellnessScreen(){
             var totalP=rows.reduce(function(s,r){return s+Number(r.protein||0);},0);
             rendered.push(<View key={t} style={{paddingVertical:10,borderTopWidth:rendered.length>0?StyleSheet.hairlineWidth:0,borderTopColor:theme.border}}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline'}}>
-                <Caps>{t.charAt(0).toUpperCase()+t.slice(1)}</Caps>
-                <Caps color={theme.textSecondary}>{totalKcal} kcal · {totalP}g protein</Caps>
+                <V5Caps>{t.charAt(0).toUpperCase()+t.slice(1)}</V5Caps>
+                <V5Caps color={theme.textSecondary}>{totalKcal} kcal · {totalP}g protein</V5Caps>
               </View>
               <Text style={{fontFamily:FF.sans,fontSize:14,fontWeight:'500',color:theme.text,marginTop:4}}>{summary}</Text>
             </View>);
@@ -9763,7 +9761,7 @@ function WellnessScreen(){
           return <View key={'eaten_'+row.member.id} style={{paddingVertical:12,borderTopWidth:idx>0?StyleSheet.hairlineWidth:0,borderTopColor:theme.border}}>
             <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
               <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:theme.text}}>{row.member.name}</Text>
-              <Caps color={theme.textSecondary}>{totalKcal} kcal · {totalP}g protein</Caps>
+              <V5Caps color={theme.textSecondary}>{totalKcal} kcal · {totalP}g protein</V5Caps>
             </View>
             {typeOrder.map(function(t){
               var rows=byType[t];
@@ -9776,19 +9774,24 @@ function WellnessScreen(){
           </View>;
         });
       })()}
-    </Block>
-    <Sec>Today’s meal log</Sec>{(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).length===0&&<Text style={[z.cap,{color:theme.muted}]}>No meals captured today.</Text>}
+    </V5Card>
+    <View style={{marginTop:18,marginBottom:10}}>
+      <V5SectionH title="Today’s meal log"/>
+    </View>
+    {(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).length===0&&<Text style={[z.cap,{color:theme.muted}]}>No meals captured today.</Text>}
     {/* W11: Meal time/member name now opens edit on tap */}
-    {(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).map(function(m,i){return<View key={m.id||('meal_'+(m.memberId||m.member_name||'member')+'_'+(m.date||'date')+'_'+(m.mealTime||m.meal_type||'type')+'_'+i)} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}>
+    {(memberFilterId?todayMeals.filter(function(m){return m.memberId===memberFilterId;}):todayMeals).map(function(m,i){return<V5Card key={m.id||('meal_'+(m.memberId||m.member_name||'member')+'_'+(m.date||'date')+'_'+(m.mealTime||m.meal_type||'type')+'_'+i)} style={{marginBottom:8}}>
       <View style={[z.row,{justifyContent:'space-between',marginBottom:4}]}>
         <TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,m.memberId)){haptic('light');setEditMeal(m);}else{Alert.alert('Read only','Only admin can edit other member logs.');}}}><Text style={[z.txM,{color:theme.text}]}>{m.mealTime} - {m.memberName}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(m.date)}</Text></TouchableOpacity>
         <View style={z.row}><TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,m.memberId)){setEditMeal(m);}else{Alert.alert('Read only','Only admin can edit other member logs.');}}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity><TouchableOpacity onPress={function(){deleteMeal(m);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity></View>
       </View>
       <Text style={[z.body,{marginBottom:6,color:theme.text}]}>{m.items}</Text>
       <View style={z.row}><Text style={[z.macro,{backgroundColor:theme.surfaceElevated,color:theme.textSecondary}]}>Protein: {m.protein}g</Text><Text style={[z.macro,{backgroundColor:theme.surfaceElevated,color:theme.textSecondary}]}>Carbs: {m.carbs}g</Text><Text style={[z.macro,{backgroundColor:theme.surfaceElevated,color:theme.textSecondary}]}>Cal: {m.cal}</Text></View>
-    </View>;})}
+    </V5Card>;})}
     {/* Phase B3: Today's activities — list of activity rows for today, filtered by member if a filter is active. */}
-    <Sec>Today’s activities</Sec>
+    <View style={{marginTop:18,marginBottom:10}}>
+      <V5SectionH title="Today’s activities"/>
+    </View>
     {(function(){
       var todayISO=isoDate(new Date());
       var todayActivities=(activities||[]).filter(function(a){return a.date===todayISO;});
@@ -9799,7 +9802,7 @@ function WellnessScreen(){
         var memberName=a.memberName||(members.find(function(m){return m.id===a.memberId;})||{}).name||'Member';
         var typeLabel=String(a.activity_type||'activity');
         typeLabel=typeLabel.charAt(0).toUpperCase()+typeLabel.slice(1);
-        return <View key={a.id||('act_'+i)} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}>
+        return <V5Card key={a.id||('act_'+i)} style={{marginBottom:8}}>
           <View style={[z.row,{justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}]}>
             <View style={{flex:1}}>
               <Text style={[z.txM,{color:theme.text}]}>{typeLabel} · {a.duration_minutes} min</Text>
@@ -9816,10 +9819,13 @@ function WellnessScreen(){
             </View>:null}
           </View>
           {a.note?<Text style={[z.body,{color:theme.text,marginTop:4}]}>{a.note}</Text>:null}
-        </View>;
+        </V5Card>;
       });
     })()}
-    <Sec>Time on screens today</Sec>{(memberFilterId?members.filter(function(m){return m.id===memberFilterId;}):members).map(function(m){var w=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});var hrs=w?(w.screenHrs!=null?w.screenHrs:(w.screen_hrs!=null?w.screen_hrs:null)):null;var hasLog=hrs!=null;var under=hasLog&&hrs<=4;return<TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){haptic('light');setScreenDate(new Date());setShowScreen(true);}} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}><Text style={[z.txM,{color:theme.text}]}>{m.name}</Text><View style={z.row}><Text style={[z.fv,{color:!hasLog||hrs===0?'#888':under?'#085041':'#E24B4A'}]}>{hasLog?hrs+' hrs':'\u2014'}</Text>{w&&<TouchableOpacity onPress={function(){deleteWellnessRow(w);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity>}</View></View>{hasLog&&<Bar pct={Math.min((hrs/4)*100,100)} color={under?'#0F6E56':'#E24B4A'}/>}</TouchableOpacity>;})}
+    <View style={{marginTop:18,marginBottom:10}}>
+      <V5SectionH title="Time on screens today"/>
+    </View>
+    {(memberFilterId?members.filter(function(m){return m.id===memberFilterId;}):members).map(function(m){var w=todayW.find(function(w){return (w.memberId||w.member_id)===m.id;})||todayW.find(function(w){return w.memberName===m.name;});var hrs=w?(w.screenHrs!=null?w.screenHrs:(w.screen_hrs!=null?w.screen_hrs:null)):null;var hasLog=hrs!=null;var under=hasLog&&hrs<=4;return<TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){haptic('light');setScreenDate(new Date());setShowScreen(true);}}><V5Card style={{marginBottom:8}}><View style={[z.row,{justifyContent:'space-between',marginBottom:6}]}><Text style={[z.txM,{color:theme.text}]}>{m.name}</Text><View style={z.row}><Text style={[z.fv,{color:!hasLog||hrs===0?'#888':under?'#085041':'#E24B4A'}]}>{hasLog?hrs+' hrs':'\u2014'}</Text>{w&&<TouchableOpacity onPress={function(){deleteWellnessRow(w);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity>}</View></View>{hasLog&&<V5Progress value={Math.min((hrs/4)*100,100)} color={under?'#0F6E56':'#E24B4A'}/>}</V5Card></TouchableOpacity>;})}
     {/* W14: Insight card jumps to Reflect protein trend */}
     {totalProtein>0&&<TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_protein_trend',nonce:Date.now()});navigation.navigate('Reflect');}} style={z.insight}><Text style={z.insightTx}>Your family ate {totalProtein}g of protein today. {totalProtein>=totalProteinTarget?'Everyone close to target.':'One egg or some paneer would close the gap.'} {'›'}</Text></TouchableOpacity>}
     <View style={{height:32}}/></ScrollView></View>);
