@@ -3711,6 +3711,44 @@ var Q_LANGUAGE_OPTIONS=['English','Hindi','Tamil','Telugu','Kannada','Malayalam'
 var Q_FAMILY_OPTIONS=['Just me','Partner','Kids','Parents','Extended'];
 var Q_PASSION_OPTIONS=['Cooking','Travel','Sports','Reading','Music','Fitness','Spirituality','Gardening','Movies','Art','Technology','Business'];
 
+// ─────────────────────────────────────────────────────────────
+// v2 questionnaire option arrays. Per Onboarding_Questionnaire_v2_Spec.md.
+// v1 arrays above (Q_FAMILY_OPTIONS, Q_PASSION_OPTIONS) are dropped when
+// the page-rendering migration lands (commit 4 of the v2 sequence).
+// ─────────────────────────────────────────────────────────────
+var Q_HOUSEHOLD_OPTIONS=['Just me','Spouse / Partner','Kids under 12','Teenagers','Parents','Parents-in-law','Sibling','Extended family','Live-in domestic help'];
+var Q_KIDS_STAGE_OPTIONS=['Under 5','Primary school','Middle school','High school / boards','College','Working but living with us','Married, living elsewhere'];
+var Q_MONEY_HANDLER_OPTIONS=['I do most of it','My spouse does most of it','We split it','Neither of us really does','A parent still handles a lot of it'];
+var Q_INCOME_SOURCE_OPTIONS=['Just mine','Just my spouse’s','Both, roughly equal','Both, but one is much higher','A parent or pension also contributes','I’d rather not say'];
+var Q_INCOME_BAND_OPTIONS=['Under ₹50k','₹50k – 1L','₹1L – 2L','₹2L – 4L','₹4L – 8L','Over ₹8L','I’d rather not say'];
+var Q_SAVINGS_PERCENT_OPTIONS=['Less than 5%','5–15%','15–25%','25–40%','More than 40%','No idea'];
+var Q_SAVINGS_VEHICLE_OPTIONS=['SIPs / Mutual funds','Stocks I pick myself','PPF / EPF','Fixed deposits','Gold','Real estate / second property','Crypto','Insurance-linked plans','Chit fund / committee','It just sits in the savings account'];
+var Q_LOAN_TYPE_OPTIONS=['Home loan','Car loan','Personal loan','Credit card carrying balance','Education loan','BNPL / EMI on appliances','Loan from family','Gold loan'];
+var Q_EMI_PERCENT_OPTIONS=['Under 10%','10–25%','25–40%','40–55%','Over 55%'];
+var Q_MONEY_FIGHT_OPTIONS=['We don’t really argue about money','Big-ticket purchases without discussing','Daily delivery and takeout spend','Spending on extended family or parents','Spending on kids','One person tracks, the other doesn’t','Investments and risk appetite','Gifts, weddings, festivals','Something else'];
+var Q_STATEMENT_VISIBILITY_OPTIONS=['Yes, together','One of us does, the other roughly knows','Only one of us does, the other has no idea','Neither of us looks at it carefully','We have separate accounts and don’t share'];
+var Q_EMERGENCY_FUNDING_OPTIONS=['Emergency fund I’ve built for this','Savings I’d dip into','I’d break an FD or sell some MF','Credit card or personal loan','Borrow from family','Honestly, I’d struggle'];
+var Q_COOK_OPTIONS=['I cook','My spouse cooks','A parent cooks','Cook / didi who comes in','We mostly order in','It rotates'];
+var Q_FAMILY_DINNER_OPTIONS=['0–1 nights','2–3 nights','4–5 nights','6–7 nights'];
+var Q_DELIVERY_FREQUENCY_OPTIONS=['Daily','A few times a week','Once a week','A few times a month','Rarely'];
+var Q_PROTEIN_BELIEF_OPTIONS=['Dal','Curd','Milk','Eggs','Paneer','Chicken / fish','Sprouts / chana','Soya','We honestly don’t think about protein this way'];
+var Q_HEALTH_CONDITION_OPTIONS=['Diabetes / pre-diabetic','High BP','High cholesterol','Thyroid','PCOS / PCOD','Fatty liver','Heart condition','Pregnant or planning','None'];
+var Q_SMOKING_OPTIONS=['Daily','Sometimes','Quit','Never'];
+var Q_ALCOHOL_OPTIONS=['A few times a week','Weekends','Occasions','Quit','Never'];
+var Q_SCREEN_TIME_OPTIONS=['Under 2 hours','2–4 hours','4–6 hours','6–8 hours','Over 8 hours','Honestly no idea'];
+var Q_MORNING_REACH_OPTIONS=['My phone','Water','The kids','A book','Coffee or tea','Cigarette','Honestly, the phone — I just don’t want to admit it'];
+var Q_PHONE_AT_DINNER_OPTIONS=['In another room','Face-down on the table','Face-up on the table','I check it during dinner','We all do'];
+var Q_FAMILY_TIME_OPTIONS=['Under 30 minutes','30–60 minutes','1–2 hours','2–3 hours','More than 3 hours'];
+var Q_KIDS_SCREEN_TIME_OPTIONS=['Under 1 hour','1–2 hours','2–3 hours','3–4 hours','More than 4 hours','I genuinely don’t know'];
+var Q_UNPHOTOGRAPHED_OPTIONS=['Yesterday','Last week','A while ago','I can’t remember'];
+var Q_MENTAL_DRAIN_OPTIONS=['Work','Money','Health — mine or my family’s','Aging parents','Kids','A relationship','Social media or the news','Sleep','Don’t know how to name it'];
+var Q_MENTAL_EXHAUSTION_OPTIONS=['Most days','A few times a week','Sometimes','Rarely','Never'];
+var Q_FIRST_INSIGHT_OPTIONS=['Where the money’s actually going','Whether we eat well enough','Whether we’re together enough','Whether I’m okay','Whether my kids are okay','I don’t know yet — surprise me'];
+var Q_PACING_OPTIONS=['Tell me everything in week one','Show me one thing at a time','Somewhere in between'];
+var Q_SHARING_OPTIONS=['Yes, send it to both of us','Yes, but let me see it first','Only me','We don’t share like that yet'];
+var Q_WORRIED_ABOUT_OPTIONS=['My spouse / partner','A parent','A child','A sibling','Myself','Honestly — all of us','No one in particular'];
+var Q_QUIT_REASON_OPTIONS=['Too many notifications','It started feeling like every other tracker','My spouse never joined','It made fights worse','Nothing changed','I don’t think I’ll stop','Something else'];
+
 function createDefaultQuestionnaireAnswers(){
   return {
     q1_name:'',
