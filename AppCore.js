@@ -2179,6 +2179,289 @@ function V5MiniStat({label,value,sub,suffix,prefix,tone,ringValue,ringColor,spar
   </View>;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v5 ATOM GALLERY — sanity-check / regression / docs in one screen
+// TEMP — remove after Phase 2 migration complete (see SettingsScreen
+// for the trigger listRow, also marked TEMP).
+//
+// Renders every v5 atom + viz + helper once. Top-right toggle flips
+// the gallery between light and dark mode independently of the user's
+// global theme setting — useful for verifying both palettes without
+// changing system preferences.
+// ═══════════════════════════════════════════════════════════════
+function V5GalleryItem({name,children}){
+  var theme=useThemeColors();
+  return <View style={{marginBottom:16}}>
+    <Text style={{fontFamily:FF.mono,fontSize:10,fontWeight:'600',color:theme.muted,marginBottom:6,letterSpacing:0.5}}>{name}</Text>
+    <View style={{padding:12,borderRadius:8,backgroundColor:theme.surfaceElevated,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.hairlineSoft}}>
+      {children}
+    </View>
+  </View>;
+}
+function V5GallerySection({title,children}){
+  var theme=useThemeColors();
+  return <View>
+    <Text style={{fontFamily:FF.sansBold,fontSize:12,fontWeight:'700',color:theme.muted,letterSpacing:0.8,textTransform:'uppercase',marginTop:24,marginBottom:12}}>{title}</Text>
+    {children}
+  </View>;
+}
+
+function V5AtomGallery({onClose}){
+  var ins=useSafeAreaInsets();
+  var[forceMode,setForceMode]=useState('light');
+  var forcedTheme=forceMode==='dark'?DARK_THEME:LIGHT_THEME;
+  return <ThemeContext.Provider value={{theme:forcedTheme,themeMode:forceMode,setThemeMode:setForceMode}}>
+    <View style={{flex:1,backgroundColor:forcedTheme.bg,paddingTop:ins.top}}>
+      {/* Header bar */}
+      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingVertical:12,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:forcedTheme.hairlineSoft,backgroundColor:forcedTheme.bg}}>
+        <TouchableOpacity onPress={onClose} hitSlop={{top:8,bottom:8,left:8,right:8}}>
+          <Text style={{fontFamily:FF.sansBold,fontSize:14,fontWeight:'700',color:forcedTheme.primary}}>Done</Text>
+        </TouchableOpacity>
+        <Text style={{fontFamily:FF.sansBold,fontSize:15,fontWeight:'700',letterSpacing:-0.2,color:forcedTheme.text}}>v5 Atom Gallery</Text>
+        <TouchableOpacity onPress={function(){setForceMode(forceMode==='dark'?'light':'dark');}} style={{
+          paddingHorizontal:10,paddingVertical:6,borderRadius:9999,
+          backgroundColor:forcedTheme.surfaceElevated,
+          borderWidth:StyleSheet.hairlineWidth,borderColor:forcedTheme.hairline,
+        }}>
+          <Text style={{fontFamily:FF.sansBold,fontSize:11,color:forcedTheme.text}}>{forceMode==='dark'?'Dark':'Light'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={{padding:18,paddingBottom:60}} showsVerticalScrollIndicator={false}>
+        <Text style={{fontFamily:FF.sans,fontSize:12,color:forcedTheme.textSecondary,marginTop:4,lineHeight:18}}>
+          Every v5 atom + viz + helper, rendered against the Saturated Forest palette in {forceMode} mode. Tap the toggle (top-right) to verify both modes. Removed at end of Phase 2.
+        </Text>
+
+        {/* ═══ PRIMITIVES ═══ */}
+        <V5GallerySection title="Primitives">
+          <V5GalleryItem name="V5Caps"><V5Caps>Caps eyebrow</V5Caps></V5GalleryItem>
+          <V5GalleryItem name="V5Hero"><V5Hero label="Spent today" value="2,840" prefix="₹"/></V5GalleryItem>
+          <V5GalleryItem name="V5Hero (onTone, inside primary Card)"><V5Card tone="primary" padding={14}><V5Hero label="Family score" value="2,840" suffix="pts" onTone/></V5Card></V5GalleryItem>
+          <V5GalleryItem name="V5Avatar"><View style={{flexDirection:'row',gap:10,alignItems:'center'}}>
+            <V5Avatar name="Asha Verma" size={28}/>
+            <V5Avatar name="Ravi Kumar" size={36}/>
+            <V5Avatar name="Meera S" size={48} ring/>
+          </View></V5GalleryItem>
+          <V5GalleryItem name="V5AvatarStack"><V5AvatarStack names={['Asha Verma','Ravi Kumar','Meera Singh','Arjun Rao','Priya Lal','Sam Iyer']}/></V5GalleryItem>
+          <V5GalleryItem name="V5Progress (60%)"><V5Progress value={60}/></V5GalleryItem>
+          <V5GalleryItem name="V5PageTitle"><V5PageTitle kicker="Family" title="Your family"/></V5GalleryItem>
+          <V5GalleryItem name="V5PageTitle (serif)"><V5PageTitle title="Reflections" serif sub="Look back at this week"/></V5GalleryItem>
+          <V5GalleryItem name="V5SectionHeader"><V5SectionHeader title="Promises in motion" action="See all" onAction={function(){}}/></V5GalleryItem>
+          <V5GalleryItem name="V5NavBar"><V5NavBar title="Settings" leading={<V5BackArrow/>} trailing={<Text style={{fontFamily:FF.sansBold,fontSize:14,color:forcedTheme.primary,paddingRight:6}}>Done</Text>}/></V5GalleryItem>
+          <V5GalleryItem name="V5FRLogo (mark + wordmark)"><View style={{flexDirection:'row',alignItems:'center',gap:18}}>
+            <V5FRLogo size={40}/>
+            <V5FRLogo size={28} variant="wordmark"/>
+          </View></V5GalleryItem>
+        </V5GallerySection>
+
+        {/* ═══ INTERACTIVE ═══ */}
+        <V5GallerySection title="Interactive">
+          <V5GalleryItem name="V5Button (variants)">
+            <View style={{gap:8}}>
+              <View style={{flexDirection:'row',gap:8,flexWrap:'wrap'}}>
+                <V5Button>Primary</V5Button>
+                <V5Button variant="secondary">Secondary</V5Button>
+                <V5Button variant="tertiary">Tertiary</V5Button>
+              </View>
+              <View style={{flexDirection:'row',gap:8,flexWrap:'wrap'}}>
+                <V5Button variant="destructive">Destructive</V5Button>
+                <V5Button variant="accent">Accent</V5Button>
+                <V5Button disabled>Disabled</V5Button>
+              </View>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5Button (sm / md / lg)">
+            <View style={{flexDirection:'row',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+              <V5Button size="sm">Small</V5Button>
+              <V5Button>Medium</V5Button>
+              <V5Button size="lg">Large</V5Button>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5Chip">
+            <View style={{flexDirection:'row',gap:8,flexWrap:'wrap'}}>
+              <V5Chip>Default</V5Chip>
+              <V5Chip selected>Selected</V5Chip>
+              <V5Chip tone="soft">Soft</V5Chip>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5CategoryPill">
+            <View style={{flexDirection:'row',gap:6,flexWrap:'wrap'}}>
+              <V5CategoryPill cat="Groceries"/>
+              <V5CategoryPill cat="Travel"/>
+              <V5CategoryPill cat="Health"/>
+              <V5CategoryPill cat="Dining"/>
+              <V5CategoryPill cat="Subscription"/>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5Input"><V5Input value="" placeholder="Enter merchant…"/></V5GalleryItem>
+          <V5GalleryItem name="V5Input (focused)"><V5Input value="Walmart" placeholder="" focused/></V5GalleryItem>
+          <V5GalleryItem name="V5Input (error)"><V5Input value="abc" placeholder="" error/></V5GalleryItem>
+          <V5GalleryItem name="V5Field"><V5Field label="Amount" hint="Up to ₹10,00,000"><V5Input value="" placeholder="0" keyboardType="numeric" prefix="₹"/></V5Field></V5GalleryItem>
+          <V5GalleryItem name="V5OptionRow (radio)">
+            <View style={{gap:8}}>
+              <V5OptionRow title="Just check in" desc="A weekly note from each of you" selected/>
+              <V5OptionRow title="Track screen time" desc="Stay under your set target"/>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5OptionRow (check)">
+            <View style={{gap:8}}>
+              <V5OptionRow title="Remind me at 8 PM" type="check" selected/>
+              <V5OptionRow title="Send me a daily nudge" type="check"/>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5IconBtn / V5BackArrow / V5CloseX">
+            <View style={{flexDirection:'row',gap:8}}>
+              <V5IconBtn><Text style={{fontFamily:FF.sansBold,fontSize:14,color:forcedTheme.text}}>?</Text></V5IconBtn>
+              <V5BackArrow/>
+              <V5CloseX/>
+            </View>
+          </V5GalleryItem>
+        </V5GallerySection>
+
+        {/* ═══ COMPOSITE ═══ */}
+        <V5GallerySection title="Composite">
+          <V5GalleryItem name="V5Card (surface / sunk / elevated)">
+            <View style={{gap:8}}>
+              <V5Card><Text style={{color:forcedTheme.text,fontFamily:FF.sans}}>surface (default)</Text></V5Card>
+              <V5Card tone="sunk"><Text style={{color:forcedTheme.text,fontFamily:FF.sans}}>sunk</Text></V5Card>
+              <V5Card tone="elevated"><Text style={{color:forcedTheme.text,fontFamily:FF.sans}}>elevated</Text></V5Card>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5Card (primary / primary-soft / accent / accent-soft)">
+            <View style={{gap:8}}>
+              <V5Card tone="primary"><Text style={{color:forcedTheme.onPrimary,fontFamily:FF.sans}}>primary — set Text color manually to theme.onPrimary</Text></V5Card>
+              <V5Card tone="primary-soft"><Text style={{color:forcedTheme.primary,fontFamily:FF.sans}}>primary-soft</Text></V5Card>
+              <V5Card tone="accent"><Text style={{color:forcedTheme.onAccent,fontFamily:FF.sans}}>accent</Text></V5Card>
+              <V5Card tone="accent-soft"><Text style={{color:forcedTheme.accentDeep,fontFamily:FF.sans}}>accent-soft</Text></V5Card>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5Stat">
+            <View style={{flexDirection:'row',gap:8}}>
+              <View style={{flex:1}}><V5Stat label="Spent" value="2,840" prefix="₹" sub="this week"/></View>
+              <View style={{flex:1}}><V5Stat label="Days" value="14" suffix="logged" tone="primary-soft"/></View>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5EmptyState (inline)">
+            <V5EmptyState size="inline" body="No promises yet. The first one starts when you make it with someone."/>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5EmptyState (card)">
+            <V5EmptyState size="card" title="Nothing captured yet" body="The first entry is the hardest." cta="Capture one"/>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5Toast">
+            <View style={{gap:8,alignItems:'flex-start'}}>
+              <V5Toast title="Saved" body="Reflection added to this week."/>
+              <V5Toast tone="error" title="Could not save" body="Check your connection."/>
+              <V5Toast tone="info" title="Reminder" body="Time to log dinner."/>
+              <V5Toast tone="soft" title="Note" body="Soft variant."/>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5ListRow">
+            <V5Card padding={0}>
+              <V5ListRow title="Profile" detail="Asha" chevron onPress={function(){}}/>
+              <V5ListRow title="Notifications" detail="On" chevron onPress={function(){}}/>
+              <V5ListRow title="Theme" detail="System" chevron last onPress={function(){}}/>
+            </V5Card>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5TabBar"><V5TabBar active="family" onChange={function(){}}/></V5GalleryItem>
+        </V5GallerySection>
+
+        {/* ═══ VIZ ═══ */}
+        <V5GallerySection title="Viz">
+          <V5GalleryItem name="V5ActivityRing">
+            <View style={{flexDirection:'row',gap:16,alignItems:'flex-start'}}>
+              <V5ActivityRing value={62} label="Hydration" sub="6/8 glasses">
+                <Text style={{fontFamily:FF.sansBold,fontSize:14,color:forcedTheme.text}}>62%</Text>
+              </V5ActivityRing>
+              <V5ActivityRing size={88} stroke={8} value={88} color={forcedTheme.accent}>
+                <Text style={{fontFamily:FF.sansBold,fontSize:18,color:forcedTheme.accent}}>88</Text>
+              </V5ActivityRing>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5MultiRing">
+            <V5MultiRing size={120} stroke={9} rings={[
+              {value:78,color:forcedTheme.primary},
+              {value:54,color:forcedTheme.accent},
+              {value:88,color:forcedTheme.primaryDeep},
+            ]}/>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5Sparkline"><V5Sparkline data={[12,18,15,22,20,28,26]} width={240} height={32} fill={forcedTheme.primary}/></V5GalleryItem>
+          <V5GalleryItem name="V5MiniArea"><V5MiniArea data={[8,14,11,18,16,24,22]} width={260} height={50}/></V5GalleryItem>
+          <V5GalleryItem name="V5Heatmap (4×7)">
+            <V5Heatmap cols={7} max={5} cells={[
+              2,4,1,0,3,5,2,
+              4,3,2,5,4,1,0,
+              0,0,1,3,2,5,4,
+              2,3,4,5,5,4,3,
+            ]} showLegend/>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5SegmentedProgress (14 days, 9 done, 2 missed)">
+            <V5SegmentedProgress total={14} done={9} missed={2}/>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5StackedBar">
+            <V5StackedBar height={14} labelInside segments={[
+              {value:42,color:forcedTheme.primary,label:'Food'},
+              {value:30,color:forcedTheme.accent,label:'Bills'},
+              {value:18,color:forcedTheme.primaryDeep,label:'Travel'},
+              {value:10,color:forcedTheme.muted,label:'Other'},
+            ]}/>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5HistBars"><V5HistBars data={[4.2,5.1,3.8,6.2,4.0,5.5,4.9]} labels={['M','T','W','T','F','S','S']} height={48}/></V5GalleryItem>
+          <V5GalleryItem name="V5RangeBar (sleep 23:00 → 07:00)"><V5RangeBar from={23} to={7} startHour={18}/></V5GalleryItem>
+          <V5GalleryItem name="V5LivePulse">
+            <View style={{flexDirection:'row',gap:16,alignItems:'center',paddingVertical:6}}>
+              <V5LivePulse/>
+              <V5LivePulse color={forcedTheme.primary} size={12}/>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5GridBg">
+            <View style={{height:80,backgroundColor:forcedTheme.surface,borderRadius:8,overflow:'hidden'}}>
+              <V5GridBg size={14}/>
+              <View style={{flex:1,alignItems:'center',justifyContent:'center'}}>
+                <Text style={{fontFamily:FF.sans,fontSize:12,color:forcedTheme.muted}}>dotted bg pattern</Text>
+              </View>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5GlassNav">
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:forcedTheme.textSecondary,lineHeight:18}}>Absolute-positioned overlay (top:0). Not previewable inline; use on screens where a frosted top nav over scrolling content is needed.</Text>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5CountdownRing">
+            <View style={{flexDirection:'row',gap:16}}>
+              <V5CountdownRing daysLeft={3} totalDays={10}/>
+              <V5CountdownRing daysLeft={8} totalDays={10} color={forcedTheme.primary}/>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5MonoNum">
+            <View style={{flexDirection:'row',gap:16,alignItems:'baseline'}}>
+              <V5MonoNum size={32}>2,840.00</V5MonoNum>
+              <V5MonoNum size={18} weight="500" color={forcedTheme.accent}>+8.2%</V5MonoNum>
+            </View>
+          </V5GalleryItem>
+        </V5GallerySection>
+
+        {/* ═══ LAYOUT HELPERS ═══ */}
+        <V5GallerySection title="Layout helpers">
+          <V5GalleryItem name="V5SectionH">
+            <View style={{gap:14}}>
+              <V5SectionH title="Today's wins" sub="3 caught up"/>
+              <V5SectionH title="Live activity" live/>
+              <V5SectionH title="Recent" action="See all" onAction={function(){}}/>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5MiniStat (with ring + sparkline)">
+            <View style={{flexDirection:'row',gap:8}}>
+              <View style={{flex:1}}><V5MiniStat label="Protein" value="62" suffix="g" sub="of 90g target" ringValue={68}/></View>
+              <View style={{flex:1}}><V5MiniStat label="Spent" value="2,840" prefix="₹" sub="this week" sparkData={[8,14,11,18,16,24,22]}/></View>
+            </View>
+          </V5GalleryItem>
+          <V5GalleryItem name="V5Pad / V5Body">
+            <Text style={{fontFamily:FF.sans,fontSize:12,color:forcedTheme.textSecondary,lineHeight:18}}>Layout wrappers (18px horizontal padding column / scrollable body). Used as screen containers — preview as the structure around every other item on a real tab.</Text>
+          </V5GalleryItem>
+        </V5GallerySection>
+      </ScrollView>
+    </View>
+  </ThemeContext.Provider>;
+}
+
 function MemberStatChip({label,value}){
   var theme=useThemeColors();
   return <View style={{
@@ -10673,6 +10956,8 @@ function SettingsScreen({onClose}){
   var[removeConfirm,setRemoveConfirm]=useState(null);
   var[showProfile,setShowProfile]=useState(false);
   var[showOurPromise,setShowOurPromise]=useState(false);
+  // TEMP — remove after Phase 2 migration complete (v5 atom gallery for dev sanity check)
+  var[showV5Gallery,setShowV5Gallery]=useState(false);
   var[showRename,setShowRename]=useState(false); // S3
   var[memberDetail,setMemberDetail]=useState(null); // S4
   var[showAddMember,setShowAddMember]=useState(false);
@@ -10976,8 +11261,15 @@ function SettingsScreen({onClose}){
         </View>
       </ModalSheet>}
 
+      {/* TEMP — v5 atom gallery hook. Remove after Phase 2 migration complete. */}
+      <Caps style={{marginTop:20,marginBottom:8}}>Developer</Caps>
+      {listRow('v5 Atom Gallery (dev)',null,function(){haptic('light');setShowV5Gallery(true);},{emoji:'🎨'})}
+
       <View style={{height:32}}/>
     </ScrollView>
+
+    {/* TEMP — v5 atom gallery modal. Remove after Phase 2 migration complete. */}
+    {showV5Gallery&&<Modal visible={true} animationType="slide" onRequestClose={function(){setShowV5Gallery(false);}}><V5AtomGallery onClose={function(){setShowV5Gallery(false);}}/></Modal>}
   </View>);
 }
 
