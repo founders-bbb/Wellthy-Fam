@@ -4227,6 +4227,10 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
 
 
   function renderPageQuestions(){
+    var hasKids=(qAnswers.q6_household||[]).indexOf('Kids under 12')!==-1
+             ||(qAnswers.q6_household||[]).indexOf('Teenagers')!==-1;
+
+    // ═══ PAGE 1 — Who you are, who you live with ═══
     if(qPage===1){return <View>
       <QuestionText>1. What is your name?</QuestionText>
       <Inp value={qAnswers.q1_name} onChangeText={function(v){setAnswer('q1_name',v);}} placeholder="First name is fine"/>
@@ -4240,191 +4244,271 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
       <SelectField value={qAnswers.q3_location} onChange={function(v){setAnswer('q3_location',v);}} options={[{label:'Select city',value:''}].concat(Q_LOCATION_OPTIONS.map(function(c){return{label:c,value:c};}))} placeholder="Select city"/>
       {qErrors.q3_location?<Text style={z.errTx}>{qErrors.q3_location}</Text>:null}
 
+      <Inp label="Which neighbourhood or area? (optional)" value={qAnswers.q3_neighbourhood} onChangeText={function(v){setAnswer('q3_neighbourhood',v);}} placeholder="e.g. Whitefield, Powai, Indiranagar"/>
+
       <QuestionText>4. Home language</QuestionText>
       <SelectField value={qAnswers.q4_language} onChange={function(v){setAnswer('q4_language',v);}} options={[{label:'Select language',value:''}].concat(Q_LANGUAGE_OPTIONS.map(function(l){return{label:l,value:l};}))} placeholder="Select language"/>
       {qErrors.q4_language?<Text style={z.errTx}>{qErrors.q4_language}</Text>:null}
 
-      <QuestionText>5. What do you do for a living?</QuestionText>
-      <Inp value={qAnswers.q5_occupation} onChangeText={function(v){setAnswer('q5_occupation',v);}} placeholder="Your occupation"/>
+      <QuestionText>5. What do you do for work?</QuestionText>
+      <Inp value={qAnswers.q5_occupation} onChangeText={function(v){setAnswer('q5_occupation',v);}} placeholder="e.g. software engineer, schoolteacher, run a small business"/>
       {qErrors.q5_occupation?<Text style={z.errTx}>{qErrors.q5_occupation}</Text>:null}
 
       {!isInvitee?<View>
-        <QuestionText>6. Who do you have in your family?</QuestionText>
-        <ChipSelector options={Q_FAMILY_OPTIONS} value={qAnswers.q6_family} onChange={function(v){setAnswer('q6_family',v);}} multi={true}/>
-        {qErrors.q6_family?<Text style={z.errTx}>{qErrors.q6_family}</Text>:null}
-        <ConditionalInput show={(qAnswers.q6_family||[]).includes('Kids')}>
-          <Inp label="How many children?" value={String(qAnswers.q6_children_count||'')} onChangeText={function(v){setAnswer('q6_children_count',v.replace(/[^0-9]/g,''));}} keyboardType="numeric" placeholder="1-10"/>
-          {qErrors.q6_children_count?<Text style={z.errTx}>{qErrors.q6_children_count}</Text>:null}
+        <QuestionText>6. Who lives in your house with you, day to day?</QuestionText>
+        <ChipSelector options={Q_HOUSEHOLD_OPTIONS} value={qAnswers.q6_household} onChange={function(v){setAnswer('q6_household',v);}} multi={true}/>
+        {qErrors.q6_household?<Text style={z.errTx}>{qErrors.q6_household}</Text>:null}
+        <ConditionalInput show={hasKids}>
+          <QuestionText>7. What stage are your kids at?</QuestionText>
+          <ChipSelector options={Q_KIDS_STAGE_OPTIONS} value={qAnswers.q7_kids_stages} onChange={function(v){setAnswer('q7_kids_stages',v);}} multi={true}/>
+          {qErrors.q7_kids_stages?<Text style={z.errTx}>{qErrors.q7_kids_stages}</Text>:null}
         </ConditionalInput>
       </View>:null}
 
-      <QuestionText>7. What are your passions?</QuestionText>
-      <ChipSelector options={Q_PASSION_OPTIONS} value={qAnswers.q7_passions} onChange={function(v){setAnswer('q7_passions',v);}} multi={true}/>
-      {qErrors.q7_passions?<Text style={z.errTx}>{qErrors.q7_passions}</Text>:null}
+      <QuestionText>8. Who in the house handles the money? Be honest.</QuestionText>
+      <ChipSelector options={Q_MONEY_HANDLER_OPTIONS} value={qAnswers.q8_money_handler} onChange={function(v){setAnswer('q8_money_handler',v);}}/>
+      {qErrors.q8_money_handler?<Text style={z.errTx}>{qErrors.q8_money_handler}</Text>:null}
+
+      <QuestionText>9. Whose income runs the household?</QuestionText>
+      <ChipSelector options={Q_INCOME_SOURCE_OPTIONS} value={qAnswers.q9_income_source} onChange={function(v){setAnswer('q9_income_source',v);}}/>
+      {qErrors.q9_income_source?<Text style={z.errTx}>{qErrors.q9_income_source}</Text>:null}
+
+      <QuestionText>10. In your own words: what made you open this app today?</QuestionText>
+      <Inp value={qAnswers.q10_why_today} onChangeText={function(v){setAnswer('q10_why_today',v);}} multiline={true} placeholder="A fight, a number that scared you, a friend who told you — whatever it was."/>
+      {qErrors.q10_why_today?<Text style={z.errTx}>{qErrors.q10_why_today}</Text>:null}
     </View>;}
 
+    // ═══ PAGE 2 — How money moves through your house ═══
     if(qPage===2){return <View>
-      <QuestionText>8. Spending awareness</QuestionText>
-      <ChipSelector options={['I track everything','Rough idea','Not really','No clue']} value={qAnswers.q8_spending_awareness} onChange={function(v){setAnswer('q8_spending_awareness',v);}}/>
-      {qErrors.q8_spending_awareness?<Text style={z.errTx}>{qErrors.q8_spending_awareness}</Text>:null}
+      <QuestionText>11. Roughly, what does your household bring in every month?</QuestionText>
+      <ChipSelector options={Q_INCOME_BAND_OPTIONS} value={qAnswers.q11_income_band} onChange={function(v){setAnswer('q11_income_band',v);}}/>
+      {qErrors.q11_income_band?<Text style={z.errTx}>{qErrors.q11_income_band}</Text>:null}
 
-      <QuestionText>9. Purchase regret from last month</QuestionText>
-      <Inp value={qAnswers.q9_spending_regret} onChangeText={function(v){setAnswer('q9_spending_regret',v);}} multiline={true} placeholder="e.g. food delivery, impulse shopping"/>
-      {qErrors.q9_spending_regret?<Text style={z.errTx}>{qErrors.q9_spending_regret}</Text>:null}
-
-      <QuestionText>10. Do you have savings or investments for your future?</QuestionText>
-      <ChipSelector options={['Yes','No']} value={qAnswers.q10_savings_investments} onChange={function(v){setAnswer('q10_savings_investments',v);}}/>
-      {qErrors.q10_savings_investments?<Text style={z.errTx}>{qErrors.q10_savings_investments}</Text>:null}
-
-      <QuestionText>11. Do you have loans?</QuestionText>
-      <ChipSelector options={['Yes','No']} value={qAnswers.q11_has_loans} onChange={function(v){setAnswer('q11_has_loans',v);if(v!=='Yes')setAnswer('q11_loan_types',[]);}}/>
-      {qErrors.q11_has_loans?<Text style={z.errTx}>{qErrors.q11_has_loans}</Text>:null}
-      <ConditionalInput show={qAnswers.q11_has_loans==='Yes'}>
-        <ChipSelector options={['Home','Car','Personal','Credit card','Education','Other']} value={qAnswers.q11_loan_types} onChange={function(v){setAnswer('q11_loan_types',v);}} multi={true}/>
-        {qErrors.q11_loan_types?<Text style={z.errTx}>{qErrors.q11_loan_types}</Text>:null}
+      <QuestionText>12. Of that, how much do you actually save or invest in a normal month?</QuestionText>
+      <ChipSelector options={Q_SAVINGS_PERCENT_OPTIONS} value={qAnswers.q12_savings_percent} onChange={function(v){setAnswer('q12_savings_percent',v);if(v==='No idea')setAnswer('q13_savings_vehicles',[]);}}/>
+      {qErrors.q12_savings_percent?<Text style={z.errTx}>{qErrors.q12_savings_percent}</Text>:null}
+      <ConditionalInput show={!!qAnswers.q12_savings_percent && qAnswers.q12_savings_percent!=='No idea'}>
+        <QuestionText>13. Where does that saving go?</QuestionText>
+        <ChipSelector options={Q_SAVINGS_VEHICLE_OPTIONS} value={qAnswers.q13_savings_vehicles} onChange={function(v){setAnswer('q13_savings_vehicles',v);}} multi={true}/>
+        {qErrors.q13_savings_vehicles?<Text style={z.errTx}>{qErrors.q13_savings_vehicles}</Text>:null}
       </ConditionalInput>
 
-      <SliderInput label="12. Money stress (1-10)" value={qAnswers.q12_money_stress} onChange={function(v){setAnswer('q12_money_stress',v);}} min={1} max={10} leftLabel="Low" rightLabel="High"/>
-      {qErrors.q12_money_stress?<Text style={z.errTx}>{qErrors.q12_money_stress}</Text>:null}
+      <QuestionText>14. Do you owe money on any loans or credit?</QuestionText>
+      <ChipSelector options={['Yes','No']} value={qAnswers.q14_has_loans} onChange={function(v){setAnswer('q14_has_loans',v);if(v!=='Yes'){setAnswer('q14_loan_types',[]);setAnswer('q14_emi_percent','');}}}/>
+      {qErrors.q14_has_loans?<Text style={z.errTx}>{qErrors.q14_has_loans}</Text>:null}
+      <ConditionalInput show={qAnswers.q14_has_loans==='Yes'}>
+        <QuestionText>Which ones?</QuestionText>
+        <ChipSelector options={Q_LOAN_TYPE_OPTIONS} value={qAnswers.q14_loan_types} onChange={function(v){setAnswer('q14_loan_types',v);}} multi={true}/>
+        {qErrors.q14_loan_types?<Text style={z.errTx}>{qErrors.q14_loan_types}</Text>:null}
+        <QuestionText>Roughly how much of your monthly income goes to all EMIs combined?</QuestionText>
+        <ChipSelector options={Q_EMI_PERCENT_OPTIONS} value={qAnswers.q14_emi_percent} onChange={function(v){setAnswer('q14_emi_percent',v);}}/>
+        {qErrors.q14_emi_percent?<Text style={z.errTx}>{qErrors.q14_emi_percent}</Text>:null}
+      </ConditionalInput>
+
+      <QuestionText>15. What was the last thing you bought that you regret?</QuestionText>
+      <Inp value={qAnswers.q15_last_regret} onChangeText={function(v){setAnswer('q15_last_regret',v);}} multiline={true} placeholder={"It's okay if you don't fully regret it. The thing you'd rather not tell your spouse about. Could be ₹400, could be ₹40,000."}/>
+      {qErrors.q15_last_regret?<Text style={z.errTx}>{qErrors.q15_last_regret}</Text>:null}
+
+      <QuestionText>16. When you and your spouse / partner argue about money, what's it usually about?</QuestionText>
+      <ChipSelector options={Q_MONEY_FIGHT_OPTIONS} value={qAnswers.q16_money_fight} onChange={function(v){setAnswer('q16_money_fight',v);if(v.indexOf('Something else')===-1)setAnswer('q16_money_fight_other','');}} multi={true}/>
+      {qErrors.q16_money_fight?<Text style={z.errTx}>{qErrors.q16_money_fight}</Text>:null}
+      <ConditionalInput show={(qAnswers.q16_money_fight||[]).indexOf('Something else')!==-1}>
+        <Inp label="Tell us in one line." value={qAnswers.q16_money_fight_other} onChangeText={function(v){setAnswer('q16_money_fight_other',v);}} placeholder="What the actual argument is"/>
+        {qErrors.q16_money_fight_other?<Text style={z.errTx}>{qErrors.q16_money_fight_other}</Text>:null}
+      </ConditionalInput>
+
+      <QuestionText>17. Do both of you actually look at the bank statements?</QuestionText>
+      <ChipSelector options={Q_STATEMENT_VISIBILITY_OPTIONS} value={qAnswers.q17_statement_visibility} onChange={function(v){setAnswer('q17_statement_visibility',v);}}/>
+      {qErrors.q17_statement_visibility?<Text style={z.errTx}>{qErrors.q17_statement_visibility}</Text>:null}
+
+      <QuestionText>18. If a family member needed ₹2 lakh tomorrow morning for a medical emergency — where would the money come from?</QuestionText>
+      <ChipSelector options={Q_EMERGENCY_FUNDING_OPTIONS} value={qAnswers.q18_emergency_funding} onChange={function(v){setAnswer('q18_emergency_funding',v);}}/>
+      {qErrors.q18_emergency_funding?<Text style={z.errTx}>{qErrors.q18_emergency_funding}</Text>:null}
+
+      <SliderInput label="19. Money stress (1-10)" value={qAnswers.q19_money_stress} onChange={function(v){setAnswer('q19_money_stress',v);}} min={1} max={10} leftLabel="Low" rightLabel="High"/>
+      {qErrors.q19_money_stress?<Text style={z.errTx}>{qErrors.q19_money_stress}</Text>:null}
+
+      <QuestionText>20. Where do you hope your money is in one year?</QuestionText>
+      <Inp value={qAnswers.q20_goal_1year} onChangeText={function(v){setAnswer('q20_goal_1year',v);}} multiline={true} placeholder={"Be specific. 'Save more' is not an answer. '₹3L sitting in an emergency fund' is."}/>
+      {qErrors.q20_goal_1year?<Text style={z.errTx}>{qErrors.q20_goal_1year}</Text>:null}
+
+      <QuestionText>21. And in five years?</QuestionText>
+      <Inp value={qAnswers.q21_goal_5year} onChangeText={function(v){setAnswer('q21_goal_5year',v);}} multiline={true} placeholder="A house, kids' school, parents' retirement, your own freedom — say it however you want."/>
+      {qErrors.q21_goal_5year?<Text style={z.errTx}>{qErrors.q21_goal_5year}</Text>:null}
     </View>;}
 
+    // ═══ PAGE 3 — The family plate ═══
     if(qPage===3){return <View>
-      <QuestionText>13. How would you describe your spender type?</QuestionText>
-      <ChipSelector options={['Planned spender','Balanced spender','Impulse spender','Avoids tracking']} value={qAnswers.q13_spender_type} onChange={function(v){setAnswer('q13_spender_type',v);}}/>
-      {qErrors.q13_spender_type?<Text style={z.errTx}>{qErrors.q13_spender_type}</Text>:null}
+      <QuestionText>22. Your height</QuestionText>
+      <View style={[z.row,{gap:8,marginBottom:8}]}>
+        <TouchableOpacity style={[z.chip,qAnswers.q22_height_unit==='cm'&&z.chipSel]} onPress={function(){setAnswer('q22_height_unit','cm');}}><Text style={[z.chipTx,qAnswers.q22_height_unit==='cm'&&z.chipSelTx]}>cm</Text></TouchableOpacity>
+        <TouchableOpacity style={[z.chip,qAnswers.q22_height_unit==='ft'&&z.chipSel]} onPress={function(){setAnswer('q22_height_unit','ft');}}><Text style={[z.chipTx,qAnswers.q22_height_unit==='ft'&&z.chipSelTx]}>ft</Text></TouchableOpacity>
+      </View>
+      <Inp value={String(qAnswers.q22_height||'')} onChangeText={function(v){setAnswer('q22_height',v.replace(/[^0-9.]/g,''));}} keyboardType="numeric" placeholder={qAnswers.q22_height_unit==='ft'?'e.g. 5.75 for 5’9”':'e.g. 170'}/>
+      {qErrors.q22_height?<Text style={z.errTx}>{qErrors.q22_height}</Text>:null}
 
-      <QuestionText>14. Biggest financial worry right now</QuestionText>
-      <ChipSelector options={['Debt / EMI','Monthly expenses','Emergency fund','Child education','Retirement','Job security']} value={qAnswers.q14_financial_worry} onChange={function(v){setAnswer('q14_financial_worry',v);}}/>
-      {qErrors.q14_financial_worry?<Text style={z.errTx}>{qErrors.q14_financial_worry}</Text>:null}
+      <QuestionText>23. Your weight</QuestionText>
+      <View style={[z.row,{gap:8,marginBottom:8}]}>
+        <TouchableOpacity style={[z.chip,qAnswers.q23_weight_unit==='kg'&&z.chipSel]} onPress={function(){setAnswer('q23_weight_unit','kg');}}><Text style={[z.chipTx,qAnswers.q23_weight_unit==='kg'&&z.chipSelTx]}>kg</Text></TouchableOpacity>
+        <TouchableOpacity style={[z.chip,qAnswers.q23_weight_unit==='lbs'&&z.chipSel]} onPress={function(){setAnswer('q23_weight_unit','lbs');}}><Text style={[z.chipTx,qAnswers.q23_weight_unit==='lbs'&&z.chipSelTx]}>lbs</Text></TouchableOpacity>
+      </View>
+      <Inp value={String(qAnswers.q23_weight||'')} onChangeText={function(v){setAnswer('q23_weight',v.replace(/[^0-9.]/g,''));}} keyboardType="numeric" placeholder={qAnswers.q23_weight_unit==='kg'?'e.g. 70':'e.g. 154'}/>
+      {qErrors.q23_weight?<Text style={z.errTx}>{qErrors.q23_weight}</Text>:null}
 
-      <QuestionText>15. Your main goal in 1 year</QuestionText>
-      <Inp value={qAnswers.q15_goal_1year} onChangeText={function(v){setAnswer('q15_goal_1year',v);}} placeholder="e.g. emergency fund"/>
-      {qErrors.q15_goal_1year?<Text style={z.errTx}>{qErrors.q15_goal_1year}</Text>:null}
+      <SliderInput label="24. Your sleep, on a normal weeknight" value={qAnswers.q24_sleep_hours} onChange={function(v){setAnswer('q24_sleep_hours',v);}} min={4} max={10} leftLabel="4h" rightLabel="10h"/>
+      {qErrors.q24_sleep_hours?<Text style={z.errTx}>{qErrors.q24_sleep_hours}</Text>:null}
 
-      <QuestionText>16. Your main goal in 5 years</QuestionText>
-      <Inp value={qAnswers.q16_goal_5year} onChangeText={function(v){setAnswer('q16_goal_5year',v);}} placeholder="e.g. home down payment"/>
-      {qErrors.q16_goal_5year?<Text style={z.errTx}>{qErrors.q16_goal_5year}</Text>:null}
+      <QuestionText>25. Who cooks at home, most days?</QuestionText>
+      <ChipSelector options={Q_COOK_OPTIONS} value={qAnswers.q25_cook} onChange={function(v){setAnswer('q25_cook',v);}}/>
+      {qErrors.q25_cook?<Text style={z.errTx}>{qErrors.q25_cook}</Text>:null}
 
-      <QuestionText>17. What's stopping you from achieving the goal? (optional)</QuestionText>
-      <Inp value={qAnswers.q17_stopping_you} onChangeText={function(v){setAnswer('q17_stopping_you',v);}} multiline={true} placeholder="Optional"/>
+      <QuestionText>26. In a normal week, how many dinners does your family eat together at the same table?</QuestionText>
+      <ChipSelector options={Q_FAMILY_DINNER_OPTIONS} value={qAnswers.q26_family_dinners} onChange={function(v){setAnswer('q26_family_dinners',v);}}/>
+      {qErrors.q26_family_dinners?<Text style={z.errTx}>{qErrors.q26_family_dinners}</Text>:null}
+
+      <QuestionText>27. How often does delivery (Swiggy, Zomato, Eatsure) replace a home-cooked meal?</QuestionText>
+      <ChipSelector options={Q_DELIVERY_FREQUENCY_OPTIONS} value={qAnswers.q27_delivery_frequency} onChange={function(v){setAnswer('q27_delivery_frequency',v);}}/>
+      {qErrors.q27_delivery_frequency?<Text style={z.errTx}>{qErrors.q27_delivery_frequency}</Text>:null}
+
+      <QuestionText>28. What do you believe gives your family enough protein?</QuestionText>
+      <ChipSelector options={Q_PROTEIN_BELIEF_OPTIONS} value={qAnswers.q28_protein_beliefs} onChange={function(v){setAnswer('q28_protein_beliefs',v);}} multi={true}/>
+      {qErrors.q28_protein_beliefs?<Text style={z.errTx}>{qErrors.q28_protein_beliefs}</Text>:null}
+
+      <QuestionText>29. Does anyone in the house have a health condition we should know about?</QuestionText>
+      <ChipSelector options={Q_HEALTH_CONDITION_OPTIONS} value={qAnswers.q29_health_conditions} onChange={function(v){
+        // 'None' is mutually exclusive with everything else.
+        var next=v;
+        var hadNone=(qAnswers.q29_health_conditions||[]).indexOf('None')>=0;
+        var pickedNone=v.indexOf('None')>=0;
+        if(pickedNone && !hadNone)next=['None'];
+        else if(pickedNone && hadNone && v.length>1)next=v.filter(function(x){return x!=='None';});
+        setAnswer('q29_health_conditions',next);
+        if(next.length===1 && next[0]==='None')setAnswer('q29_conditions_detail','');
+      }} multi={true}/>
+      {qErrors.q29_health_conditions?<Text style={z.errTx}>{qErrors.q29_health_conditions}</Text>:null}
+      <ConditionalInput show={(qAnswers.q29_health_conditions||[]).some(function(c){return c!=='None';})}>
+        <Inp label="Anything else, or who it's for?" value={qAnswers.q29_conditions_detail} onChangeText={function(v){setAnswer('q29_conditions_detail',v);}} placeholder="e.g. my father has diabetes; my wife had gestational"/>
+        {qErrors.q29_conditions_detail?<Text style={z.errTx}>{qErrors.q29_conditions_detail}</Text>:null}
+      </ConditionalInput>
+
+      <QuestionText>30. Smoking</QuestionText>
+      <ChipSelector options={Q_SMOKING_OPTIONS} value={qAnswers.q30_smoking} onChange={function(v){setAnswer('q30_smoking',v);}}/>
+      {qErrors.q30_smoking?<Text style={z.errTx}>{qErrors.q30_smoking}</Text>:null}
+
+      <QuestionText>31. Alcohol</QuestionText>
+      <ChipSelector options={Q_ALCOHOL_OPTIONS} value={qAnswers.q31_alcohol} onChange={function(v){setAnswer('q31_alcohol',v);}}/>
+      {qErrors.q31_alcohol?<Text style={z.errTx}>{qErrors.q31_alcohol}</Text>:null}
+
+      <SliderInput label="32. Glasses of water on a typical day" value={qAnswers.q32_water_glasses} onChange={function(v){setAnswer('q32_water_glasses',v);}} min={1} max={20} leftLabel="1" rightLabel="20"/>
+      {qErrors.q32_water_glasses?<Text style={z.errTx}>{qErrors.q32_water_glasses}</Text>:null}
+
+      <QuestionText>33. In your own words: what's one thing about how your family eats that you'd want to fix?</QuestionText>
+      <Inp value={qAnswers.q33_food_fix} onChangeText={function(v){setAnswer('q33_food_fix',v);}} multiline={true} placeholder={"Not the perfect answer — the honest one. 'My kids only eat noodles.' 'We eat too late.'"}/>
+      {qErrors.q33_food_fix?<Text style={z.errTx}>{qErrors.q33_food_fix}</Text>:null}
     </View>;}
 
+    // ═══ PAGE 4 — The phone, the screen, and the room ═══
     if(qPage===4){return <View>
-      <QuestionText>18. Height</QuestionText>
-      <View style={[z.row,{gap:8,marginBottom:8}]}> 
-        <TouchableOpacity style={[z.chip,qAnswers.q18_height_unit==='cm'&&z.chipSel]} onPress={function(){setAnswer('q18_height_unit','cm');}}><Text style={[z.chipTx,qAnswers.q18_height_unit==='cm'&&z.chipSelTx]}>cm</Text></TouchableOpacity>
-        <TouchableOpacity style={[z.chip,qAnswers.q18_height_unit==='ft'&&z.chipSel]} onPress={function(){setAnswer('q18_height_unit','ft');}}><Text style={[z.chipTx,qAnswers.q18_height_unit==='ft'&&z.chipSelTx]}>ft</Text></TouchableOpacity>
-      </View>
-      {qAnswers.q18_height_unit==='cm'
-        ? <Inp value={String(qAnswers.q18_height||'')} onChangeText={function(v){setAnswer('q18_height',v.replace(/[^0-9.]/g,''));}} keyboardType="numeric" placeholder="e.g. 170"/>
-        : <View style={[z.row,{gap:10}]}>
-            <View style={{flex:1}}>
-              <Inp label="Feet" value={String(qAnswers.q18_height_ft||'')} onChangeText={function(v){setAnswer('q18_height_ft',v.replace(/[^0-9]/g,''));}} keyboardType="numeric" placeholder="e.g. 5"/>
-            </View>
-            <View style={{flex:1}}>
-              <Inp label="Inches" value={String(qAnswers.q18_height_in||'')} onChangeText={function(v){setAnswer('q18_height_in',v.replace(/[^0-9]/g,''));}} keyboardType="numeric" placeholder="0-11"/>
-            </View>
-          </View>}
-      {qErrors.q18_height?<Text style={z.errTx}>{qErrors.q18_height}</Text>:null}
+      <QuestionText>34. Your screen time on a normal day</QuestionText>
+      <ChipSelector options={Q_SCREEN_TIME_OPTIONS} value={qAnswers.q34_screen_time} onChange={function(v){setAnswer('q34_screen_time',v);}}/>
+      {qErrors.q34_screen_time?<Text style={z.errTx}>{qErrors.q34_screen_time}</Text>:null}
 
-      <QuestionText>19. Weight</QuestionText>
-      <View style={[z.row,{gap:8,marginBottom:8}]}> 
-        <TouchableOpacity style={[z.chip,qAnswers.q19_weight_unit==='kg'&&z.chipSel]} onPress={function(){setAnswer('q19_weight_unit','kg');}}><Text style={[z.chipTx,qAnswers.q19_weight_unit==='kg'&&z.chipSelTx]}>kg</Text></TouchableOpacity>
-        <TouchableOpacity style={[z.chip,qAnswers.q19_weight_unit==='lbs'&&z.chipSel]} onPress={function(){setAnswer('q19_weight_unit','lbs');}}><Text style={[z.chipTx,qAnswers.q19_weight_unit==='lbs'&&z.chipSelTx]}>lbs</Text></TouchableOpacity>
-      </View>
-      <Inp value={String(qAnswers.q19_weight||'')} onChangeText={function(v){setAnswer('q19_weight',v.replace(/[^0-9.]/g,''));}} keyboardType="numeric" placeholder={qAnswers.q19_weight_unit==='kg'?'e.g. 70':'e.g. 154'}/>
-      {qErrors.q19_weight?<Text style={z.errTx}>{qErrors.q19_weight}</Text>:null}
+      <QuestionText>35. First thing you reach for in the morning?</QuestionText>
+      <ChipSelector options={Q_MORNING_REACH_OPTIONS} value={qAnswers.q35_morning_reach} onChange={function(v){setAnswer('q35_morning_reach',v);}}/>
+      {qErrors.q35_morning_reach?<Text style={z.errTx}>{qErrors.q35_morning_reach}</Text>:null}
 
-      <SliderInput label="20. Sleep hours" value={qAnswers.q20_sleep_hours} onChange={function(v){setAnswer('q20_sleep_hours',v);}} min={1} max={12} leftLabel="1h" rightLabel="12h"/>
-      <QuestionText>21. Do you exercise?</QuestionText>
-      <ChipSelector options={['Yes','No']} value={qAnswers.q21_exercise} onChange={function(v){setAnswer('q21_exercise',v);if(v!=='Yes')setAnswer('q21_exercise_types',[]);}}/>
-      {qErrors.q21_exercise?<Text style={z.errTx}>{qErrors.q21_exercise}</Text>:null}
-      <ConditionalInput show={qAnswers.q21_exercise==='Yes'}>
-        <ChipSelector options={['Walking','Gym','Yoga','Sports','Running','Home workout','Other']} value={qAnswers.q21_exercise_types} onChange={function(v){setAnswer('q21_exercise_types',v);}} multi={true}/>
-        {qErrors.q21_exercise_types?<Text style={z.errTx}>{qErrors.q21_exercise_types}</Text>:null}
+      <QuestionText>36. At dinner, where is your phone?</QuestionText>
+      <ChipSelector options={Q_PHONE_AT_DINNER_OPTIONS} value={qAnswers.q36_phone_at_dinner} onChange={function(v){setAnswer('q36_phone_at_dinner',v);}}/>
+      {qErrors.q36_phone_at_dinner?<Text style={z.errTx}>{qErrors.q36_phone_at_dinner}</Text>:null}
+
+      <QuestionText>37. On a normal weekday, how much time do you spend with your family — same room, no separate screens?</QuestionText>
+      <ChipSelector options={Q_FAMILY_TIME_OPTIONS} value={qAnswers.q37_family_time_daily} onChange={function(v){setAnswer('q37_family_time_daily',v);}}/>
+      {qErrors.q37_family_time_daily?<Text style={z.errTx}>{qErrors.q37_family_time_daily}</Text>:null}
+
+      <ConditionalInput show={hasKids}>
+        <QuestionText>38. How much screen time do your kids get on a normal weekday?</QuestionText>
+        <ChipSelector options={Q_KIDS_SCREEN_TIME_OPTIONS} value={qAnswers.q38_kids_screen_time} onChange={function(v){setAnswer('q38_kids_screen_time',v);}}/>
+        {qErrors.q38_kids_screen_time?<Text style={z.errTx}>{qErrors.q38_kids_screen_time}</Text>:null}
       </ConditionalInput>
 
-      <QuestionText>22. Protein awareness</QuestionText>
-      <ChipSelector options={['Yes track',"Know don't track",'No idea']} value={qAnswers.q22_protein_awareness} onChange={function(v){setAnswer('q22_protein_awareness',v);}}/>
-      {qErrors.q22_protein_awareness?<Text style={z.errTx}>{qErrors.q22_protein_awareness}</Text>:null}
+      <QuestionText>39. When was the last time you and your family did something together that nobody photographed or posted?</QuestionText>
+      <ChipSelector options={Q_UNPHOTOGRAPHED_OPTIONS} value={qAnswers.q39_unphotographed} onChange={function(v){setAnswer('q39_unphotographed',v);}}/>
+      {qErrors.q39_unphotographed?<Text style={z.errTx}>{qErrors.q39_unphotographed}</Text>:null}
+
+      <QuestionText>40. What's the biggest thing draining your mental energy right now?</QuestionText>
+      <ChipSelector options={Q_MENTAL_DRAIN_OPTIONS} value={qAnswers.q40_mental_drain} onChange={function(v){setAnswer('q40_mental_drain',v);}}/>
+      {qErrors.q40_mental_drain?<Text style={z.errTx}>{qErrors.q40_mental_drain}</Text>:null}
+      <Inp label="Anything specific you want to add? (optional)" value={qAnswers.q40_mental_drain_detail} onChangeText={function(v){setAnswer('q40_mental_drain_detail',v);}} placeholder="Optional. One line is fine."/>
+
+      <QuestionText>41. How often do you feel mentally exhausted at the end of a day?</QuestionText>
+      <ChipSelector options={Q_MENTAL_EXHAUSTION_OPTIONS} value={qAnswers.q41_mental_exhaustion} onChange={function(v){setAnswer('q41_mental_exhaustion',v);}}/>
+      {qErrors.q41_mental_exhaustion?<Text style={z.errTx}>{qErrors.q41_mental_exhaustion}</Text>:null}
+
+      <QuestionText>42. In your own words: what's the time of week when your family feels most "not okay" — and why?</QuestionText>
+      <Inp value={qAnswers.q42_hardest_time} onChangeText={function(v){setAnswer('q42_hardest_time',v);}} multiline={true} placeholder="Sunday evenings. Monday mornings. Friday after work. Tell us yours."/>
+      {qErrors.q42_hardest_time?<Text style={z.errTx}>{qErrors.q42_hardest_time}</Text>:null}
     </View>;}
 
-    if(qPage===5){return <View>
-      <SliderInput label="23. Water glasses per day" value={qAnswers.q23_water_glasses} onChange={function(v){setAnswer('q23_water_glasses',v);}} min={1} max={20} leftLabel="1" rightLabel="20"/>
-      <QuestionText>24. Smoking</QuestionText>
-      <ChipSelector options={['Never','Occasionally','Regularly','Trying to quit']} value={qAnswers.q24_smoking} onChange={function(v){setAnswer('q24_smoking',v);}}/>
-      {qErrors.q24_smoking?<Text style={z.errTx}>{qErrors.q24_smoking}</Text>:null}
-
-      <QuestionText>25. Alcohol</QuestionText>
-      <ChipSelector options={['Never','Socially','Regularly','Trying to reduce']} value={qAnswers.q25_alcohol} onChange={function(v){setAnswer('q25_alcohol',v);}}/>
-      {qErrors.q25_alcohol?<Text style={z.errTx}>{qErrors.q25_alcohol}</Text>:null}
-
-      <QuestionText>26. Any health conditions?</QuestionText>
-      <ChipSelector options={['Yes','No']} value={qAnswers.q26_health_conditions} onChange={function(v){setAnswer('q26_health_conditions',v);if(v!=='Yes')setAnswer('q26_conditions_list','');}}/>
-      {qErrors.q26_health_conditions?<Text style={z.errTx}>{qErrors.q26_health_conditions}</Text>:null}
-      <ConditionalInput show={qAnswers.q26_health_conditions==='Yes'}>
-        <Inp value={qAnswers.q26_conditions_list} onChangeText={function(v){setAnswer('q26_conditions_list',v);}} multiline={true} placeholder="List conditions"/>
-        {qErrors.q26_conditions_list?<Text style={z.errTx}>{qErrors.q26_conditions_list}</Text>:null}
-      </ConditionalInput>
-
-      <SliderInput label="27. Energy level (1-10)" value={qAnswers.q27_energy_level} onChange={function(v){setAnswer('q27_energy_level',v);}} min={1} max={10} leftLabel="Low" rightLabel="High"/>
-    </View>;}
-
-    if(qPage===6){return <View>
-      <QuestionText>28. Screen time yesterday</QuestionText>
-      <ChipSelector options={['<2h','2-4h','4-6h','6-8h','8+h']} value={qAnswers.q28_screen_time} onChange={function(v){setAnswer('q28_screen_time',v);}}/>
-      <Text style={[z.cap,{marginTop:4,marginBottom:8}]}>Not sure? Check Settings → Screen Time.</Text>
-      {qErrors.q28_screen_time?<Text style={z.errTx}>{qErrors.q28_screen_time}</Text>:null}
-
-      <QuestionText>29. Do you check phone first thing in the morning?</QuestionText>
-      <ChipSelector options={['Yes','No']} value={qAnswers.q29_morning_phone} onChange={function(v){setAnswer('q29_morning_phone',v);}}/>
-      {qErrors.q29_morning_phone?<Text style={z.errTx}>{qErrors.q29_morning_phone}</Text>:null}
-
-      <QuestionText>30. Social media detox history</QuestionText>
-      <ChipSelector options={['Yes successfully','Yes failed','Never tried',"What's that?"]} value={qAnswers.q30_social_detox} onChange={function(v){setAnswer('q30_social_detox',v);}}/>
-      {qErrors.q30_social_detox?<Text style={z.errTx}>{qErrors.q30_social_detox}</Text>:null}
-
-      <QuestionText>31. Do you practice mindfulness?</QuestionText>
-      <ChipSelector options={['Yes','No']} value={qAnswers.q31_mindfulness} onChange={function(v){setAnswer('q31_mindfulness',v);}}/>
-      {qErrors.q31_mindfulness?<Text style={z.errTx}>{qErrors.q31_mindfulness}</Text>:null}
-
-      <QuestionText>32. Mental exhaustion frequency</QuestionText>
-      <ChipSelector options={['Daily','Few times week','Rarely','Never']} value={qAnswers.q32_mental_exhaustion} onChange={function(v){setAnswer('q32_mental_exhaustion',v);}}/>
-      {qErrors.q32_mental_exhaustion?<Text style={z.errTx}>{qErrors.q32_mental_exhaustion}</Text>:null}
-
-      <SliderInput label="33. Family time per day (hours)" value={qAnswers.q33_family_time} onChange={function(v){setAnswer('q33_family_time',v);}} min={0} max={10} leftLabel="0h" rightLabel="10h"/>
-
-      <QuestionText>34. Biggest source of mental drain</QuestionText>
-      <ChipSelector options={['Work','Money','Health','Relationships','Social media','Sleep','Other']} value={qAnswers.q34_mental_drain} onChange={function(v){setAnswer('q34_mental_drain',v);}}/>
-      {qErrors.q34_mental_drain?<Text style={z.errTx}>{qErrors.q34_mental_drain}</Text>:null}
-    </View>;}
-
+    // ═══ PAGE 5 — What you want from this ═══
     return <View>
-      <QuestionText>35. Why are you here?</QuestionText>
-      <Inp value={qAnswers.q35_purpose} onChangeText={function(v){setAnswer('q35_purpose',v);}} multiline={true} placeholder="Share your reason"/>
-      {qErrors.q35_purpose?<Text style={z.errTx}>{qErrors.q35_purpose}</Text>:null}
+      <QuestionText>43. What's the first thing you hope this app shows you about your family? (pick up to 2)</QuestionText>
+      <ChipSelector options={Q_FIRST_INSIGHT_OPTIONS} value={qAnswers.q43_first_insight} onChange={function(v){setAnswer('q43_first_insight',v);}} multi={true} max={2}/>
+      {qErrors.q43_first_insight?<Text style={z.errTx}>{qErrors.q43_first_insight}</Text>:null}
 
-      <QuestionText>36. What are you looking for?</QuestionText>
-      <ChipSelector options={['Long-term lifestyle','Quick results']} value={qAnswers.q36_looking_for} onChange={function(v){setAnswer('q36_looking_for',v);}}/>
-      <Text style={[z.cap,{marginTop:4,marginBottom:8}]}>Both answers are allowed. We use this to personalize AI nudges.</Text>
-      {qErrors.q36_looking_for?<Text style={z.errTx}>{qErrors.q36_looking_for}</Text>:null}
+      <QuestionText>44. Are you the kind of person who wants the truth fast, or the truth slowly?</QuestionText>
+      <ChipSelector options={Q_PACING_OPTIONS} value={qAnswers.q44_pacing} onChange={function(v){setAnswer('q44_pacing',v);}}/>
+      {qErrors.q44_pacing?<Text style={z.errTx}>{qErrors.q44_pacing}</Text>:null}
 
-      <QuestionText>37. Consistency commitment</QuestionText>
-      <ChipSelector options={["Yes I'll try","Not sure","Probably not"]} value={qAnswers.q37_consistency} onChange={function(v){setAnswer('q37_consistency',v);}}/>
-      {qErrors.q37_consistency?<Text style={z.errTx}>{qErrors.q37_consistency}</Text>:null}
+      <QuestionText>45. If you saw a number this week that surprised you — would you want your spouse to see it too?</QuestionText>
+      <ChipSelector options={Q_SHARING_OPTIONS} value={qAnswers.q45_sharing} onChange={function(v){setAnswer('q45_sharing',v);}}/>
+      {qErrors.q45_sharing?<Text style={z.errTx}>{qErrors.q45_sharing}</Text>:null}
 
-      <QuestionText>38. What legacy do you want to leave after 20 years?</QuestionText>
-      <Inp value={qAnswers.q38_legacy} onChangeText={function(v){setAnswer('q38_legacy',v);}} multiline={true} placeholder="Your long-term vision"/>
-      {qErrors.q38_legacy?<Text style={z.errTx}>{qErrors.q38_legacy}</Text>:null}
+      <QuestionText>46. Is there one person in your family you're worried about right now?</QuestionText>
+      <ChipSelector options={Q_WORRIED_ABOUT_OPTIONS} value={qAnswers.q46_worried_about} onChange={function(v){setAnswer('q46_worried_about',v);}}/>
+      {qErrors.q46_worried_about?<Text style={z.errTx}>{qErrors.q46_worried_about}</Text>:null}
+
+      <QuestionText>47. What's one habit you want this app to help your household actually keep?</QuestionText>
+      <Inp value={qAnswers.q47_one_habit} onChangeText={function(v){setAnswer('q47_one_habit',v);}} multiline={true} placeholder="Eat dinner together at least four nights a week. Stop ordering on Mondays. Look at the bank balance every Sunday."/>
+      {qErrors.q47_one_habit?<Text style={z.errTx}>{qErrors.q47_one_habit}</Text>:null}
+
+      <QuestionText>48. If you could change one thing about your family's day-to-day life, what would it be?</QuestionText>
+      <Inp value={qAnswers.q48_one_change} onChangeText={function(v){setAnswer('q48_one_change',v);}} multiline={true} placeholder="There are no wrong answers. We've heard everything from 'I want my mother to call less' to 'I want to actually retire one day.'"/>
+      {qErrors.q48_one_change?<Text style={z.errTx}>{qErrors.q48_one_change}</Text>:null}
+
+      <QuestionText>49. What would make you stop using this app in three months?</QuestionText>
+      <ChipSelector options={Q_QUIT_REASON_OPTIONS} value={qAnswers.q49_quit_reason} onChange={function(v){setAnswer('q49_quit_reason',v);if(v.indexOf('Something else')===-1)setAnswer('q49_quit_reason_other','');}} multi={true}/>
+      {qErrors.q49_quit_reason?<Text style={z.errTx}>{qErrors.q49_quit_reason}</Text>:null}
+      <ConditionalInput show={(qAnswers.q49_quit_reason||[]).indexOf('Something else')!==-1}>
+        <Inp label="Tell us what it would be." value={qAnswers.q49_quit_reason_other} onChangeText={function(v){setAnswer('q49_quit_reason_other',v);}} placeholder="One line is fine."/>
+        {qErrors.q49_quit_reason_other?<Text style={z.errTx}>{qErrors.q49_quit_reason_other}</Text>:null}
+      </ConditionalInput>
+
+      <QuestionText>50. Anything else you want us to know before we start? (optional)</QuestionText>
+      <Inp value={qAnswers.q50_anything_else} onChangeText={function(v){setAnswer('q50_anything_else',v);}} multiline={true} placeholder="Things you didn't get to say. Context about your family. A warning about something. Anything."/>
     </View>;
   }
 
   function renderTransition(){
-    if(qPage===1)return <TransitionCard lines={["Before we begin, let's get to know you."]}/>;
-    if(qPage===2)return <TransitionCard lines={["Now, let's talk about money.","Not to judge. Just to understand."]}/>;
-    if(qPage===4)return <TransitionCard lines={["Money is important. But so is your health.","Let's check in on your body."]}/>;
-    if(qPage===6)return <TransitionCard lines={["Your body needs energy. So does your mind.","Let's be honest about screen time."]}/>;
-    if(qPage===7)return <TransitionCard lines={["One last thing.","This app isn't a quick fix. It's a lifestyle.","Are you ready?"]}/>;
+    if(qPage===1)return <TransitionCard lines={[
+      "Before anything else — who's actually in the house with you.",
+      "The numbers don't make sense without this.",
+    ]}/>;
+    if(qPage===2)return <TransitionCard lines={[
+      "Now the money. Not your salary slip — what actually happens.",
+      "We're not here to judge. Just to see the same picture, finally written down.",
+    ]}/>;
+    if(qPage===3)return <TransitionCard lines={[
+      "Now the food. Same idea — not your gym macros.",
+      "The family plate. The thing that gets cooked once and four people eat.",
+    ]}/>;
+    if(qPage===4)return <TransitionCard lines={[
+      "This one's harder to be honest about.",
+      "We'll keep it short.",
+    ]}/>;
+    if(qPage===5)return <TransitionCard lines={[
+      "Last bit.",
+      "This part shapes how we write your reports.",
+    ]}/>;
     return null;
   }
 
