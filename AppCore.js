@@ -83,21 +83,28 @@ var SLOTS = [
   { bg:'#E6F1FB', text:'#0C447C' },{ bg:'#FAEEDA', text:'#633806' },
   { bg:'#EEEDFE', text:'#3C3489' },
 ];
+// Composite phase item 4 — Category rebrand to v5 Saturated Forest set.
+// Old keys (Daily Essentials, House Bills, Lifestyle, Savings) → new v5 keys
+// (Groceries, Utilities, Dining + Schools + Subscription split). Colors taken
+// from V5_CATS.light. Cash + Uncat preserved as legacy-extension keys (V5_CATS
+// doesn't have them). DB backfill is a separate MCP migration — until it runs,
+// transactions with old category strings will fall through to Uncat (gray) via
+// the CATS[label]||CATS.Uncat lookup in CategoryPill.
 var CATS = {
-  // Per Design Guide — Category Colour Coding (section 05)
-  'Daily Essentials':{bg:'#E4F2EC',text:'#085041'},
-  'House Bills':     {bg:'#E4EDFB',text:'#1A4A8A'},
-  Travel:            {bg:'#FDF0E4',text:'#7A4A10'},
-  Health:            {bg:'#FBE4EE',text:'#7A1A3A'},
-  Lifestyle:         {bg:'#EDECFB',text:'#3A2A8A'},
-  Savings:           {bg:'#E4F2EC',text:'#085041'},
-  Income:            {bg:'#E4F2EC',text:'#085041'},
-  Cash:              {bg:'#F0EBDC',text:'#5A4A2A'},
-  Transfer:          {bg:'#DCE6EC',text:'#2A4A5A'},
-  Uncat:             {bg:'#F2F2EE',text:'#555555'},
+  Groceries:    {bg:'#E5E9D3',text:'#3F5125'},
+  Utilities:    {bg:'#E0E2EC',text:'#363F62'},
+  Travel:       {bg:'#F1DFC8',text:'#7A4416'},
+  Health:       {bg:'#F1D9D6',text:'#702824'},
+  Dining:       {bg:'#F0E0CB',text:'#7A4D15'},
+  Schools:      {bg:'#E0E6DD',text:'#395241'},
+  Income:       {bg:'#DDE3D3',text:'#2F4234'},
+  Transfer:     {bg:'#E5DDC8',text:'#5E4F2D'},
+  Subscription: {bg:'#E6DEEB',text:'#4B3960'},
+  Cash:         {bg:'#F0EBDC',text:'#5A4A2A'}, // legacy-extension, v5 set doesn't include Cash
+  Uncat:        {bg:'#F2F2EE',text:'#555555'}, // legacy-extension fallback
 };
-var CAT_LIST = ['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Cash','Transfer'];
-var CAT_COLORS = {'Daily Essentials':'#085041','House Bills':'#1A4A8A',Travel:'#7A4A10',Health:'#7A1A3A',Lifestyle:'#3A2A8A',Savings:'#085041',Cash:'#5A4A2A',Transfer:'#2A4A5A'};
+var CAT_LIST = ['Groceries','Utilities','Travel','Health','Dining','Schools','Subscription','Cash','Transfer'];
+var CAT_COLORS = {Groceries:'#3F5125',Utilities:'#363F62',Travel:'#7A4416',Health:'#702824',Dining:'#7A4D15',Schools:'#395241',Subscription:'#4B3960',Cash:'#5A4A2A',Transfer:'#5E4F2D'};
 // Spending = real outflow. Income/Cash/Transfer are excluded from "spend" totals
 // (cash is extracted not consumed; transfers are personal payments, not retail).
 function isSpendingCategory(c){return c!=='Income'&&c!=='Cash'&&c!=='Transfer';}
@@ -269,9 +276,16 @@ function normMembers(rows){return(rows||[]).map(function(m){
 });}
 function normTransactions(rows){
   var categoryMap={
-    Sustenance:'Daily Essentials',
-    Home:'House Bills',
+    Sustenance:'Groceries',
+    Home:'Utilities',
     'Travel & Dreams':'Travel',
+    // Composite phase item 4 — also map the now-legacy v4 category labels
+    // forward so any in-flight UI states still resolve to a v5 key. DB-side
+    // backfill happens separately via MCP.
+    'Daily Essentials':'Groceries',
+    'House Bills':'Utilities',
+    'Lifestyle':'Dining',
+    'Savings':'Transfer',
   };
   return(rows||[]).map(function(t){
     var mapped=categoryMap[t.category]||t.category;
@@ -4944,14 +4958,15 @@ function QuickLogSheet({visible,onClose}){
   var[saving,setSaving]=useState(false);
 
   var QL_CATS=[
-    {key:'Daily Essentials',icon:'🛒'},
-    {key:'House Bills',     icon:'🏠'},
+    {key:'Groceries',       icon:'🛒'},
+    {key:'Utilities',       icon:'🏠'},
     {key:'Travel',          icon:'✈️'},
     {key:'Health',          icon:'❤️'},
-    {key:'Lifestyle',       icon:'🛍️'},
-    {key:'Savings',         icon:'💰'},
+    {key:'Dining',          icon:'🍽️'},
+    {key:'Schools',         icon:'📚'},
+    {key:'Subscription',    icon:'🔁'},
     {key:'Cash',            icon:'💵'},
-    {key:'Transfer',        icon:'🔁'},
+    {key:'Transfer',        icon:'💸'},
   ];
 
   useEffect(function(){
@@ -5154,7 +5169,7 @@ var STATEMENT_PARSE_PHRASES = [
   'Categorizing…',
   'Almost there…',
 ];
-var STATEMENT_CATEGORY_OPTIONS = ['Daily Essentials','House Bills','Travel','Health','Lifestyle','Savings','Income','Cash','Transfer'];
+var STATEMENT_CATEGORY_OPTIONS = ['Groceries','Utilities','Travel','Health','Dining','Schools','Subscription','Income','Cash','Transfer'];
 
 function StatementUploadModal({visible,onClose,onOpenReview}){
   var theme=useThemeColors();
@@ -5481,14 +5496,14 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
         // Initial actions: every row pending, category_confirmed=category_suggested.
         var seed={};
         rows.forEach(function(r){
-          seed[r.id]={action:'pending',category_confirmed:r.category_suggested||'Daily Essentials'};
+          seed[r.id]={action:'pending',category_confirmed:r.category_suggested||'Groceries'};
         });
         setActions(seed);
         // Compute initial expanded state per category: Income always expanded, plus
         // any category that has a non-high-confidence row.
         var byCat={};
         rows.forEach(function(r){
-          var c=r.category_suggested||'Daily Essentials';
+          var c=r.category_suggested||'Groceries';
           if(!byCat[c])byCat[c]={count:0,minConf:1};
           byCat[c].count++;
           var cs=Number(r.confidence_score||0);
@@ -5517,17 +5532,17 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
 
   // ── Action helpers ───────────────────────────────────────────────────────────
   function setRowAction(id,patch){
-    setActions(function(prev){return Object.assign({},prev,{[id]:Object.assign({},prev[id]||{action:'pending',category_confirmed:'Daily Essentials'},patch)});});
+    setActions(function(prev){return Object.assign({},prev,{[id]:Object.assign({},prev[id]||{action:'pending',category_confirmed:'Groceries'},patch)});});
   }
   function confirmAllInCategory(cat){
     setActions(function(prev){
       var next=Object.assign({},prev);
       stagedTxs.forEach(function(r){
-        if((r.category_suggested||'Daily Essentials')===cat){
-          var was=next[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Daily Essentials'};
+        if((r.category_suggested||'Groceries')===cat){
+          var was=next[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Groceries'};
           // Don't override discarded rows — user explicitly skipped.
           if(was.action!=='discarded'){
-            next[r.id]={action:'confirmed',category_confirmed:r.category_suggested||'Daily Essentials'};
+            next[r.id]={action:'confirmed',category_confirmed:r.category_suggested||'Groceries'};
           }
         }
       });
@@ -5538,9 +5553,9 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
     setActions(function(prev){
       var next=Object.assign({},prev);
       stagedTxs.forEach(function(r){
-        var was=next[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Daily Essentials'};
+        var was=next[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Groceries'};
         if(was.action!=='discarded'){
-          next[r.id]={action:'confirmed',category_confirmed:r.category_suggested||'Daily Essentials'};
+          next[r.id]={action:'confirmed',category_confirmed:r.category_suggested||'Groceries'};
         }
       });
       return next;
@@ -5552,7 +5567,7 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
     if(was&&was.action==='discarded'){
       // un-discard: revert to pending with original suggestion
       var orig=stagedTxs.find(function(r){return r.id===id;});
-      setRowAction(id,{action:'pending',category_confirmed:(orig&&orig.category_suggested)||'Daily Essentials'});
+      setRowAction(id,{action:'pending',category_confirmed:(orig&&orig.category_suggested)||'Groceries'});
     } else {
       setRowAction(id,{action:'discarded'});
     }
@@ -5568,7 +5583,7 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
   var grouped=(function(){
     var byCat={};
     stagedTxs.forEach(function(r){
-      var c=r.category_suggested||'Daily Essentials';
+      var c=r.category_suggested||'Groceries';
       if(!byCat[c])byCat[c]={category:c,rows:[],total:0,minConf:1,sumConf:0};
       byCat[c].rows.push(r);
       byCat[c].total+=Number(r.amount||0);
@@ -5744,7 +5759,7 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
 
             {/* Expanded rows */}
             {isExpanded?g.rows.map(function(r){
-              var a=actions[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Daily Essentials'};
+              var a=actions[r.id]||{action:'pending',category_confirmed:r.category_suggested||'Groceries'};
               var cs=Number(r.confidence_score||0);
               var dotColor=cs>=0.85?theme.primary:(cs>=0.65?theme.accent:theme.danger);
               var isDiscarded=a.action==='discarded';
@@ -8537,7 +8552,7 @@ function HomeScreen(){
       {catchup.map(function(c){return<TouchableOpacity key={c.key} style={[z.row,{paddingVertical:6}]} onPress={function(){runChecklistAction(c);}}><View style={[z.checkbox,{borderColor:theme.accent}]}/><Text style={[z.body,{color:theme.text,flex:1}]}>{c.label}</Text><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Open</Text></TouchableOpacity>;})}
     </View>}
 
-    {unconf.length>0&&<View><View style={{marginTop:18}}><V5SectionH title="Waiting for you to confirm"/></View>{unconf.slice(0,5).map(function(t){return<SwipeableTxCard key={t.id} tx={t} onConfirm={function(){confirmTx(t.id);}} onEdit={function(){setEditTx(t);}}><V5Card style={{marginTop:10}}><View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><View style={{flex:1}}><Text style={[z.txM,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.memberName||'Joint'}</Text></View><Text style={[z.txM,{color:theme.text}]}>{'₹'}{fmt(t.amount)}</Text></View><View style={[z.row,{justifyContent:'space-between'}]}><CategoryPill label={t.category||'Uncat'}/><View style={z.row}><TouchableOpacity onPress={function(){setEditTx(t);}} style={z.editBtn}><Text style={z.editTx}>{'✎'}</Text></TouchableOpacity><V5Button variant="primary" onPress={function(){confirmTx(t.id);}}>Confirm</V5Button></View></View></V5Card></SwipeableTxCard>;})}<Text style={[z.cap,{textAlign:'center',marginTop:4,color:theme.muted}]}>Swipe right to confirm · Swipe left to edit</Text></View>}
+    {unconf.length>0&&<View><View style={{marginTop:18}}><V5SectionH title="Waiting for you to confirm"/></View>{unconf.slice(0,5).map(function(t){return<SwipeableTxCard key={t.id} tx={t} onConfirm={function(){confirmTx(t.id);}} onEdit={function(){setEditTx(t);}}><V5Card style={{marginTop:10}}><View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><View style={{flex:1}}><Text style={[z.txM,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.memberName||'Joint'}</Text></View><Text style={[z.txM,{color:theme.text}]}>{'₹'}{fmt(t.amount)}</Text></View><View style={[z.row,{justifyContent:'space-between'}]}><V5CategoryPill cat={t.category||'Uncat'}/><View style={z.row}><TouchableOpacity onPress={function(){setEditTx(t);}} style={z.editBtn}><Text style={z.editTx}>{'✎'}</Text></TouchableOpacity><V5Button variant="primary" onPress={function(){confirmTx(t.id);}}>Confirm</V5Button></View></View></V5Card></SwipeableTxCard>;})}<Text style={[z.cap,{textAlign:'center',marginTop:4,color:theme.muted}]}>Swipe right to confirm · Swipe left to edit</Text></View>}
     {/* PHASE 6 #6: 'Still pending today' moved to top of Home (above), this duplicate removed. */}
     <View style={{alignSelf:'flex-start',marginTop:16}}><V5Button variant="primary" onPress={function(){setShowTx(true);}}>+ Capture an entry</V5Button></View>
     <View style={{marginTop:18}}><V5SectionH title="The last seven days"/></View>
@@ -9073,7 +9088,7 @@ function FinanceScreen(){
 
     <View style={{marginTop:18,marginBottom:10}}>
       <V5SectionH title="This month’s entries"/>
-    </View>{filteredMonthTxs.slice(0,25).map(function(t){var commentCount=(transactionComments||[]).filter(function(c){return c.transaction_id===t.id;}).length;return<View key={t.id} style={z.txRow}><TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}}><Text style={[z.body,{flex:1}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(t.date)} · {t.memberName||'Joint'}</Text></TouchableOpacity><Text style={[z.fv,{marginRight:8}]}>{'₹'}{fmt(t.amount)}</Text>{t.is_family_spending&&<Text style={[z.cap,{color:'#0F6E56',marginRight:6}]}>👨‍👩‍👧 Family</Text>}<TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){haptic('light');setCatPickTx(t);} else Alert.alert('Read only','Only admin can change other member entries.');}}><CategoryPill label={t.category||'Uncat'}/></TouchableOpacity><TouchableOpacity onPress={function(){setSelectedTxForComments(t);}} style={z.editBtn}><Text style={z.editTx}>💬</Text>{commentCount>0&&<View style={z.commentCountBadge}><Text style={z.commentCountTx}>{commentCount}</Text></View>}</TouchableOpacity><TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity><TouchableOpacity onPress={function(){deleteTx(t);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity></View>;})}
+    </View>{filteredMonthTxs.slice(0,25).map(function(t){var commentCount=(transactionComments||[]).filter(function(c){return c.transaction_id===t.id;}).length;return<View key={t.id} style={z.txRow}><TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}}><Text style={[z.body,{flex:1}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(t.date)} · {t.memberName||'Joint'}</Text></TouchableOpacity><Text style={[z.fv,{marginRight:8}]}>{'₹'}{fmt(t.amount)}</Text>{t.is_family_spending&&<Text style={[z.cap,{color:'#0F6E56',marginRight:6}]}>👨‍👩‍👧 Family</Text>}<TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){haptic('light');setCatPickTx(t);} else Alert.alert('Read only','Only admin can change other member entries.');}}><V5CategoryPill cat={t.category||'Uncat'}/></TouchableOpacity><TouchableOpacity onPress={function(){setSelectedTxForComments(t);}} style={z.editBtn}><Text style={z.editTx}>💬</Text>{commentCount>0&&<View style={z.commentCountBadge}><Text style={z.commentCountTx}>{commentCount}</Text></View>}</TouchableOpacity><TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity><TouchableOpacity onPress={function(){deleteTx(t);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity></View>;})}
     {filteredMonthTxs.length===0&&<Text style={[z.cap,{color:theme.muted}]}>Nothing matches those filters.</Text>}
     <View style={{marginTop:18,marginBottom:10}}>
       <V5SectionH title="What you’re building toward"/>
@@ -11710,7 +11725,7 @@ function AppInner(){
           family_id:family,
           merchant:recur.description||'Recurring entry',
           amount:Number(recur.amount||0),
-          category:recur.transaction_type==='income'?'Income':(recur.category||'House Bills'),
+          category:recur.transaction_type==='income'?'Income':(recur.category||'Utilities'),
           member_id:recur.member_id||'joint',
           member_name:recur.member_name||'Joint',
           confirmed:false,
