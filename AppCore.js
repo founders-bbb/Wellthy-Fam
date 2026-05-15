@@ -889,7 +889,7 @@ function DateField({label,value,onChange,minimumDate,maximumDate,placeholder,def
     </TouchableOpacity>
     {Platform.OS==='web'&&<Text style={[z.cap,{marginTop:6,color:theme.muted}]}>Date picker is not supported on web preview. Use mobile app for calendar picker.</Text>}
     {show&&Platform.OS!=='web'&&<DateTimePicker value={pickerInitial} mode="date" display={Platform.OS==='ios'?'spinner':'default'} minimumDate={minimumDate||undefined} maximumDate={maximumDate||new Date()} onChange={handleChange}/>}
-    {show&&Platform.OS==='ios'&&<View style={{marginTop:8}}><SecondaryButton full onPress={function(){setShow(false);}}>Done</SecondaryButton></View>}
+    {show&&Platform.OS==='ios'&&<View style={{marginTop:8}}><V5Button variant="secondary" full onPress={function(){setShow(false);}}>Done</V5Button></View>}
   </View>);
 }
 
@@ -945,7 +945,7 @@ function Hero({label,value,suffix,prefix,size,color,accent}){
   var fs=size||42;
   var fg=accent||color||theme.text;
   return <View>
-    <Caps>{label}</Caps>
+    <V5Caps>{label}</V5Caps>
     <View style={{flexDirection:'row',alignItems:'baseline',marginTop:6}}>
       {prefix?<Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:fs*0.5,color:fg,opacity:0.85}}>{prefix}</Text>:null}
       <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:fs,letterSpacing:-1.5,color:fg,lineHeight:fs}}>{value}</Text>
@@ -2550,7 +2550,7 @@ function InfoIcon({title,body,color,style}){
     </Pressable>
     <ModalSheet visible={open} title={title} onClose={function(){setOpen(false);}}>
       <Text style={{fontFamily:FF.sans,fontSize:14,lineHeight:21,color:theme.text,marginBottom:18}}>{body}</Text>
-      <PrimaryButton full onPress={function(){setOpen(false);}}>Got it</PrimaryButton>
+      <V5Button variant="primary" full onPress={function(){setOpen(false);}}>Got it</V5Button>
     </ModalSheet>
   </View>;
 }
@@ -2736,81 +2736,81 @@ function DayDetailModal({visible,date,onClose,onChangeDate,onEditTransaction,onE
   return <ModalSheet visible={visible} title={titleStr} onClose={onClose}>
     {/* Date stepper */}
     <View style={{flexDirection:'row',gap:8,marginBottom:14}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={function(){onChangeDate&&onChangeDate(addDays(focusDate,-1));}}>‹ Prev</SecondaryButton></View>
-      <View style={{flex:1}}><SecondaryButton full onPress={function(){onChangeDate&&onChangeDate(new Date());}}>Today</SecondaryButton></View>
-      <View style={{flex:1}}><SecondaryButton full onPress={function(){onChangeDate&&onChangeDate(addDays(focusDate,1));}}>Next ›</SecondaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){onChangeDate&&onChangeDate(addDays(focusDate,-1));}}>‹ Prev</V5Button></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){onChangeDate&&onChangeDate(new Date());}}>Today</V5Button></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){onChangeDate&&onChangeDate(addDays(focusDate,1));}}>Next ›</V5Button></View>
     </View>
 
-    {!hasData&&<Block style={{padding:18,marginBottom:14,alignItems:'center'}}>
-      <Caps color={theme.muted} style={{marginBottom:10}}>No logs for this day</Caps>
-      <PrimaryButton onPress={function(){onAddTransaction&&onAddTransaction(focusDate);}}>+ Capture an entry</PrimaryButton>
-    </Block>}
+    {!hasData&&<V5Card style={{padding:18,marginBottom:14,alignItems:'center'}}>
+      <V5Caps color={theme.muted} style={{marginBottom:10}}>No logs for this day</V5Caps>
+      <V5Button variant="primary" onPress={function(){onAddTransaction&&onAddTransaction(focusDate);}}>+ Capture an entry</V5Button>
+    </V5Card>}
 
     {hasData&&<View>
       {/* Transactions */}
-      <Caps style={{marginBottom:8}}>Transactions · {dayTx.length}</Caps>
-      <Block style={{padding:14,marginBottom:12}}>
+      <V5Caps style={{marginBottom:8}}>Transactions · {dayTx.length}</V5Caps>
+      <V5Card style={{padding:14,marginBottom:12}}>
         {dayTx.length===0?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No entries.</Text>:
         incomeTx.concat(expenseTx).slice(0,20).map(function(t,i,arr){
           var isLast=i===arr.length-1;
           return <TouchableOpacity key={t.id} activeOpacity={0.7} onPress={function(){if(onEditTransaction)onEditTransaction(t);else Alert.alert('Open Finance','Go to Finance tab to edit this transaction.');}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:10,borderBottomWidth:isLast?0:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
             <View style={{flex:1}}>
               <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>{t.merchant}</Text>
-              <Caps color={theme.muted} style={{marginTop:2}}>{t.memberName||'Joint'} · {t.category}</Caps>
+              <V5Caps color={theme.muted} style={{marginTop:2}}>{t.memberName||'Joint'} · {t.category}</V5Caps>
             </View>
             <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:t.category==='Income'?theme.primary:theme.text}}>{t.category==='Income'?'+':'−'}₹{fmt(Math.abs(Number(t.amount)||0))}</Text>
           </TouchableOpacity>;
         })}
-      </Block>
+      </V5Card>
 
       {/* Meals */}
-      <Caps style={{marginBottom:8}}>Meals · {dayMeals.length}</Caps>
-      <Block style={{padding:14,marginBottom:12}}>
+      <V5Caps style={{marginBottom:8}}>Meals · {dayMeals.length}</V5Caps>
+      <V5Card style={{padding:14,marginBottom:12}}>
         {dayMeals.length===0?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No meals on this day.</Text>:
         ['breakfast','lunch','dinner','snack'].map(function(mt){
           var rows=mealsByType[mt]||[];
           if(rows.length===0)return null;
           return <View key={mt} style={{marginBottom:8}}>
-            <Caps>{mt}</Caps>
+            <V5Caps>{mt}</V5Caps>
             {rows.map(function(m){return <TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){onEditMeal&&onEditMeal(m);}} style={{paddingVertical:6}}>
               <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text}}>{m.items}</Text>
-              <Caps color={theme.muted} style={{marginTop:2}}>{m.memberName||'Member'} · {m.protein||0}g protein</Caps>
+              <V5Caps color={theme.muted} style={{marginTop:2}}>{m.memberName||'Member'} · {m.protein||0}g protein</V5Caps>
             </TouchableOpacity>;})}
           </View>;
         })}
-      </Block>
+      </V5Card>
 
       {/* Wellness */}
-      <Caps style={{marginBottom:8}}>Wellness · {dayWell.length}</Caps>
-      <Block style={{padding:14,marginBottom:12}}>
+      <V5Caps style={{marginBottom:8}}>Wellness · {dayWell.length}</V5Caps>
+      <V5Card style={{padding:14,marginBottom:12}}>
         {dayWell.length===0?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No wellness logs.</Text>:
         dayWell.map(function(w,i,arr){
           var isLast=i===arr.length-1;
           return <TouchableOpacity key={w.id||((w.memberId||'m')+'_'+w.date)} activeOpacity={0.7} onPress={function(){haptic('light');if(w.screenHrs||w.screen_hrs){onAddScreen&&onAddScreen(toDate(w.date));}else if((w.water||0)>0){onAddWater&&onAddWater(toDate(w.date));}else{onAddScreen&&onAddScreen(toDate(w.date));}}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:10,borderBottomWidth:isLast?0:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
             <View style={{flex:1}}>
               <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>{w.memberName||'Member'}</Text>
-              <Caps color={theme.muted} style={{marginTop:2}}>{waterTrackingEnabled?'Water: '+formatWaterFromLitres(w.water||0)+' · ':''}Screen: {(w.screenHrs!=null||w.screen_hrs!=null)?(w.screenHrs??w.screen_hrs)+'h':'\u2014'}</Caps>
+              <V5Caps color={theme.muted} style={{marginTop:2}}>{waterTrackingEnabled?'Water: '+formatWaterFromLitres(w.water||0)+' · ':''}Screen: {(w.screenHrs!=null||w.screen_hrs!=null)?(w.screenHrs??w.screen_hrs)+'h':'\u2014'}</V5Caps>
             </View>
-            <Caps color={theme.primary}>Edit ›</Caps>
+            <V5Caps color={theme.primary}>Edit ›</V5Caps>
           </TouchableOpacity>;
         })}
-      </Block>
+      </V5Card>
 
       {/* Goals snapshot */}
       {((goals||[]).length>0||(sharedGoals||[]).length>0||dayContribs.length>0)&&<View>
-        <Caps style={{marginBottom:8}}>Goals progress</Caps>
-        <Block style={{padding:14,marginBottom:12}}>
-          {(goals||[]).slice(0,5).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return <View key={g.id} style={{flexDirection:'row',justifyContent:'space-between',paddingVertical:4}}><Text style={{fontFamily:FF.sans,fontSize:13,color:theme.text,flex:1,marginRight:8}} numberOfLines={1}>{g.name}</Text><Caps color={theme.primary}>{pct}%</Caps></View>;})}
-          {(sharedGoals||[]).slice(0,3).map(function(g){var pct=g.target_amount>0?Math.round((Number(g.current_amount||0)/Number(g.target_amount))*100):0;return <View key={g.id} style={{flexDirection:'row',justifyContent:'space-between',paddingVertical:4}}><Text style={{fontFamily:FF.sans,fontSize:13,color:theme.text,flex:1,marginRight:8}} numberOfLines={1}>Shared: {g.goal_name}</Text><Caps color={theme.accent}>{pct}%</Caps></View>;})}
-          {dayContribs.length>0&&<Caps color={theme.muted} style={{marginTop:6}}>Contributions today: {dayContribs.length}</Caps>}
-        </Block>
+        <V5Caps style={{marginBottom:8}}>Goals progress</V5Caps>
+        <V5Card style={{padding:14,marginBottom:12}}>
+          {(goals||[]).slice(0,5).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return <View key={g.id} style={{flexDirection:'row',justifyContent:'space-between',paddingVertical:4}}><Text style={{fontFamily:FF.sans,fontSize:13,color:theme.text,flex:1,marginRight:8}} numberOfLines={1}>{g.name}</Text><V5Caps color={theme.primary}>{pct}%</V5Caps></View>;})}
+          {(sharedGoals||[]).slice(0,3).map(function(g){var pct=g.target_amount>0?Math.round((Number(g.current_amount||0)/Number(g.target_amount))*100):0;return <View key={g.id} style={{flexDirection:'row',justifyContent:'space-between',paddingVertical:4}}><Text style={{fontFamily:FF.sans,fontSize:13,color:theme.text,flex:1,marginRight:8}} numberOfLines={1}>Shared: {g.goal_name}</Text><V5Caps color={theme.accent}>{pct}%</V5Caps></View>;})}
+          {dayContribs.length>0&&<V5Caps color={theme.muted} style={{marginTop:6}}>Contributions today: {dayContribs.length}</V5Caps>}
+        </V5Card>
       </View>}
     </View>}
 
     <View style={{flexDirection:'row',gap:8,marginTop:4}}>
-      <View style={{flex:1}}><PrimaryButton full onPress={function(){onAddTransaction&&onAddTransaction(focusDate);}}>+ Tx</PrimaryButton></View>
-      <View style={{flex:1}}><SecondaryButton full onPress={function(){onAddMeal&&onAddMeal(focusDate);}}>+ Meal</SecondaryButton></View>
-      <View style={{flex:1}}><SecondaryButton full onPress={function(){onAddScreen&&onAddScreen(focusDate);}}>+ Screen</SecondaryButton></View>
+      <View style={{flex:1}}><V5Button variant="primary" full onPress={function(){onAddTransaction&&onAddTransaction(focusDate);}}>+ Tx</V5Button></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){onAddMeal&&onAddMeal(focusDate);}}>+ Meal</V5Button></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){onAddScreen&&onAddScreen(focusDate);}}>+ Screen</V5Button></View>
     </View>
   </ModalSheet>;
 }
@@ -2855,17 +2855,17 @@ function UnifiedCalendarModal({visible,onClose,context,selectedDate,onSelectDate
     {/* Month stepper */}
     <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
       <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()-1,1));}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
-        <Caps color={theme.primary}>‹ Prev</Caps>
+        <V5Caps color={theme.primary}>‹ Prev</V5Caps>
       </TouchableOpacity>
-      <Caps color={theme.muted}>From {context==='finance'?'Finance':context==='wellness'?'Wellness':'Reflections'}</Caps>
+      <V5Caps color={theme.muted}>From {context==='finance'?'Finance':context==='wellness'?'Wellness':'Reflections'}</V5Caps>
       <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()+1,1));}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
-        <Caps color={theme.primary}>Next ›</Caps>
+        <V5Caps color={theme.primary}>Next ›</V5Caps>
       </TouchableOpacity>
     </View>
 
     {/* Day-of-week header */}
     <View style={{flexDirection:'row',marginBottom:6}}>
-      {['M','T','W','T','F','S','S'].map(function(d,idx){return <View key={d+'_'+idx} style={{flex:1,alignItems:'center',paddingVertical:4}}><Caps color={theme.muted} ls={0.4}>{d}</Caps></View>;})}
+      {['M','T','W','T','F','S','S'].map(function(d,idx){return <View key={d+'_'+idx} style={{flex:1,alignItems:'center',paddingVertical:4}}><V5Caps color={theme.muted} ls={0.4}>{d}</V5Caps></View>;})}
     </View>
 
     {/* 6×7 grid */}
@@ -2902,20 +2902,20 @@ function UnifiedCalendarModal({visible,onClose,context,selectedDate,onSelectDate
     </View>
 
     {/* Selected day stats */}
-    <Caps style={{marginTop:18,marginBottom:8}}>{localSelected.toLocaleDateString('en-IN',{weekday:'long',month:'long',day:'numeric'})}</Caps>
+    <V5Caps style={{marginTop:18,marginBottom:8}}>{localSelected.toLocaleDateString('en-IN',{weekday:'long',month:'long',day:'numeric'})}</V5Caps>
     <View style={{gap:8}}>
-      {context!=='wellness'&&<Block bg={theme.primaryLight} style={{padding:14}}>
-        <Caps color={theme.primary}>Transactions</Caps>
+      {context!=='wellness'&&<V5Card border={false} style={{backgroundColor:theme.primaryLight,padding:14}}>
+        <V5Caps color={theme.primary}>Transactions</V5Caps>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.primary,marginTop:4}}>{selectedStats.tx}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}>{selectedStats.recur>0?' · '+selectedStats.recur+' recurring due':''}</Text></Text>
-      </Block>}
-      <Block style={{padding:14}}>
-        <Caps>Meals · Wellness</Caps>
+      </V5Card>}
+      <V5Card style={{padding:14}}>
+        <V5Caps>Meals · Wellness</V5Caps>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{selectedStats.meal}<Text style={{fontSize:12,fontWeight:'500',color:theme.textSecondary}}> meals · {selectedStats.well} logs</Text></Text>
-      </Block>
-      <Block style={{padding:14}}>
-        <Caps>Day completion</Caps>
+      </V5Card>
+      <V5Card style={{padding:14}}>
+        <V5Caps>Day completion</V5Caps>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{selectedStats.completion.percent}%</Text>
-      </Block>
+      </V5Card>
     </View>
   </ModalSheet>;
 }
@@ -3223,7 +3223,7 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
       <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
         <ScrollView contentContainerStyle={{flexGrow:1,paddingTop:ins.top+36,paddingHorizontal:24,paddingBottom:24}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {pendingConfirmation?(<View style={{flex:1}}>
-            <Caps color={theme.primary}>Wellthy Fam</Caps>
+            <V5Caps color={theme.primary}>Wellthy Fam</V5Caps>
             <Text style={{fontFamily:FF.serifItalic,fontSize:40,letterSpacing:-1.2,color:theme.text,marginTop:12,lineHeight:42}}>
               Check your{'\n'}email.
             </Text>
@@ -3236,16 +3236,16 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
               The email comes from Wellthy Fam {'<'}onboarding@resend.dev{'>'}. Check your spam folder if you don't see it within a minute.
             </Text>
             <View style={{flex:1,minHeight:32}}/>
-            <SecondaryButton full disabled={resending} onPress={handleResend}>
+            <V5Button variant="secondary" full disabled={resending} onPress={handleResend}>
               {resending?'Sending…':'Resend email'}
-            </SecondaryButton>
+            </V5Button>
             <TouchableOpacity onPress={handleDifferentEmail} style={{marginTop:18,alignItems:'center',paddingVertical:8}}>
               <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>
                 Use a different email
               </Text>
             </TouchableOpacity>
           </View>):(<View style={{flex:1}}>
-            <Caps color={theme.primary}>Wellthy Fam</Caps>
+            <V5Caps color={theme.primary}>Wellthy Fam</V5Caps>
             <Text style={{fontFamily:FF.serifItalic,fontSize:40,letterSpacing:-1.2,color:theme.text,marginTop:12,lineHeight:42}}>
               {isSignup?'Build your\nfamily’s story.':'Welcome\nback.'}
             </Text>
@@ -3262,7 +3262,7 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
               </TouchableOpacity>
             </View>
 
-            <Caps style={{marginBottom:8}}>Email</Caps>
+            <V5Caps style={{marginBottom:8}}>Email</V5Caps>
             <TextInput
               style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:16}}
               placeholder="you@email.com" placeholderTextColor={theme.muted}
@@ -3270,7 +3270,7 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
               keyboardType="email-address" autoCapitalize="none" autoCorrect={false}
             />
 
-            <Caps style={{marginBottom:8}}>Password</Caps>
+            <V5Caps style={{marginBottom:8}}>Password</V5Caps>
             <TextInput
               style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:32}}
               placeholder="Min 6 characters" placeholderTextColor={theme.muted}
@@ -3283,9 +3283,9 @@ function AuthScreen({onWantJoin,initialInviteCode,onAuthSuccess,onAuthRefreshReq
 
             <View style={{flex:1,minHeight:24}}/>
 
-            <PrimaryButton full disabled={loading} onPress={function(){if(isSignup)handleSignup();else handleLogin();}}>
+            <V5Button variant="primary" full disabled={loading} onPress={function(){if(isSignup)handleSignup();else handleLogin();}}>
               {loading?'Please wait…':isSignup?'Create account':'Sign in'}
-            </PrimaryButton>
+            </V5Button>
 
             <TouchableOpacity onPress={function(){onWantJoin&&onWantJoin();}} style={{marginTop:18,alignItems:'center',paddingVertical:8}}>
               <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>
@@ -3338,7 +3338,7 @@ function ResetPasswordScreen({onComplete,onCancel}){
       <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg}/>
       <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
         <ScrollView contentContainerStyle={{flexGrow:1,paddingTop:ins.top+36,paddingHorizontal:24,paddingBottom:24}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <Caps color={theme.primary}>Wellthy Fam</Caps>
+          <V5Caps color={theme.primary}>Wellthy Fam</V5Caps>
           <Text style={{fontFamily:FF.serifItalic,fontSize:40,letterSpacing:-1.2,color:theme.text,marginTop:12,lineHeight:42}}>
             Set a new{'\n'}password.
           </Text>
@@ -3346,13 +3346,13 @@ function ResetPasswordScreen({onComplete,onCancel}){
             You're signed in via the reset link. Pick a new password to continue.
           </Text>
 
-          <Caps style={{marginTop:32,marginBottom:8}}>New password</Caps>
+          <V5Caps style={{marginTop:32,marginBottom:8}}>New password</V5Caps>
           <TextInput
             style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:16}}
             placeholder="Min 6 characters" placeholderTextColor={theme.muted}
             value={newPass} onChangeText={setNewPass} secureTextEntry
           />
-          <Caps style={{marginBottom:8}}>Confirm new password</Caps>
+          <V5Caps style={{marginBottom:8}}>Confirm new password</V5Caps>
           <TextInput
             style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:32}}
             placeholder="Re-enter password" placeholderTextColor={theme.muted}
@@ -3361,9 +3361,9 @@ function ResetPasswordScreen({onComplete,onCancel}){
 
           <View style={{flex:1,minHeight:24}}/>
 
-          <PrimaryButton full disabled={loading} onPress={handleSubmit}>
+          <V5Button variant="primary" full disabled={loading} onPress={handleSubmit}>
             {loading?'Updating…':'Set new password'}
-          </PrimaryButton>
+          </V5Button>
 
           <TouchableOpacity onPress={onCancel} style={{marginTop:18,alignItems:'center',paddingVertical:8}}>
             <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.textSecondary}}>
@@ -3609,7 +3609,7 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
       <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
         <ScrollView contentContainerStyle={{padding:20,paddingBottom:40}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {pendingConfirmation&&<View>
-            <Caps color={theme.primary}>Wellthy Fam</Caps>
+            <V5Caps color={theme.primary}>Wellthy Fam</V5Caps>
             <Text style={{fontFamily:FF.serifItalic,fontSize:40,letterSpacing:-1.2,color:theme.text,marginTop:12,lineHeight:42}}>
               Check your{'\n'}email.
             </Text>
@@ -3622,9 +3622,9 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
               The email comes from Wellthy Fam {'<'}onboarding@resend.dev{'>'}. Check your spam folder if you don't see it within a minute.
             </Text>
             <View style={{height:32}}/>
-            <SecondaryButton full disabled={resending} onPress={handleResend}>
+            <V5Button variant="secondary" full disabled={resending} onPress={handleResend}>
               {resending?'Sending…':'Resend email'}
-            </SecondaryButton>
+            </V5Button>
             <TouchableOpacity onPress={handleDifferentEmail} style={{marginTop:18,alignItems:'center',paddingVertical:8}}>
               <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>
                 Use a different email
@@ -3636,7 +3636,7 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
             </TouchableOpacity>
           </View>}
           {!pendingConfirmation&&step===1&&<View>
-            <Caps>Step 1 of 2</Caps>
+            <V5Caps>Step 1 of 2</V5Caps>
             <Text style={{fontFamily:FF.serif,fontSize:28,letterSpacing:-0.8,color:theme.text,marginTop:8,lineHeight:32}}>Enter your invite code</Text>
 
             <View style={{flexDirection:'row',gap:8,marginTop:20,marginBottom:24}}>
@@ -3661,23 +3661,23 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
               autoCapitalize="characters" autoCorrect={false} maxLength={6}
             />
 
-            <PrimaryButton full disabled={loading} onPress={function(){lookup();}}>
+            <V5Button variant="primary" full disabled={loading} onPress={function(){lookup();}}>
               {loading?'Looking up…':'Continue'}
-            </PrimaryButton>
+            </V5Button>
           </View>}
 
           {!pendingConfirmation&&step===2&&preview&&<View>
-            <Caps>Step 2 of 2</Caps>
+            <V5Caps>Step 2 of 2</V5Caps>
             <Text style={{fontFamily:FF.serif,fontSize:28,letterSpacing:-0.8,color:theme.text,marginTop:8,lineHeight:32}}>Almost there.</Text>
             <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:8,lineHeight:21}}>Confirm and create your account to finish joining.</Text>
 
-            <Block bg={theme.primaryLight} style={{marginTop:16}}>
-              <Caps color={theme.primary}>You’re joining</Caps>
+            <V5Card border={false} style={{backgroundColor:theme.primaryLight,marginTop:16}}>
+              <V5Caps color={theme.primary}>You’re joining</V5Caps>
               <Text style={{fontFamily:FF.serif,fontSize:24,letterSpacing:-0.4,color:theme.text,marginTop:8}}>{preview.family&&preview.family.family_name?preview.family.family_name:'Family'}</Text>
               <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:6}}>Invited as {preview.invite.invited_member_name||'Member'} · {preview.invite.invited_member_role||'parent'}</Text>
-            </Block>
+            </V5Card>
 
-            <Caps style={{marginTop:20,marginBottom:8}}>Email</Caps>
+            <V5Caps style={{marginTop:20,marginBottom:8}}>Email</V5Caps>
             <TextInput
               style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:16}}
               placeholder="you@email.com" placeholderTextColor={theme.muted}
@@ -3685,16 +3685,16 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
               keyboardType="email-address" autoCapitalize="none" autoCorrect={false}
             />
 
-            <Caps style={{marginBottom:8}}>Password</Caps>
+            <V5Caps style={{marginBottom:8}}>Password</V5Caps>
             <TextInput
               style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:24}}
               placeholder="Min 6 characters" placeholderTextColor={theme.muted}
               value={pass} onChangeText={setPass} secureTextEntry
             />
 
-            <PrimaryButton full disabled={loading} onPress={joinAndLink}>
+            <V5Button variant="primary" full disabled={loading} onPress={joinAndLink}>
               {loading?'Joining…':'Join '+(preview.family&&preview.family.family_name?preview.family.family_name:'family')}
-            </PrimaryButton>
+            </V5Button>
           </View>}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -3927,8 +3927,8 @@ function ConditionalInput({show,children}){return show?<View style={{marginTop:1
 function NavigationButtons({canGoBack,canContinue,onBack,onContinue,isLast,saving}){
   var theme=useThemeColors();
   return <View style={[z.row,{marginTop:14,gap:10}]}> 
-    <View style={{flex:1}}><SecondaryButton full disabled={!canGoBack||saving} onPress={onBack}>Back</SecondaryButton></View>
-    <View style={{flex:1}}><PrimaryButton full disabled={!canContinue||saving} onPress={onContinue}>{saving?'Saving…':(isLast?'Finish':'Continue')}</PrimaryButton></View>
+    <View style={{flex:1}}><V5Button variant="secondary" full disabled={!canGoBack||saving} onPress={onBack}>Back</V5Button></View>
+    <View style={{flex:1}}><V5Button variant="primary" full disabled={!canContinue||saving} onPress={onContinue}>{saving?'Saving…':(isLast?'Finish':'Continue')}</V5Button></View>
   </View>;
 }
 
@@ -4500,12 +4500,12 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
 
   if(showResumePrompt&&hasSavedProgress){
     return <View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg,padding:20}}>
-      <Caps color={theme.primary}>Welcome back</Caps>
+      <V5Caps color={theme.primary}>Welcome back</V5Caps>
       <Text style={{fontFamily:FF.serif,fontSize:30,letterSpacing:-0.8,color:theme.text,marginTop:8,lineHeight:34}}>Resume questionnaire</Text>
       <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:10,lineHeight:21,marginBottom:20}}>We found your saved progress at page {qPage}. Continue where you left off, or start over.</Text>
-      <PrimaryButton full onPress={function(){setShowResumePrompt(false);}}>Continue where I left off</PrimaryButton>
+      <V5Button variant="primary" full onPress={function(){setShowResumePrompt(false);}}>Continue where I left off</V5Button>
       <View style={{height:10}}/>
-      <SecondaryButton full onPress={restartQuestionnaire}>Start from beginning</SecondaryButton>
+      <V5Button variant="secondary" full onPress={restartQuestionnaire}>Start from beginning</V5Button>
     </View>;
   }
 
@@ -4541,25 +4541,25 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
           </TouchableOpacity>
           {isModal&&typeof onSkipped==='function'&&qPage>1?(
             <TouchableOpacity onPress={function(){if(!saving)onSkipped();}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
-              <Caps color={theme.textSecondary}>Skip for now</Caps>
+              <V5Caps color={theme.textSecondary}>Skip for now</V5Caps>
             </TouchableOpacity>
           ):<View style={{width:32,height:32}}/>}
         </View>
         <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:8}}>
-          <Caps>Page {qPage} of {Q_TOTAL_PAGES}</Caps>
-          <Caps>{pageTitle}</Caps>
+          <V5Caps>Page {qPage} of {Q_TOTAL_PAGES}</V5Caps>
+          <V5Caps>{pageTitle}</V5Caps>
         </View>
-        <Progress value={pageProgressPct}/>
+        <V5Progress value={pageProgressPct}/>
       </View>
       <ScrollView style={z.fl} contentContainerStyle={{padding:20,paddingBottom:40}} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {renderTransition()}
         {renderPageQuestions()}
         <View style={{flexDirection:'row',gap:10,marginTop:24}}>
-          {qPage>1&&<View style={{flex:1}}><SecondaryButton full disabled={saving} onPress={handleBack}>Back</SecondaryButton></View>}
+          {qPage>1&&<View style={{flex:1}}><V5Button variant="secondary" full disabled={saving} onPress={handleBack}>Back</V5Button></View>}
           <View style={{flex:qPage>1?1.4:1}}>
-            <PrimaryButton full disabled={!canContinue||saving} onPress={handleContinue}>
+            <V5Button variant="primary" full disabled={!canContinue||saving} onPress={handleContinue}>
               {saving?'Saving…':qPage===Q_TOTAL_PAGES?'Finish':'Continue'}
-            </PrimaryButton>
+            </V5Button>
           </View>
         </View>
       </ScrollView>
@@ -4652,11 +4652,11 @@ function FamilySetupScreen({userId,currentUserName,onDone}){
       <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
         <ScrollView contentContainerStyle={{padding:20,paddingBottom:40}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {!createdFamilyId&&<View>
-            <Caps color={theme.primary}>Final step</Caps>
+            <V5Caps color={theme.primary}>Final step</V5Caps>
             <Text style={{fontFamily:FF.serif,fontSize:36,letterSpacing:-1,color:theme.text,marginTop:10,lineHeight:38}}>Set up your family.</Text>
             <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:10,lineHeight:21}}>You can add members later, or invite them now.</Text>
 
-            <Caps style={{marginTop:24,marginBottom:8}}>Family name</Caps>
+            <V5Caps style={{marginTop:24,marginBottom:8}}>Family name</V5Caps>
             <TextInput
               style={{height:48,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderRadius:12,paddingHorizontal:16,fontFamily:FF.sans,fontSize:15,color:theme.text,backgroundColor:theme.surface,marginBottom:24}}
               placeholder="The Sharma family" placeholderTextColor={theme.muted}
@@ -4664,18 +4664,18 @@ function FamilySetupScreen({userId,currentUserName,onDone}){
             />
 
             <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-              <Caps>Members</Caps>
-              <Caps color={theme.muted}>Optional</Caps>
+              <V5Caps>Members</V5Caps>
+              <V5Caps color={theme.muted}>Optional</V5Caps>
             </View>
 
             {(members||[]).map(function(m,i){
               var slot=SLOTS[i%5];
-              return <Block key={m.localId||('member_'+i)} style={{marginBottom:10,padding:14}}>
+              return <V5Card key={m.localId||('member_'+i)} style={{marginBottom:10,padding:14}}>
                 <View style={{flexDirection:'row',alignItems:'center',marginBottom:10}}>
-                  <Avatar name={m.name||'?'} color={slot.bg} size={36}/>
-                  <Caps style={{marginLeft:12,flex:1}}>Member {i+1}</Caps>
+                  <V5Avatar name={m.name||'?'} color={slot.bg} size={36}/>
+                  <V5Caps style={{marginLeft:12,flex:1}}>Member {i+1}</V5Caps>
                   <TouchableOpacity onPress={function(){rm(i);}} hitSlop={{top:8,bottom:8,left:8,right:8}}>
-                    <Caps color={theme.danger}>Remove</Caps>
+                    <V5Caps color={theme.danger}>Remove</V5Caps>
                   </TouchableOpacity>
                 </View>
                 <TextInput
@@ -4691,7 +4691,7 @@ function FamilySetupScreen({userId,currentUserName,onDone}){
                     </TouchableOpacity>;
                   })}
                 </View>
-              </Block>;
+              </V5Card>;
             })}
 
             <TouchableOpacity onPress={addM} style={{
@@ -4703,37 +4703,37 @@ function FamilySetupScreen({userId,currentUserName,onDone}){
               <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.textSecondary}}>+ Add member</Text>
             </TouchableOpacity>
 
-            <PrimaryButton full disabled={loading} onPress={create}>
+            <V5Button variant="primary" full disabled={loading} onPress={create}>
               {loading?'Creating…':'Create family'}
-            </PrimaryButton>
+            </V5Button>
           </View>}
 
           {createdFamilyId&&<View>
-            <Caps color={theme.primary}>You’re in</Caps>
+            <V5Caps color={theme.primary}>You’re in</V5Caps>
             <Text style={{fontFamily:FF.serif,fontSize:36,letterSpacing:-1,color:theme.text,marginTop:10,lineHeight:38}}>Family created.</Text>
             <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:10,marginBottom:24,lineHeight:21}}>Share these invite codes with your family members.</Text>
 
-            {createdInvites.length===0&&<Block bg={theme.accentLight} style={{marginBottom:20,borderLeftWidth:3,borderLeftColor:theme.accent,borderRadius:16}}>
+            {createdInvites.length===0&&<V5Card border={false} style={{backgroundColor:theme.accentLight,marginBottom:20,borderLeftWidth:3,borderLeftColor:theme.accent,borderRadius:16}}>
               <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,lineHeight:20}}>No invite codes yet. You can add and invite members later from Settings.</Text>
-            </Block>}
+            </V5Card>}
 
             {createdInvites.map(function(inv){
-              return <Block key={inv.id} style={{marginBottom:10,padding:16}}>
+              return <V5Card key={inv.id} style={{marginBottom:10,padding:16}}>
                 <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{inv.invited_member_name||'Member'}</Text>
-                <Caps color={theme.textSecondary} style={{marginTop:2,marginBottom:12}}>{inv.invited_member_role||'parent'}</Caps>
+                <V5Caps color={theme.textSecondary} style={{marginTop:2,marginBottom:12}}>{inv.invited_member_role||'parent'}</V5Caps>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
                   <Text style={{fontFamily:FF.sansBold,fontSize:22,fontWeight:'700',color:theme.primary,letterSpacing:3}}>{inv.invite_code}</Text>
                   <TouchableOpacity onPress={function(){copyInviteText(inv);}}>
                     <Pill bg={theme.primaryLight} fg={theme.primary}>Share</Pill>
                   </TouchableOpacity>
                 </View>
-              </Block>;
+              </V5Card>;
             })}
 
             <View style={{height:8}}/>
-            <PrimaryButton full onPress={function(){onDone&&onDone(createdFamilyId,normalizeText(familyName)||'My Family',createdInvites);}}>
+            <V5Button variant="primary" full onPress={function(){onDone&&onDone(createdFamilyId,normalizeText(familyName)||'My Family',createdInvites);}}>
               Continue to home
-            </PrimaryButton>
+            </V5Button>
           </View>}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -4894,7 +4894,7 @@ function AddTxModal({visible,onClose,editTx,initialDate}){
       </TouchableOpacity>
     </View>
 
-    <Caps style={{marginBottom:8}}>Amount</Caps>
+    <V5Caps style={{marginBottom:8}}>Amount</V5Caps>
     <View style={{backgroundColor:theme.primary,borderRadius:16,padding:18,marginBottom:16,flexDirection:'row',alignItems:'baseline'}}>
       <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,color:'#fff',opacity:0.85,marginRight:6}}>₹</Text>
       <TextInput
@@ -4908,7 +4908,7 @@ function AddTxModal({visible,onClose,editTx,initialDate}){
     <Inp label={isIncome?'Income source':'Merchant'} value={merchant} onChangeText={setMerchant} placeholder={isIncome?'Salary, freelance, rent...':'Swiggy, DMart...'} maxLength={LIMITS.finance.descMax}/>
     {!isIncome&&<SelectField label="Category" value={cat} onChange={setCat} options={categoryPickerOptions} placeholder="Select category"/>}
 
-    <Caps style={{marginBottom:8}}>Who paid?</Caps>
+    <V5Caps style={{marginBottom:8}}>Who paid?</V5Caps>
     <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
       <TouchableOpacity style={[z.chip,!mid&&z.chipSel]} onPress={function(){setMid('');}}><Text style={[z.chipTx,!mid&&z.chipSelTx]}>Joint</Text></TouchableOpacity>
       {members.map(function(m){return <TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
@@ -4936,17 +4936,17 @@ function AddTxModal({visible,onClose,editTx,initialDate}){
       <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text}}>Mark as recurring transaction</Text>
     </TouchableOpacity>
 
-    {isRecurring&&<Block style={{padding:14,marginBottom:12}}>
-      <Caps style={{marginBottom:8}}>Frequency</Caps>
+    {isRecurring&&<V5Card style={{padding:14,marginBottom:12}}>
+      <V5Caps style={{marginBottom:8}}>Frequency</V5Caps>
       <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:10}}>
         {['monthly','weekly','biweekly'].map(function(f){var sel=recurringFreq===f;return <TouchableOpacity key={f} style={[z.chip,sel&&z.chipSel]} onPress={function(){setRecurringFreq(f);}}><Text style={[z.chipTx,sel&&z.chipSelTx]}>{f}</Text></TouchableOpacity>;})}
       </View>
       {recurringFreq==='monthly'&&<Inp label="Due day (1-31)" value={dueDay} onChangeText={setDueDay} keyboardType="numeric" placeholder="1"/>}
-    </Block>}
+    </V5Card>}
 
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':editTx?'Update':'Save transaction'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={loading} onPress={save}>{loading?'Saving…':editTx?'Update':'Save transaction'}</V5Button></View>
     </View>
   </ModalSheet>);
 }
@@ -5410,8 +5410,8 @@ function StatementUploadModal({visible,onClose,onOpenReview}){
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginBottom:8,lineHeight:19}}>• We'll show you everything we found — you confirm what's real.</Text>
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,lineHeight:19}}>• Works with most Indian banks and credit cards.</Text>
       </View>
-      <View style={{marginBottom:10}}><PrimaryButton full onPress={pickPDF}>Pick PDF</PrimaryButton></View>
-      <SecondaryButton full onPress={onClose}>Cancel</SecondaryButton>
+      <View style={{marginBottom:10}}><V5Button variant="primary" full onPress={pickPDF}>Pick PDF</V5Button></View>
+      <V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button>
     </View>:null}
 
     {stage==='password'?<View>
@@ -5432,8 +5432,8 @@ function StatementUploadModal({visible,onClose,onOpenReview}){
       <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,lineHeight:17,marginBottom:6}}>Often your DOB in DDMMYYYY format, or PAN digits. Check your bank's email for the exact format.</Text>
       {passwordAttempts>0?<Text style={{fontFamily:FF.sans,fontSize:12,color:theme.danger,marginBottom:6}}>That password didn't work.</Text>:null}
       <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted,marginBottom:14}}>{Math.max(0,4-passwordAttempts)} attempt{Math.max(0,4-passwordAttempts)===1?'':'s'} left.</Text>
-      <View style={{marginBottom:10}}><PrimaryButton full disabled={pdfPassword.trim().length<3} onPress={function(){if(pickedFile)runParse(pickedFile,pdfPassword.trim());}}>Unlock and parse</PrimaryButton></View>
-      <SecondaryButton full onPress={onClose}>Cancel</SecondaryButton>
+      <View style={{marginBottom:10}}><V5Button variant="primary" full disabled={pdfPassword.trim().length<3} onPress={function(){if(pickedFile)runParse(pickedFile,pdfPassword.trim());}}>Unlock and parse</V5Button></View>
+      <V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button>
     </View>:null}
 
     {stage==='parsing'?<View style={{paddingVertical:32,alignItems:'center'}}>
@@ -5451,8 +5451,8 @@ function StatementUploadModal({visible,onClose,onOpenReview}){
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,textAlign:'center',marginTop:6}}>{parseSummary.bank_name||'Your statement'}{parseSummary.period_start&&parseSummary.period_end?', '+parseSummary.period_start+' to '+parseSummary.period_end:''}</Text>
       </View>
       <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,lineHeight:20,marginBottom:18,textAlign:'center'}}>Take a moment to look through them — you control what gets added.</Text>
-      <View style={{marginBottom:10}}><PrimaryButton full onPress={function(){onOpenReview&&onOpenReview(statementImportId);}}>Review them now</PrimaryButton></View>
-      <SecondaryButton full onPress={onClose}>I'll do this later</SecondaryButton>
+      <View style={{marginBottom:10}}><V5Button variant="primary" full onPress={function(){onOpenReview&&onOpenReview(statementImportId);}}>Review them now</V5Button></View>
+      <V5Button variant="secondary" full onPress={onClose}>I'll do this later</V5Button>
     </View>:null}
 
     {stage==='error'&&error?<View>
@@ -5463,8 +5463,8 @@ function StatementUploadModal({visible,onClose,onOpenReview}){
         <Text style={{fontFamily:fontW(600),fontWeight:'600',fontSize:18,color:theme.text,textAlign:'center'}}>{error.message}</Text>
       </View>
       <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,lineHeight:19,marginBottom:18,textAlign:'center'}}>Your statement has been deleted. Nothing was saved.</Text>
-      <View style={{marginBottom:10}}><PrimaryButton full onPress={tryAnotherStatement}>Try another statement</PrimaryButton></View>
-      <SecondaryButton full onPress={onClose}>Close</SecondaryButton>
+      <View style={{marginBottom:10}}><V5Button variant="primary" full onPress={tryAnotherStatement}>Try another statement</V5Button></View>
+      <V5Button variant="secondary" full onPress={onClose}>Close</V5Button>
     </View>:null}
   </ModalSheet>;
 }
@@ -5825,7 +5825,7 @@ function StatementReviewModal({visible,statementImportId,onClose,onImported}){
                 {sel?<Text style={{fontSize:14,color:theme.primary}}>✓</Text>:null}
               </TouchableOpacity>;
             })}
-            <View style={{marginTop:6}}><SecondaryButton full onPress={function(){setPickerForId(null);}}>Cancel</SecondaryButton></View>
+            <View style={{marginTop:6}}><V5Button variant="secondary" full onPress={function(){setPickerForId(null);}}>Cancel</V5Button></View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -5856,12 +5856,12 @@ function StatementUploadOnboardingPrompt({onUpload,onSkip}){
   var theme=useThemeColors();
   return <View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
     <ScrollView contentContainerStyle={{padding:24,paddingTop:48}}>
-      <Caps color={theme.muted} style={{marginBottom:8}}>Step 5 of 5</Caps>
+      <V5Caps color={theme.muted} style={{marginBottom:8}}>Step 5 of 5</V5Caps>
       <Text style={{fontFamily:FF.serif,fontSize:32,letterSpacing:-1,color:theme.text,lineHeight:36,marginBottom:6}}>One more thing before we start</Text>
       <Text style={{fontFamily:FF.sans,fontSize:15,color:theme.textSecondary,lineHeight:22,marginBottom:18}}>Want to skip a month of typing?</Text>
       <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,lineHeight:21,marginBottom:24}}>Most things you spend on already live in your bank or credit card statement. Upload a recent one and we'll fill in your last month — so the app reflects your real life from day one. (Optional. You can always do this later.)</Text>
-      <View style={{marginBottom:12}}><PrimaryButton full onPress={onUpload}>Yes, upload a statement</PrimaryButton></View>
-      <SecondaryButton full onPress={onSkip}>Skip for now</SecondaryButton>
+      <View style={{marginBottom:12}}><V5Button variant="primary" full onPress={onUpload}>Yes, upload a statement</V5Button></View>
+      <V5Button variant="secondary" full onPress={onSkip}>Skip for now</V5Button>
       <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted,marginTop:16,lineHeight:16,textAlign:'center'}}>We use your statement once and delete it within 24 hours.</Text>
     </ScrollView>
   </View>;
@@ -6291,7 +6291,7 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
   function MemberChips(){
     if(!members||members.length===0)return null;
     return <View>
-      <Caps style={{marginBottom:8}}>Who?</Caps>
+      <V5Caps style={{marginBottom:8}}>Who?</V5Caps>
       <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:14}}>
         {members.map(function(m){return <TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){haptic('light');setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
       </View>
@@ -6313,7 +6313,7 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
 
   function CookingStyleToggle(){
     return <View style={{marginBottom:14}}>
-      <Caps style={{marginBottom:8}}>Cooking style</Caps>
+      <V5Caps style={{marginBottom:8}}>Cooking style</V5Caps>
       <View style={{flexDirection:'row',gap:8}}>
         {[['home','Home-cooked'],['restaurant','Restaurant']].map(function(pair){
           var val=pair[0];var sel=cookingStyle===val;
@@ -6403,27 +6403,27 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
       {parsedDishes.map(function(d,i){return <DishRow key={d.dish_normalized} dish={d} first={i===0}/>;})}
       <View style={{paddingVertical:12,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.border,marginBottom:14}}>
         <View style={{flexDirection:'row',justifyContent:'space-between'}}>
-          <Caps>Meal total</Caps>
-          <Caps color={theme.textSecondary}>{totals.calories} kcal · {totals.protein}g protein</Caps>
+          <V5Caps>Meal total</V5Caps>
+          <V5Caps color={theme.textSecondary}>{totals.calories} kcal · {totals.protein}g protein</V5Caps>
         </View>
       </View>
       <PhotoRow/>
       <View style={{flexDirection:'row',gap:10}}>
-        <View style={{flex:1}}><SecondaryButton full disabled={saving} onPress={handleCancel}>Cancel</SecondaryButton></View>
-        <View style={{flex:1.4}}><PrimaryButton full disabled={saveDisabled} onPress={handleSave}>{saving?'Saving…':editMeal?'Update meal':'Save meal'}</PrimaryButton></View>
+        <View style={{flex:1}}><V5Button variant="secondary" full disabled={saving} onPress={handleCancel}>Cancel</V5Button></View>
+        <View style={{flex:1.4}}><V5Button variant="primary" full disabled={saveDisabled} onPress={handleSave}>{saving?'Saving…':editMeal?'Update meal':'Save meal'}</V5Button></View>
       </View>
     </ModalSheet>;
   }
 
   // Compose stage
   return <ModalSheet visible={visible} title={editMeal?'Edit meal':'Log meal'} onClose={handleCancel}>
-    <Caps style={{marginBottom:8}}>Meal time</Caps>
+    <V5Caps style={{marginBottom:8}}>Meal time</V5Caps>
     <MealTimePills/>
     <MemberChips/>
     <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
 
     {topDishes.length>0?<View style={{marginBottom:6}}>
-      <Caps style={{marginBottom:8}}>Log it again</Caps>
+      <V5Caps style={{marginBottom:8}}>Log it again</V5Caps>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingRight:16}}>
         {topDishes.map(function(td){return <TouchableOpacity key={'qd_'+td.dish_normalized} onPress={function(){handleQuickPickChip(td);}} style={{
           height:36,paddingHorizontal:14,borderRadius:9999,
@@ -6431,17 +6431,17 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
           backgroundColor:theme.primaryLight,borderWidth:0,
         }}><Text style={{fontFamily:fontW(500),fontSize:14,color:theme.primary}}>{td.dish_name}</Text></TouchableOpacity>;})}
       </ScrollView>
-      <Caps color={theme.muted} style={{marginTop:6,marginBottom:14}}>Tap to log this again</Caps>
+      <V5Caps color={theme.muted} style={{marginTop:6,marginBottom:14}}>Tap to log this again</V5Caps>
     </View>:null}
 
-    <Caps style={{marginBottom:8}}>What did you eat?</Caps>
+    <V5Caps style={{marginBottom:8}}>What did you eat?</V5Caps>
     <TextInput
       style={[z.inp,{height:88,textAlignVertical:'top',paddingTop:10,marginBottom:6,backgroundColor:theme.surface,color:theme.text,borderColor:theme.primary,borderWidth:1.5}]}
       value={itemsText} onChangeText={setItemsText} maxLength={LIMITS.meal.descMax}
       placeholder={'What did you eat? E.g. 2 rotis, dal, sabzi'}
       placeholderTextColor={theme.muted} multiline
     />
-    <Caps color={theme.muted} style={{marginBottom:14}}>{topDishes.length>0?'Or tap a chip above to log it again.':'Write naturally — we’ll figure out the dishes.'}</Caps>
+    <V5Caps color={theme.muted} style={{marginBottom:14}}>{topDishes.length>0?'Or tap a chip above to log it again.':'Write naturally — we’ll figure out the dishes.'}</V5Caps>
 
     <PhotoRow/>
 
@@ -6450,8 +6450,8 @@ function AddMealModal({visible,onClose,editMeal,initialMealType,initialDate}){
     </View>:null}
 
     <View style={{flexDirection:'row',gap:10,marginTop:4}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={handleCancel}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={parsing||!itemsText.trim()} onPress={function(){parseAndAdvance(itemsText);}}>{parsing?'Reading…':'Continue'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={handleCancel}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={parsing||!itemsText.trim()} onPress={function(){parseAndAdvance(itemsText);}}>{parsing?'Reading…':'Continue'}</V5Button></View>
     </View>
   </ModalSheet>;
 }
@@ -6540,18 +6540,18 @@ function AddGoalModal({visible,onClose,defaultGoalType,defaultCategory,prefillNa
 
   return(<ModalSheet visible={visible} title={contextLabel?('New '+contextLabel.toLowerCase()+' goal'):'New goal'} onClose={onClose}>
     {!isWellnessContext&&<>
-      <Caps style={{marginBottom:8}}>Goal type</Caps>
+      <V5Caps style={{marginBottom:8}}>Goal type</V5Caps>
       <View style={{flexDirection:'row',gap:8,marginBottom:6}}>
         <TouchableOpacity style={[z.chip,goalType==='personal'&&z.chipSel]} onPress={function(){setGoalType('personal');}}><Text style={[z.chipTx,goalType==='personal'&&z.chipSelTx]}>Personal goal</Text></TouchableOpacity>
         <TouchableOpacity style={[z.chip,goalType==='shared'&&z.chipSel]} onPress={function(){setGoalType('shared');}}><Text style={[z.chipTx,goalType==='shared'&&z.chipSelTx]}>Shared family goal</Text></TouchableOpacity>
       </View>
-      <Caps color={theme.muted} style={{marginBottom:12}}>{goalType==='personal'?'Only you can update this goal.':'All family members can view and contribute.'}</Caps>
+      <V5Caps color={theme.muted} style={{marginBottom:12}}>{goalType==='personal'?'Only you can update this goal.':'All family members can view and contribute.'}</V5Caps>
     </>}
     <Inp label="Goal name" value={name} onChangeText={setName} placeholder={isWellnessContext?"Run 5km weekly, Hit 70g protein daily...":"Save for bike, Emergency fund..."} maxLength={LIMITS.goals.nameMax}/>
     {isWellnessContext?(
       <>
         <Inp label="Target" value={target} onChangeText={setTarget} placeholder="e.g. 5 (km), 70 (grams), 8 (hours)" keyboardType="numeric"/>
-        <Caps color={theme.textSecondary} style={{marginTop:-2,marginBottom:12}}>Tip: kms, grams, hours, days, books — any units.</Caps>
+        <V5Caps color={theme.textSecondary} style={{marginTop:-2,marginBottom:12}}>Tip: kms, grams, hours, days, books — any units.</V5Caps>
         <Inp label="Current progress (optional)" value={current} onChangeText={setCurrent} placeholder="0" keyboardType="numeric"/>
       </>
     ):(
@@ -6573,8 +6573,8 @@ function AddGoalModal({visible,onClose,defaultGoalType,defaultCategory,prefillNa
     </TouchableOpacity>
     {useTargetDate&&<DateField label="Target date" value={targetDate} onChange={setTargetDate} minimumDate={todayStart} maximumDate={maxTargetDate}/>}
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Create goal'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={loading} onPress={save}>{loading?'Saving…':'Create goal'}</V5Button></View>
     </View>
   </ModalSheet>);
 }
@@ -6645,8 +6645,8 @@ function EditGoalModal({visible,onClose,goal,familyId}){
     <Inp label="Target" value={target} onChangeText={setTarget} keyboardType="numeric"/>
     <Inp label="Current progress" value={current} onChangeText={setCurrent} keyboardType="numeric"/>
     <View style={{flexDirection:'row',gap:10,marginTop:4}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save changes'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={loading} onPress={save}>{loading?'Saving…':'Save changes'}</V5Button></View>
     </View>
     <TouchableOpacity onPress={deleteGoal} style={{marginTop:14,height:48,borderRadius:12,paddingHorizontal:22,alignItems:'center',justifyContent:'center',borderWidth:1.5,borderColor:theme.danger,backgroundColor:'transparent'}}>
       <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.danger}}>Delete goal</Text>
@@ -6691,13 +6691,13 @@ function TransactionCommentsModal({visible,onClose,transaction}){
   }
 
   return <ModalSheet visible={visible} title="Comments" onClose={onClose} scroll={false}>
-    {transaction?<Block style={{padding:14,marginBottom:12}}>
+    {transaction?<V5Card style={{padding:14,marginBottom:12}}>
       <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline'}}>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:15,color:theme.text}}>{transaction.merchant||'Transaction'}</Text>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:15,color:theme.text}}>{transaction.category==='Income'?'+':'−'}₹{fmt(Math.abs(Number(transaction.amount)||0))}</Text>
       </View>
-      <Caps color={theme.muted} style={{marginTop:4}}>{transaction.category||'Uncategorized'}{transaction.date?' · '+displayDate(toDate(transaction.date)):''}</Caps>
-    </Block>:null}
+      <V5Caps color={theme.muted} style={{marginTop:4}}>{transaction.category||'Uncategorized'}{transaction.date?' · '+displayDate(toDate(transaction.date)):''}</V5Caps>
+    </V5Card>:null}
     <ScrollView style={{maxHeight:320,marginBottom:10}} showsVerticalScrollIndicator={false}>
       {comments.map(function(c){
         var mine=c.user_id===userId;
@@ -6708,8 +6708,8 @@ function TransactionCommentsModal({visible,onClose,transaction}){
           borderRadius:16,padding:10,marginBottom:8,maxWidth:'85%',
         }}>
           <View style={{flexDirection:'row',alignItems:'baseline',marginBottom:3}}>
-            <Caps color={mine?'rgba(255,255,255,0.75)':theme.textSecondary}>{mine?'You':(c.user_name||'Member')}</Caps>
-            <Caps color={mine?'rgba(255,255,255,0.6)':theme.muted} style={{marginLeft:8}}>{relativeTime(c.created_at)}</Caps>
+            <V5Caps color={mine?'rgba(255,255,255,0.75)':theme.textSecondary}>{mine?'You':(c.user_name||'Member')}</V5Caps>
+            <V5Caps color={mine?'rgba(255,255,255,0.6)':theme.muted} style={{marginLeft:8}}>{relativeTime(c.created_at)}</V5Caps>
           </View>
           <Text style={{fontFamily:FF.sans,fontSize:14,color:mine?'#fff':theme.text}}>{c.comment_text}</Text>
         </View>;
@@ -6838,7 +6838,7 @@ function InvitationConfirmModal({commitment,promise,onClose}){
               <Text style={{color:theme.muted,fontWeight:'500'}}>Cancel</Text>
             </TouchableOpacity>
             <View style={{flex:2}}>
-              <PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving...':'Confirm'}</PrimaryButton>
+              <V5Button variant="primary" full disabled={saving} onPress={save}>{saving?'Saving...':'Confirm'}</V5Button>
             </View>
           </View>
         </ScrollView>
@@ -7203,9 +7203,9 @@ function NewPromiseModal({visible,onClose,onCreated}){
           </View>}
 
           <View style={{flexDirection:'row',gap:8,marginTop:20}}>
-            {step>1&&<View style={{flex:1}}><SecondaryButton full onPress={function(){setStep(step-1);}}>Back</SecondaryButton></View>}
-            {step<3&&<View style={{flex:1}}><PrimaryButton full disabled={!canAdvance()} onPress={function(){setStep(step+1);}}>Next</PrimaryButton></View>}
-            {step===3&&<View style={{flex:1}}><PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving...':'Send invitations'}</PrimaryButton></View>}
+            {step>1&&<View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){setStep(step-1);}}>Back</V5Button></View>}
+            {step<3&&<View style={{flex:1}}><V5Button variant="primary" full disabled={!canAdvance()} onPress={function(){setStep(step+1);}}>Next</V5Button></View>}
+            {step===3&&<View style={{flex:1}}><V5Button variant="primary" full disabled={saving} onPress={save}>{saving?'Saving...':'Send invitations'}</V5Button></View>}
           </View>
         </ScrollView>
       </View>
@@ -7361,7 +7361,7 @@ function PromiseDetailModal({promise,onClose}){
                       Marked done{c.manually_marked_done_at?' on '+displayDate(c.manually_marked_done_at):''}
                     </Text>
                   :(isMine&&promise.status==='active'&&c.commitment_status==='confirmed'
-                    ?<View style={{marginTop:6,alignSelf:'flex-start'}}><SecondaryButton onPress={function(){markCommitmentDone(c.id);}} disabled={busy}>Mark this done</SecondaryButton></View>
+                    ?<View style={{marginTop:6,alignSelf:'flex-start'}}><V5Button variant="secondary" onPress={function(){markCommitmentDone(c.id);}} disabled={busy}>Mark this done</V5Button></View>
                     :<Text style={[z.cap,{color:theme.muted}]}>In progress</Text>))
                 :(function(){
                     var pctProgress=snap.progress_target>0
@@ -7392,7 +7392,7 @@ function PromiseDetailModal({promise,onClose}){
           })}
 
           {promise.status==='active'&&<View style={{flexDirection:'row',gap:8,marginTop:16}}>
-            <View style={{flex:1}}><SecondaryButton full onPress={pausePromise} disabled={busy}>Pause this for now</SecondaryButton></View>
+            <View style={{flex:1}}><V5Button variant="secondary" full onPress={pausePromise} disabled={busy}>Pause this for now</V5Button></View>
             <TouchableOpacity
               style={{flex:1,padding:12,alignItems:'center',justifyContent:'center'}}
               onPress={cancelPromise}
@@ -7588,8 +7588,8 @@ function SharedGoalModal({visible,onClose,goal}){
     <SelectField label="Category" value={category} onChange={setCategory} options={SHARED_GOAL_CATEGORY_OPTIONS} placeholder="Select category"/>
     <Inp label="Description" value={description} onChangeText={setDescription} multiline placeholder="Optional details"/>
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={saving} onPress={save}>{saving?'Saving…':'Save'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={saving} onPress={save}>{saving?'Saving…':'Save'}</V5Button></View>
     </View>
   </ModalSheet>;
 }
@@ -7617,12 +7617,12 @@ function SharedGoalContributionModal({visible,onClose,goal}){
     }catch(e){showFriendlyError('Could not add contribution',e);}finally{setSaving(false);}
   }
   return <ModalSheet visible={visible} title="Add to this goal" onClose={onClose}>
-    <Caps color={theme.muted} style={{marginBottom:14}}>{goal?goal.goal_name:''}</Caps>
+    <V5Caps color={theme.muted} style={{marginBottom:14}}>{goal?goal.goal_name:''}</V5Caps>
     <Inp label="Amount" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="1000"/>
     <Inp label="Note (optional)" value={note} onChangeText={setNote} placeholder="For this month's savings"/>
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={saving} onPress={add}>{saving?'Saving…':'Add contribution'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={saving} onPress={add}>{saving?'Saving…':'Add contribution'}</V5Button></View>
     </View>
   </ModalSheet>;
 }
@@ -7667,13 +7667,13 @@ function ProfileModal({visible,onClose}){
 
   function row(label,value){
     return <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:10,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
-      <Caps>{label}</Caps>
+      <V5Caps>{label}</V5Caps>
       <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text,maxWidth:'60%'}} numberOfLines={1}>{value||'—'}</Text>
     </View>;
   }
   return <ModalSheet visible={visible} title="Profile" onClose={onClose}>
     {loadingProfile&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>Loading profile data…</Text>}
-    {!loadingProfile&&profileData&&<Block style={{padding:14,marginBottom:14}}>
+    {!loadingProfile&&profileData&&<V5Card style={{padding:14,marginBottom:14}}>
       {row('Name',profileData.name||'Not set yet')}
       {row('Email',profileData.email)}
       {row('Phone',profileData.phone)}
@@ -7684,9 +7684,9 @@ function ProfileModal({visible,onClose}){
       {row('Location',profileData.location)}
       {row('Occupation',profileData.occupation)}
       {row('Language',profileData.language)}
-    </Block>}
+    </V5Card>}
     {!loadingProfile&&!profileData&&<Text style={{fontFamily:FF.sans,fontSize:14,color:theme.muted}}>No profile data found.</Text>}
-    <PrimaryButton full onPress={onClose}>Close</PrimaryButton>
+    <V5Button variant="primary" full onPress={onClose}>Close</V5Button>
   </ModalSheet>;
 }
 
@@ -7730,21 +7730,21 @@ function LogWaterModal({visible,onClose,initialDate}){
     setLoading(false);
   }
   return(<ModalSheet visible={visible} title="Log water" onClose={onClose}>
-    <Caps style={{marginBottom:8}}>Who?</Caps>
+    <V5Caps style={{marginBottom:8}}>Who?</V5Caps>
     <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
       {members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
     </View>
-    <Caps style={{marginBottom:8}}>How many glasses?</Caps>
+    <V5Caps style={{marginBottom:8}}>How many glasses?</V5Caps>
     <View style={{flexDirection:'row',gap:8,marginBottom:16,alignItems:'center'}}>
       <TouchableOpacity style={[z.stepBtn,{borderColor:theme.border}]} onPress={function(){bump(-1);}}><Text style={[z.stepTx,{color:theme.text}]}>−</Text></TouchableOpacity>
       <TextInput style={[z.inp,{flex:1,textAlign:'center',fontSize:20,backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={water} onChangeText={setWater} placeholder="0" placeholderTextColor={theme.muted} keyboardType="numeric"/>
       <TouchableOpacity style={[z.stepBtn,{borderColor:theme.border}]} onPress={function(){bump(1);}}><Text style={[z.stepTx,{color:theme.text}]}>+</Text></TouchableOpacity>
     </View>
     <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
-    {mid&&<Caps color={theme.muted} style={{marginBottom:10}}>So far on {isoDate(selectedDate)}: {formatWaterFromLitres((wellness||[]).filter(function(w){return w.memberId===mid&&w.date===isoDate(selectedDate);}).reduce(function(sum,w){return sum+Number(w.water||0);},0))}</Caps>}
+    {mid&&<V5Caps color={theme.muted} style={{marginBottom:10}}>So far on {isoDate(selectedDate)}: {formatWaterFromLitres((wellness||[]).filter(function(w){return w.memberId===mid&&w.date===isoDate(selectedDate);}).reduce(function(sum,w){return sum+Number(w.water||0);},0))}</V5Caps>}
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save water'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={loading} onPress={save}>{loading?'Saving…':'Save water'}</V5Button></View>
     </View>
   </ModalSheet>);
 }
@@ -7793,19 +7793,19 @@ function LogScreenTimeModal({visible,onClose,initialDate}){
     setLoading(false);
   }
   return(<ModalSheet visible={visible} title="Log screen time" onClose={onClose}>
-    <Caps style={{marginBottom:8}}>Who?</Caps>
+    <V5Caps style={{marginBottom:8}}>Who?</V5Caps>
     <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
       {members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
     </View>
     <View style={{flexDirection:'row',gap:8,marginBottom:16}}>
-      <View style={{flex:1}}><Caps style={{marginBottom:6}}>Hours</Caps><TextInput style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={hrs} onChangeText={setHrs} placeholder="3" placeholderTextColor={theme.muted} keyboardType="numeric"/></View>
-      <View style={{flex:1}}><Caps style={{marginBottom:6}}>Minutes</Caps><TextInput style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={mins} onChangeText={setMins} placeholder="15" placeholderTextColor={theme.muted} keyboardType="numeric"/></View>
+      <View style={{flex:1}}><V5Caps style={{marginBottom:6}}>Hours</V5Caps><TextInput style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={hrs} onChangeText={setHrs} placeholder="3" placeholderTextColor={theme.muted} keyboardType="numeric"/></View>
+      <View style={{flex:1}}><V5Caps style={{marginBottom:6}}>Minutes</V5Caps><TextInput style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border}]} value={mins} onChangeText={setMins} placeholder="15" placeholderTextColor={theme.muted} keyboardType="numeric"/></View>
     </View>
     <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
-    {mid&&<Caps color={theme.muted} style={{marginBottom:10}}>So far on {isoDate(selectedDate)}: {(wellness||[]).filter(function(w){return w.memberId===mid&&w.date===isoDate(selectedDate);}).reduce(function(sum,w){return sum+Number(w.screenHrs||w.screen_hrs||0);},0).toFixed(1)} hrs</Caps>}
+    {mid&&<V5Caps color={theme.muted} style={{marginBottom:10}}>So far on {isoDate(selectedDate)}: {(wellness||[]).filter(function(w){return w.memberId===mid&&w.date===isoDate(selectedDate);}).reduce(function(sum,w){return sum+Number(w.screenHrs||w.screen_hrs||0);},0).toFixed(1)} hrs</V5Caps>}
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save screen time'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={loading} onPress={save}>{loading?'Saving…':'Save screen time'}</V5Button></View>
     </View>
   </ModalSheet>);
 }
@@ -7867,9 +7867,9 @@ function LogSleepModal({visible,onClose,initialDate}){
 
   var QUICK_HOURS=[5,6,7,8,9,10];
   return(<ModalSheet visible={visible} title="How did you sleep?" onClose={onClose}>
-    <Caps style={{marginBottom:6}}>Last night, in hours.</Caps>
+    <V5Caps style={{marginBottom:6}}>Last night, in hours.</V5Caps>
     {(members||[]).length>1?<>
-      <Caps style={{marginTop:8,marginBottom:8}}>Who?</Caps>
+      <V5Caps style={{marginTop:8,marginBottom:8}}>Who?</V5Caps>
       <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:14}}>
         {members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
       </View>
@@ -7880,7 +7880,7 @@ function LogSleepModal({visible,onClose,initialDate}){
       </TouchableOpacity>
       <View style={{minWidth:120,alignItems:'center'}}>
         <Text style={{fontFamily:FF.sansBold,fontSize:48,color:theme.text,letterSpacing:-1}}>{(Number(hrs)===Math.floor(Number(hrs))?Number(hrs)+'.0':Number(hrs).toFixed(1))}</Text>
-        <Caps color={theme.muted}>hours</Caps>
+        <V5Caps color={theme.muted}>hours</V5Caps>
       </View>
       <TouchableOpacity onPress={function(){bump(0.5);}} disabled={loading} style={{width:48,height:48,borderRadius:24,backgroundColor:theme.surfaceElevated,alignItems:'center',justifyContent:'center',borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
         <Text style={{fontFamily:FF.sansBold,fontSize:24,color:theme.text}}>+</Text>
@@ -7891,8 +7891,8 @@ function LogSleepModal({visible,onClose,initialDate}){
     </View>
     <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':'Save sleep'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={loading} onPress={save}>{loading?'Saving…':'Save sleep'}</V5Button></View>
     </View>
   </ModalSheet>);
 }
@@ -7972,12 +7972,12 @@ function LogActivityModal({visible,onClose,initialDate,editActivity}){
   }
   return(<ModalSheet visible={visible} title={editActivity?'Edit activity':'Log activity'} onClose={onClose}>
     {perms.tier!=='member'?<View>
-      <Caps style={{marginBottom:8}}>Who?</Caps>
+      <V5Caps style={{marginBottom:8}}>Who?</V5Caps>
       <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
         {members.map(function(m){return<TouchableOpacity key={m.id} style={[z.chip,mid===m.id&&z.chipSel]} onPress={function(){setMid(m.id);}}><Text style={[z.chipTx,mid===m.id&&z.chipSelTx]}>{m.name}</Text></TouchableOpacity>;})}
       </View>
     </View>:null}
-    <Caps style={{marginBottom:8}}>Activity type</Caps>
+    <V5Caps style={{marginBottom:8}}>Activity type</V5Caps>
     <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:16}}>
       {ACTIVITY_TYPES.map(function(t){
         var sel=activityType===t;
@@ -7991,7 +7991,7 @@ function LogActivityModal({visible,onClose,initialDate,editActivity}){
         </TouchableOpacity>;
       })}
     </View>
-    <Caps style={{marginBottom:8}}>Duration</Caps>
+    <V5Caps style={{marginBottom:8}}>Duration</V5Caps>
     <View style={{flexDirection:'row',gap:12,alignItems:'center',marginBottom:16}}>
       <TouchableOpacity onPress={function(){haptic('light');bumpDuration(-5);}} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>−</Text></TouchableOpacity>
       <View style={{flex:1,alignItems:'center'}}>
@@ -7999,8 +7999,8 @@ function LogActivityModal({visible,onClose,initialDate,editActivity}){
       </View>
       <TouchableOpacity onPress={function(){haptic('light');bumpDuration(5);}} style={[z.stepBtn,{borderColor:theme.border}]}><Text style={[z.stepTx,{color:theme.text}]}>+</Text></TouchableOpacity>
     </View>
-    <Caps color={theme.muted} style={{marginBottom:14,textAlign:'center'}}>Range: 5 to 240 min · Adjust by 5 min</Caps>
-    <Caps style={{marginBottom:8}}>Note (optional)</Caps>
+    <V5Caps color={theme.muted} style={{marginBottom:14,textAlign:'center'}}>Range: 5 to 240 min · Adjust by 5 min</V5Caps>
+    <V5Caps style={{marginBottom:8}}>Note (optional)</V5Caps>
     <TextInput
       style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border,minHeight:60,textAlignVertical:'top',marginBottom:12}]}
       value={note}
@@ -8012,8 +8012,8 @@ function LogActivityModal({visible,onClose,initialDate,editActivity}){
     />
     <DateField label="Date" value={selectedDate} onChange={setSelectedDate} maximumDate={new Date()}/>
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={loading} onPress={save}>{loading?'Saving…':(editActivity?'Save changes':'Save activity')}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={loading} onPress={save}>{loading?'Saving…':(editActivity?'Save changes':'Save activity')}</V5Button></View>
     </View>
   </ModalSheet>);
 }
@@ -10809,20 +10809,20 @@ function InviteModal({member,familyId,familyName,onClose}){
       <TierOption value="member" title="Member" desc="Can only edit their own meals, transactions, wellness logs. Use for kids, grandparents, or anyone who manages just their own data."/>
     </View>:null}
     {code?<View>
-      <Block bg={theme.primary} style={{alignItems:'center',paddingVertical:24,marginBottom:14}}>
-        <Caps color="rgba(255,255,255,0.7)">Invite code · {tierLabel}</Caps>
+      <V5Card tone="primary" style={{alignItems:'center',paddingVertical:24,marginBottom:14}}>
+        <V5Caps color="rgba(255,255,255,0.7)">Invite code · {tierLabel}</V5Caps>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:42,letterSpacing:8,color:'#fff',marginTop:8}}>{code}</Text>
-        <Caps color="rgba(255,255,255,0.7)" style={{marginTop:8}}>Expires in 7 days</Caps>
-      </Block>
+        <V5Caps color="rgba(255,255,255,0.7)" style={{marginTop:8}}>Expires in 7 days</V5Caps>
+      </V5Card>
       <View style={{flexDirection:'row',gap:10,marginBottom:12}}>
-        <View style={{flex:1}}><SecondaryButton full onPress={copyCode}>Copy</SecondaryButton></View>
-        <View style={{flex:1.4}}><PrimaryButton full onPress={shareCode}>Share via…</PrimaryButton></View>
+        <View style={{flex:1}}><V5Button variant="secondary" full onPress={copyCode}>Copy</V5Button></View>
+        <View style={{flex:1.4}}><V5Button variant="primary" full onPress={shareCode}>Share via…</V5Button></View>
       </View>
       <TouchableOpacity onPress={generate} disabled={loading} style={{alignItems:'center',paddingVertical:8}}>
-        <Caps color={theme.muted}>{loading?'Generating…':'Generate a new code'}</Caps>
+        <V5Caps color={theme.muted}>{loading?'Generating…':'Generate a new code'}</V5Caps>
       </TouchableOpacity>
-    </View>:<PrimaryButton full disabled={loading} onPress={generate}>{loading?'Generating…':'Generate invite code'}</PrimaryButton>}
-    <View style={{marginTop:8}}><SecondaryButton full onPress={onClose}>Close</SecondaryButton></View>
+    </View>:<V5Button variant="primary" full disabled={loading} onPress={generate}>{loading?'Generating…':'Generate invite code'}</V5Button>}
+    <View style={{marginTop:8}}><V5Button variant="secondary" full onPress={onClose}>Close</V5Button></View>
   </ModalSheet>);
 }
 
@@ -10859,8 +10859,8 @@ function RenameFamilyModal({visible,onClose,familyId,currentName,onRenamed}){
   return(<ModalSheet visible={visible} title="Rename your family" onClose={onClose}>
     <Inp label="Family name" value={name} onChangeText={setName} placeholder="Our Family" maxLength={48}/>
     <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={onClose}>Cancel</SecondaryButton></View>
-      <View style={{flex:1.4}}><PrimaryButton full disabled={!name.trim()||saving} onPress={save}>{saving?'Saving…':'Save'}</PrimaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={onClose}>Cancel</V5Button></View>
+      <View style={{flex:1.4}}><V5Button variant="primary" full disabled={!name.trim()||saving} onPress={save}>{saving?'Saving…':'Save'}</V5Button></View>
     </View>
   </ModalSheet>);
 }
@@ -10899,7 +10899,7 @@ function MemberDetailModal({visible,onClose,member,onJumpProtein,onJumpScreens,o
   return(<ModalSheet visible={visible} title="" onClose={onClose}>
     {/* Member header — avatar + serif name + role */}
     <View style={{flexDirection:'row',alignItems:'center',marginBottom:16}}>
-      <Avatar name={member.name||'?'} color={avatarColor} size={56}/>
+      <V5Avatar name={member.name||'?'} color={avatarColor} size={56}/>
       <View style={{flex:1,marginLeft:14}}>
         <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:24,letterSpacing:-0.4,color:theme.text}}>{member.name}</Text>
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:2}}>{getMemberRoleDisplay(member)}</Text>
@@ -10909,30 +10909,30 @@ function MemberDetailModal({visible,onClose,member,onJumpProtein,onJumpScreens,o
     {/* 2x2 stat grid */}
     <View style={{flexDirection:'row',gap:8,marginBottom:8}}>
       <View style={{flex:1}}>
-        <Block bg={theme.primary} style={{padding:16}}>
-          <Caps color="rgba(255,255,255,0.7)">Score this week</Caps>
+        <V5Card tone="primary" style={{padding:16}}>
+          <V5Caps color="rgba(255,255,255,0.7)">Score this week</V5Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:'#fff',marginTop:4}}>{weekPts}</Text>
-        </Block>
+        </V5Card>
       </View>
       <View style={{flex:1}}>
-        <Block bg={theme.accent} style={{padding:16}}>
-          <Caps color="rgba(255,255,255,0.75)">Streak</Caps>
+        <V5Card tone="accent" style={{padding:16}}>
+          <V5Caps color="rgba(255,255,255,0.75)">Streak</V5Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:'#fff',marginTop:4}}>{topStreak}<Text style={{fontSize:13,fontWeight:'500',color:'rgba(255,255,255,0.85)'}}> days</Text></Text>
-        </Block>
+        </V5Card>
       </View>
     </View>
     <View style={{flexDirection:'row',gap:8,marginBottom:16}}>
       <View style={{flex:1}}>
-        <Block bg={theme.surfaceElevated} style={{padding:16}}>
-          <Caps>Avg protein</Caps>
+        <V5Card tone="elevated" style={{padding:16}}>
+          <V5Caps>Avg protein</V5Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{avgProtein}g</Text>
-        </Block>
+        </V5Card>
       </View>
       <View style={{flex:1}}>
-        <Block bg={theme.surfaceElevated} style={{padding:16}}>
-          <Caps>Avg screens</Caps>
+        <V5Card tone="elevated" style={{padding:16}}>
+          <V5Caps>Avg screens</V5Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.6,color:theme.text,marginTop:4}}>{avgScreenH}h {avgScreenM}m</Text>
-        </Block>
+        </V5Card>
       </View>
     </View>
 
@@ -10951,7 +10951,7 @@ function MemberDetailModal({visible,onClose,member,onJumpProtein,onJumpScreens,o
       }}>
         <View style={{flex:1,marginRight:8}}>
           <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{item.label}</Text>
-          <Caps color={theme.muted} style={{marginTop:2}}>{item.detail}</Caps>
+          <V5Caps color={theme.muted} style={{marginTop:2}}>{item.detail}</V5Caps>
         </View>
         <Text style={{fontFamily:FF.sans,fontSize:18,color:theme.muted}}>›</Text>
       </TouchableOpacity>;
@@ -10994,22 +10994,22 @@ function ScoreBreakdownModal({visible,onClose,scope,member}){
     other:'Other',
   };
   return(<ModalSheet visible={visible} title="Score breakdown" onClose={onClose}>
-    <Caps color={theme.textSecondary} style={{marginBottom:14}}>{scope==='family'?'Whole family · this week':((member&&member.name)||'Member')+' · this week'}</Caps>
-    <Block bg={theme.primary} style={{padding:20,marginBottom:14}}>
-      <Caps color="rgba(255,255,255,0.7)">This week</Caps>
+    <V5Caps color={theme.textSecondary} style={{marginBottom:14}}>{scope==='family'?'Whole family · this week':((member&&member.name)||'Member')+' · this week'}</V5Caps>
+    <V5Card tone="primary" style={{padding:20,marginBottom:14}}>
+      <V5Caps color="rgba(255,255,255,0.7)">This week</V5Caps>
       <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:48,letterSpacing:-1.8,color:'#fff',lineHeight:50,marginTop:6}}>{fmt(totalPts)}<Text style={{fontSize:16,fontWeight:'500',color:'rgba(255,255,255,0.7)'}}> pts</Text></Text>
-    </Block>
-    <Caps style={{marginBottom:8}}>By category</Caps>
+    </V5Card>
+    <V5Caps style={{marginBottom:8}}>By category</V5Caps>
     {typeKeys.length===0&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>Nothing earned yet this week.</Text>}
     {typeKeys.map(function(k){
       var pct=totalPts>0?(byType[k].pts/totalPts)*100:0;
-      return <Block key={k} style={{padding:14,marginBottom:8}}>
+      return <V5Card key={k} style={{padding:14,marginBottom:8}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline',marginBottom:6}}>
           <Text style={{fontFamily:FF.sansSemi,fontSize:13,fontWeight:'600',color:theme.text}}>{nicelabel[k]||k}</Text>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:13,color:theme.primary}}>+{byType[k].pts}<Text style={{color:theme.muted,fontWeight:'500'}}> · {byType[k].count}×</Text></Text>
         </View>
-        <Progress value={pct}/>
-      </Block>;
+        <V5Progress value={pct}/>
+      </V5Card>;
     })}
     <View style={{height:8}}/>
   </ModalSheet>);
@@ -11035,7 +11035,7 @@ function CategoryQuickPickModal({visible,onClose,transaction}){
     finally{setSaving(false);}
   }
   return(<ModalSheet visible={visible} title="Change category" onClose={onClose}>
-    <Caps color={theme.textSecondary} style={{marginBottom:12}}>{transaction.merchant} · ₹{fmt(transaction.amount)}</Caps>
+    <V5Caps color={theme.textSecondary} style={{marginBottom:12}}>{transaction.merchant} · ₹{fmt(transaction.amount)}</V5Caps>
     <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:14}}>
       {CAT_LIST.map(function(c){
         var sel=transaction.category===c;
@@ -11051,7 +11051,7 @@ function CategoryQuickPickModal({visible,onClose,transaction}){
         </TouchableOpacity>;
       })}
     </View>
-    <SecondaryButton full onPress={onClose}>Close</SecondaryButton>
+    <V5Button variant="secondary" full onPress={onClose}>Close</V5Button>
   </ModalSheet>);
 }
 
@@ -11065,8 +11065,8 @@ function TrendDetailModal({visible,onClose,kind,data,labels}){
   var max=Math.max.apply(null,(data||[0]).concat([1]));
   var avg=data&&data.length?Math.round(data.reduce(function(a,b){return a+b;},0)/data.length):0;
   return(<ModalSheet visible={visible} title={title} onClose={onClose}>
-    <Block style={{padding:14}}>
-      <Caps>Daily average over 7 days</Caps>
+    <V5Card style={{padding:14}}>
+      <V5Caps>Daily average over 7 days</V5Caps>
       <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:30,letterSpacing:-1,color:theme.text,marginTop:6,marginBottom:14}}>{unit}{fmt(avg)}</Text>
       <LineChart
         data={{labels:labels||[],datasets:[{data:data||[0]}]}}
@@ -11079,8 +11079,8 @@ function TrendDetailModal({visible,onClose,kind,data,labels}){
         bezier
         style={{borderRadius:8}}
       />
-      <Caps color={theme.textSecondary} style={{marginTop:10}}>Peak: {unit}{fmt(max)}</Caps>
-    </Block>
+      <V5Caps color={theme.textSecondary} style={{marginTop:10}}>Peak: {unit}{fmt(max)}</V5Caps>
+    </V5Card>
   </ModalSheet>);
 }
 
@@ -11093,9 +11093,9 @@ function OurPromiseScreen({onClose}){
     {label:'Three',title:'We are trying to become unnecessary.',body:"After six months you should know your family's spending patterns, eating patterns, and screen patterns by heart. The habits should outlive the app. If they do, we did our job — even if you stop opening this."},
   ];
   return(<View style={{flex:1,paddingTop:ins.top,backgroundColor:theme.bg}}>
-    <NavBar title="" trailing={<TouchableOpacity onPress={function(){haptic('light');onClose();}} hitSlop={{top:8,bottom:8,left:8,right:8}}><Caps color={theme.primary} ls={0.4}>Done</Caps></TouchableOpacity>}/>
+    <NavBar title="" trailing={<TouchableOpacity onPress={function(){haptic('light');onClose();}} hitSlop={{top:8,bottom:8,left:8,right:8}}><V5Caps color={theme.primary} ls={0.4}>Done</V5Caps></TouchableOpacity>}/>
     <ScrollView style={{flex:1}} contentContainerStyle={{paddingHorizontal:24,paddingTop:16,paddingBottom:60}} showsVerticalScrollIndicator={false}>
-      <Caps color={theme.primary}>Our promise</Caps>
+      <V5Caps color={theme.primary}>Our promise</V5Caps>
       <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:32,letterSpacing:-1,color:theme.text,marginTop:12,lineHeight:38}}>
         We are not here to keep{'\n'}<Text style={{fontStyle:'italic'}}>your attention.</Text>{'\n'}We are here to give it back.
       </Text>
@@ -11105,7 +11105,7 @@ function OurPromiseScreen({onClose}){
       <View style={{marginTop:16}}>
         {sections.map(function(s,i){
           return <View key={s.label} style={{marginBottom:24}}>
-            <Caps color={theme.accent} ls={1.0}>{s.label}</Caps>
+            <V5Caps color={theme.accent} ls={1.0}>{s.label}</V5Caps>
             <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:22,letterSpacing:-0.4,color:theme.text,marginTop:10,lineHeight:28}}>{s.title}</Text>
             <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginTop:8,lineHeight:22}}>{s.body}</Text>
           </View>;
@@ -11193,19 +11193,19 @@ function SettingsScreen({onClose}){
     {removeConfirm&&<ModalSheet visible={true} title={'Remove '+removeConfirm.name+'?'} onClose={function(){setRemoveConfirm(null);}}>
       <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginBottom:16,lineHeight:20}}>This unlinks their account. Their existing logs stay in the family history.</Text>
       <View style={{flexDirection:'row',gap:10}}>
-        <View style={{flex:1}}><SecondaryButton full onPress={function(){setRemoveConfirm(null);}}>Cancel</SecondaryButton></View>
-        <View style={{flex:1}}><PrimaryButton full accent onPress={function(){removeMember(removeConfirm);}}>Remove</PrimaryButton></View>
+        <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){setRemoveConfirm(null);}}>Cancel</V5Button></View>
+        <View style={{flex:1}}><V5Button variant="primary" full accent onPress={function(){removeMember(removeConfirm);}}>Remove</V5Button></View>
       </View>
     </ModalSheet>}
 
-    <NavBar title="Settings" trailing={<TouchableOpacity onPress={function(){haptic('light');onClose();}} hitSlop={{top:8,bottom:8,left:8,right:8}}><Caps color={theme.primary} ls={0.4}>Done</Caps></TouchableOpacity>}/>
+    <NavBar title="Settings" trailing={<TouchableOpacity onPress={function(){haptic('light');onClose();}} hitSlop={{top:8,bottom:8,left:8,right:8}}><V5Caps color={theme.primary} ls={0.4}>Done</V5Caps></TouchableOpacity>}/>
 
     <ScrollView style={{flex:1}} contentContainerStyle={{padding:16,paddingTop:12,paddingBottom:32}} showsVerticalScrollIndicator={false}>
       {/* Profile card */}
       <TouchableOpacity activeOpacity={0.7} onPress={function(){setShowProfile(true);}}>
-        <Block style={{padding:16,marginBottom:14}}>
+        <V5Card style={{padding:16,marginBottom:14}}>
           <View style={{flexDirection:'row',alignItems:'center'}}>
-            <Avatar name={currentUserName||'?'} color={theme.primary} size={48}/>
+            <V5Avatar name={currentUserName||'?'} color={theme.primary} size={48}/>
             <View style={{flex:1,marginLeft:14}}>
               <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:16,color:theme.text}}>{currentUserName||'User'}</Text>
               {userProfile&&userProfile.email?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:2}}>{userProfile.email}</Text>:null}
@@ -11213,12 +11213,12 @@ function SettingsScreen({onClose}){
             </View>
             <Text style={{fontFamily:FF.sans,fontSize:18,color:theme.muted}}>›</Text>
           </View>
-        </Block>
+        </V5Card>
       </TouchableOpacity>
 
       {/* Family */}
-      <Caps style={{marginTop:8,marginBottom:8}}>Family</Caps>
-      <Block style={{padding:16,marginBottom:8}}>
+      <V5Caps style={{marginTop:8,marginBottom:8}}>Family</V5Caps>
+      <V5Card style={{padding:16,marginBottom:8}}>
         <View style={{flexDirection:'row',alignItems:'center'}}>
           <View style={{
             width:44,height:44,borderRadius:12,backgroundColor:theme.primary,
@@ -11232,9 +11232,9 @@ function SettingsScreen({onClose}){
           </View>
         </View>
         {isAdmin&&<View style={{flexDirection:'row',gap:8,marginTop:14}}>
-          <View style={{flex:1}}><SecondaryButton full onPress={function(){haptic('light');setShowRename(true);}}>Rename</SecondaryButton></View>
+          <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){haptic('light');setShowRename(true);}}>Rename</V5Button></View>
         </View>}
-      </Block>
+      </V5Card>
       {/* Member list */}
       {members.map(function(m){
         var isSelf=m.userId===userId||m.id===creatorMemberId;
@@ -11242,21 +11242,21 @@ function SettingsScreen({onClose}){
         var statusColor=isSelf?theme.primary:(m.userId?theme.primary:(m.inviteCode?theme.accent:theme.muted));
         var roleLabel=getMemberRoleDisplay(m);
         return <TouchableOpacity key={m.id} activeOpacity={0.7} onPress={function(){if(isSelf){haptic('light');setShowProfile(true);}else{haptic('light');setMemberDetail(m);}}}>
-          <Block style={{padding:14,marginBottom:8}}>
+          <V5Card style={{padding:14,marginBottom:8}}>
             <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
               <View style={{flex:1}}>
                 <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>{m.name}</Text>
-                <Caps color={theme.muted} style={{marginTop:2}}>{roleLabel}</Caps>
+                <V5Caps color={theme.muted} style={{marginTop:2}}>{roleLabel}</V5Caps>
               </View>
               <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:12,color:statusColor}}>{status}</Text>
             </View>
             {isAdmin && !m.userId && m.id!==creatorMemberId && <View style={{marginTop:12}}>
-              <SecondaryButton onPress={function(){setInviteSheet(m);}}>{m.inviteCode?'Regenerate code':'Invite'}</SecondaryButton>
+              <V5Button variant="secondary" onPress={function(){setInviteSheet(m);}}>{m.inviteCode?'Regenerate code':'Invite'}</V5Button>
             </View>}
             {isAdmin && m.userId && m.userId!==userId && <TouchableOpacity style={{marginTop:12,alignSelf:'flex-start'}} onPress={function(){setRemoveConfirm(m);}}>
-              <Caps color={theme.danger}>Remove from family</Caps>
+              <V5Caps color={theme.danger}>Remove from family</V5Caps>
             </TouchableOpacity>}
-          </Block>
+          </V5Card>
         </TouchableOpacity>;
       })}
       {isAdmin&&<TouchableOpacity style={{flexDirection:'row',alignItems:'center',justifyContent:'center',borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,borderStyle:'dashed',borderRadius:14,paddingVertical:14,marginBottom:8,backgroundColor:'transparent'}} onPress={function(){haptic('light');setShowAddMember(true);}}>
@@ -11264,8 +11264,8 @@ function SettingsScreen({onClose}){
       </TouchableOpacity>}
 
       {/* Appearance */}
-      <Caps style={{marginTop:20,marginBottom:8}}>Appearance</Caps>
-      <Block style={{padding:8,marginBottom:6}}>
+      <V5Caps style={{marginTop:20,marginBottom:8}}>Appearance</V5Caps>
+      <V5Card style={{padding:8,marginBottom:6}}>
         <View style={{flexDirection:'row',gap:8}}>
           {[{key:'light',label:'Light'},{key:'dark',label:'Dark'},{key:'system',label:'System'}].map(function(opt){
             var sel=themeMode===opt.key;
@@ -11280,44 +11280,44 @@ function SettingsScreen({onClose}){
             </TouchableOpacity>;
           })}
         </View>
-      </Block>
-      <Caps color={theme.muted} style={{marginBottom:8}}>System follows your device's appearance setting.</Caps>
+      </V5Card>
+      <V5Caps color={theme.muted} style={{marginBottom:8}}>System follows your device's appearance setting.</V5Caps>
 
       {/* Account */}
-      <Caps style={{marginTop:20,marginBottom:8}}>Account</Caps>
+      <V5Caps style={{marginTop:20,marginBottom:8}}>Account</V5Caps>
       {listRow('Your profile',null,function(){setShowProfile(true);})}
       {listRow('Revisit your answers',null,function(){haptic('light');openQuestionnaire&&openQuestionnaire();})}
       {listRow('Our promise',null,function(){haptic('light');setShowOurPromise(true);},{emoji:'🤝'})}
 
       {/* Behavior toggles */}
-      <Caps style={{marginTop:20,marginBottom:8}}>How the app behaves</Caps>
-      <Block style={{padding:14,marginBottom:6}}>
+      <V5Caps style={{marginTop:20,marginBottom:8}}>How the app behaves</V5Caps>
+      <V5Card style={{padding:14,marginBottom:6}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
           <View style={{flex:1,paddingRight:10}}>
             <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>Evening reminders</Text>
-            <Caps color={theme.muted} style={{marginTop:2}}>Smart reminder at 8 PM if today is incomplete</Caps>
+            <V5Caps color={theme.muted} style={{marginTop:2}}>Smart reminder at 8 PM if today is incomplete</V5Caps>
           </View>
           <Switch value={notificationEnabled} onValueChange={async function(next){setNotificationEnabled&&setNotificationEnabled(next);try{await supabase.from('users').update({notification_enabled:next}).eq('id',userId);}catch(e){}}}/>
         </View>
-      </Block>
-      <Block style={{padding:14,marginBottom:6}}>
+      </V5Card>
+      <V5Card style={{padding:14,marginBottom:6}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
           <View style={{flex:1,paddingRight:10}}>
             <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>Show water tracking</Text>
-            <Caps color={theme.muted} style={{marginTop:2}}>Adds water entry to Wellness. Off by default.</Caps>
+            <V5Caps color={theme.muted} style={{marginTop:2}}>Adds water entry to Wellness. Off by default.</V5Caps>
           </View>
           <Switch value={waterTrackingEnabled} onValueChange={async function(next){setWaterTrackingEnabled&&setWaterTrackingEnabled(next);try{await supabase.from('users').update({water_tracking_enabled:next}).eq('id',userId);}catch(e){}}}/>
         </View>
-      </Block>
+      </V5Card>
 
       {/* Silent Hours — calm Home screen between configured times. Defaults 22:00–08:00.
           Three columns persist: silent_hours_enabled (bool), silent_hours_start, silent_hours_end (time).
           The HomeScreen reads these via useApp(). */}
-      <Block style={{padding:14,marginBottom:6}}>
+      <V5Card style={{padding:14,marginBottom:6}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
           <View style={{flex:1,paddingRight:10}}>
             <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:14,color:theme.text}}>Silent hours</Text>
-            <Caps color={theme.muted} style={{marginTop:2}}>{silentHoursEnabled?(silentHoursStart+' – '+silentHoursEnd):'Off'}</Caps>
+            <V5Caps color={theme.muted} style={{marginTop:2}}>{silentHoursEnabled?(silentHoursStart+' – '+silentHoursEnd):'Off'}</V5Caps>
           </View>
           <Switch value={silentHoursEnabled} onValueChange={async function(next){
             setSilentHoursEnabled&&setSilentHoursEnabled(next);
@@ -11326,11 +11326,11 @@ function SettingsScreen({onClose}){
         </View>
         {silentHoursEnabled?<View style={{marginTop:12,flexDirection:'row',gap:10}}>
           <TouchableOpacity onPress={function(){setSilentPicker('start');}} style={{flex:1,backgroundColor:theme.surfaceElevated,borderRadius:10,paddingVertical:10,paddingHorizontal:12,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
-            <Caps color={theme.muted}>Start</Caps>
+            <V5Caps color={theme.muted}>Start</V5Caps>
             <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:16,color:theme.text,marginTop:2}}>{silentHoursStart}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={function(){setSilentPicker('end');}} style={{flex:1,backgroundColor:theme.surfaceElevated,borderRadius:10,paddingVertical:10,paddingHorizontal:12,borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border}}>
-            <Caps color={theme.muted}>End</Caps>
+            <V5Caps color={theme.muted}>End</V5Caps>
             <Text style={{fontFamily:FF.sansSemi,fontWeight:'600',fontSize:16,color:theme.text,marginTop:2}}>{silentHoursEnd}</Text>
           </TouchableOpacity>
         </View>:null}
@@ -11355,10 +11355,10 @@ function SettingsScreen({onClose}){
             }}
           />;
         })():null}
-      </Block>
+      </V5Card>
 
       {/* Your data */}
-      <Caps style={{marginTop:20,marginBottom:8}}>Your data</Caps>
+      <V5Caps style={{marginTop:20,marginBottom:8}}>Your data</V5Caps>
       {listRow('Pull latest from cloud',null,async function(){
         try{
           await refreshActivityFeed&&refreshActivityFeed();
@@ -11369,17 +11369,17 @@ function SettingsScreen({onClose}){
       })}
 
       {/* Under the hood */}
-      <Caps style={{marginTop:20,marginBottom:8}}>Under the hood</Caps>
+      <V5Caps style={{marginTop:20,marginBottom:8}}>Under the hood</V5Caps>
       {listRow('App version','v1.0.0',function(){var n=debugTaps+1;setDebugTaps(n);if(n>=7){setDebugEnabled(true);Alert.alert('Debug mode','Developer options unlocked for this session.');}})}
-      {debugEnabled&&<Block bg={theme.surfaceElevated} style={{padding:14,marginBottom:6}}>
-        <Caps>Debug enabled</Caps>
+      {debugEnabled&&<V5Card tone="elevated" style={{padding:14,marginBottom:6}}>
+        <V5Caps>Debug enabled</V5Caps>
         <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.muted,marginTop:6}}>User: {userId}</Text>
         <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.muted}}>Family: {familyId}</Text>
         <Text style={{fontFamily:FF.sans,fontSize:12,color:theme.muted}}>Members: {members.length}</Text>
-      </Block>}
+      </V5Card>}
 
       {/* Diagnostics (build #5) — exports invite-join flow logs via Share intent */}
-      <Caps style={{marginTop:20,marginBottom:8}}>Diagnostics</Caps>
+      <V5Caps style={{marginTop:20,marginBottom:8}}>Diagnostics</V5Caps>
       {listRow('Send debug logs','Share invite-join trace',function(){haptic('light');shareDiagLogs();})}
 
       {/* Sign out */}
@@ -11399,7 +11399,7 @@ function SettingsScreen({onClose}){
       {showAddMember&&<ModalSheet visible={true} title="Add a member" onClose={function(){setShowAddMember(false);setNewMemberName('');setNewMemberRole('parent');}}>
         <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,marginBottom:16,lineHeight:20}}>Enter their name and role. We'll generate an invite code you can share.</Text>
         <Inp label="Name" value={newMemberName} onChangeText={setNewMemberName} placeholder="First name is fine" maxLength={48}/>
-        <Caps style={{marginTop:8,marginBottom:8}}>Role</Caps>
+        <V5Caps style={{marginTop:8,marginBottom:8}}>Role</V5Caps>
         <View style={[z.row,{gap:8,marginBottom:18,flexWrap:'wrap'}]}>
           {[{label:'Parent',value:'parent'},{label:'Child',value:'child'},{label:'Other',value:'other'}].map(function(opt){
             var sel=newMemberRole===opt.value;
@@ -11409,8 +11409,8 @@ function SettingsScreen({onClose}){
           })}
         </View>
         <View style={{flexDirection:'row',gap:10}}>
-          <View style={{flex:1}}><SecondaryButton full disabled={addingMember} onPress={function(){setShowAddMember(false);setNewMemberName('');setNewMemberRole('parent');}}>Cancel</SecondaryButton></View>
-          <View style={{flex:1.4}}><PrimaryButton full disabled={addingMember||!normalizeText(newMemberName)} onPress={async function(){
+          <View style={{flex:1}}><V5Button variant="secondary" full disabled={addingMember} onPress={function(){setShowAddMember(false);setNewMemberName('');setNewMemberRole('parent');}}>Cancel</V5Button></View>
+          <View style={{flex:1.4}}><V5Button variant="primary" full disabled={addingMember||!normalizeText(newMemberName)} onPress={async function(){
             var clean=normalizeText(newMemberName);
             if(!clean){haptic('error');Alert.alert('Missing name','Enter a name for this member.');return;}
             setAddingMember(true);
@@ -11433,12 +11433,12 @@ function SettingsScreen({onClose}){
               setInviteSheet({id:'invite_'+ins.data.id,inviteId:ins.data.id,name:clean,role:newMemberRole,userId:null,inviteCode:newCode,_virtual:true});
             }catch(e){haptic('error');showFriendlyError('Could not add member',e);}
             setAddingMember(false);
-          }}>{addingMember?'Adding…':'Add member'}</PrimaryButton></View>
+          }}>{addingMember?'Adding…':'Add member'}</V5Button></View>
         </View>
       </ModalSheet>}
 
       {/* TEMP — v5 atom gallery hook. Remove after Phase 2 migration complete. */}
-      <Caps style={{marginTop:20,marginBottom:8}}>Developer</Caps>
+      <V5Caps style={{marginTop:20,marginBottom:8}}>Developer</V5Caps>
       {listRow('v5 Atom Gallery (dev)',null,function(){haptic('light');setShowV5Gallery(true);},{emoji:'🎨'})}
 
       <View style={{height:32}}/>
@@ -13336,7 +13336,7 @@ var z=StyleSheet.create({
 
   // ── Buttons ──────────────────────────────────────────────
   // Legacy z.bPri / z.bSec / z.bGhost button styles deleted (audit fix #6, 2026-05-04).
-  // All callsites converted to design-system <PrimaryButton> / <SecondaryButton> atoms.
+  // All callsites converted to design-system <V5Button variant="primary"> / <V5Button variant="secondary"> atoms.
 
   // ── Pills ────────────────────────────────────────────────
   pill:{borderRadius:9999,paddingVertical:6,paddingHorizontal:14,borderWidth:0.5,borderColor:'transparent'},
