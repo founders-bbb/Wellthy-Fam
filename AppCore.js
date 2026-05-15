@@ -2955,6 +2955,12 @@ function SwipeRightBack({onBack,children}){
 
 // B8: Swipeable transaction card. Right-swipe past 60px fires onConfirm with medium haptic.
 // Left-swipe past 60px fires onEdit with light haptic. Card slides with the finger and snaps back on release below threshold.
+// Composite phase item 6 — intentionally not migrated. SwipeableTxCard has
+// no visual chrome of its own; it is a pure gesture wrapper (PanGestureHandler
+// + Animated.Value) around `children`. The card visual it wraps was already
+// migrated to V5Card in Batch B. There are no legacy atoms inside this
+// composite to swap. A v5-native gesture primitive (V5SwipeReveal etc.) is
+// foundation-extension scope for a future session if needed.
 function SwipeableTxCard({tx,onConfirm,onEdit,children}){
   var translateX=useRef(new Animated.Value(0)).current;
   var committed=useRef(false);
