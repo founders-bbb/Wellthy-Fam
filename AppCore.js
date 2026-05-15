@@ -10444,7 +10444,7 @@ function FamilyScreen(){
         var pending=(memberScores||[]).filter(function(c){return !c.joined && c.id!==creatorMemberId;});
         if(pending.length===0)return <View>
           <Text style={{fontFamily:FF.sans,fontSize:14,lineHeight:21,color:theme.textSecondary,marginBottom:18}}>No pending members. Add new ones from Settings → Family.</Text>
-          <PrimaryButton full onPress={function(){setShowInvitePicker(false);if(openSettings)openSettings();}}>Open Settings</PrimaryButton>
+          <V5Button variant="primary" full onPress={function(){setShowInvitePicker(false);if(openSettings)openSettings();}}>Open Settings</V5Button>
         </View>;
         return <View>
           {pending.map(function(c){
@@ -10455,7 +10455,7 @@ function FamilyScreen(){
               borderRadius:14,
               borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,
             }}>
-              <Avatar name={c.name||'?'} color={c.color} size={32}/>
+              <V5Avatar name={c.name||'?'} color={c.color} size={32}/>
               <View style={{flex:1,marginLeft:12}}>
                 <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{c.name||'Unknown'}</Text>
                 <Text style={{fontFamily:FF.sans,fontSize:11,color:theme.textSecondary,marginTop:1}}>{c.role}</Text>
@@ -10487,30 +10487,30 @@ function FamilyScreen(){
     <ScrollView style={z.fl} contentContainerStyle={{paddingHorizontal:18,paddingTop:8,paddingBottom:32}} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
-      {/* Header */}
+      {/* Header — kept inline (tappable family name + tappable "+ Invite" link can't both live in V5PageTitle structure) */}
       <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',paddingTop:8,marginBottom:14}}>
         <View style={{flex:1,marginRight:12}}>
-          <Caps>Family</Caps>
+          <V5Caps>Family</V5Caps>
           <TouchableOpacity activeOpacity={isAdmin?0.7:1} onPress={function(){if(isAdmin){haptic('light');setShowRename(true);}}}>
             <Text style={{fontFamily:FF.serif,fontSize:30,letterSpacing:-0.8,color:theme.text,marginTop:6}} numberOfLines={1}>{familyName||'Your family'}{isAdmin?' ✎':''}</Text>
           </TouchableOpacity>
         </View>
         {isAdmin&&<TouchableOpacity hitSlop={{top:8,bottom:8,left:8,right:8}} onPress={function(){haptic('light');setShowInvitePicker(true);}}>
-          <Caps color={theme.primary} ls={0.4}>+ Invite</Caps>
+          <V5Caps color={theme.primary} style={{letterSpacing:0.4}}>+ Invite</V5Caps>
         </TouchableOpacity>}
       </View>
 
-      {/* Hero score */}
+      {/* Hero score — 52-px number stays inline (custom hero) */}
       <View style={{position:'relative'}}>
       <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setScoreScope({scope:'family'});}}>
-        <Block bg={theme.primary} style={{padding:22}}>
-          <Caps color="rgba(255,255,255,0.7)">Family score this week</Caps>
+        <V5Card tone="primary" padding={22}>
+          <V5Caps color="rgba(255,255,255,0.7)">Family score this week</V5Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54,marginTop:8}}>{fmt(totalScore)}</Text>
           <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:12}}>
             <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{deltaFromLastWeek===0?'Same as last week':(deltaFromLastWeek>0?'+':'')+deltaFromLastWeek+' vs last week'}</Text>
             <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>Tap for breakdown ›</Text>
           </View>
-        </Block>
+        </V5Card>
       </TouchableOpacity>
       {/* Phase 2.5.B: InfoIcon — absolute-positioned sibling so its tap doesn't bubble to the score-breakdown TouchableOpacity */}
       <InfoIcon
@@ -10522,7 +10522,9 @@ function FamilyScreen(){
       </View>
 
       {/* Members — vertical stack of MemberStreakRing cards per design source */}
-      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:10}}>Members</Text>
+      <View style={{marginTop:22,marginBottom:10}}>
+        <V5SectionH title="Members"/>
+      </View>
       <View>
         {memberScores.map(function(c){
           var memObj=members.find(function(m){return m.id===c.id;});
@@ -10540,24 +10542,26 @@ function FamilyScreen(){
       </View>
 
       {/* Activity feed */}
-      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:10}}>What’s been happening</Text>
-      {latestActivities.length>0?<Block style={{padding:14}}>
+      <View style={{marginTop:22,marginBottom:10}}>
+        <V5SectionH title="What’s been happening"/>
+      </View>
+      {latestActivities.length>0?<V5Card padding={14}>
         {latestActivities.map(function(a,i,arr){
           var data=a&&a.activity_data?a.activity_data:{};
           var actorName=data.user_name||'Someone';
           var isLast=i===arr.length-1;
           return <View key={a.id} style={{flexDirection:'row',alignItems:'center',paddingVertical:10,borderBottomWidth:isLast?0:StyleSheet.hairlineWidth,borderBottomColor:theme.border}}>
-            <Avatar name={actorName} color={activityActorColor(actorName)} size={28}/>
+            <V5Avatar name={actorName} color={activityActorColor(actorName)} size={28}/>
             <View style={{flex:1,marginLeft:10}}>
               <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.text,lineHeight:18}}>{buildActivityMessage(a)}</Text>
-              <Caps color={theme.muted} style={{marginTop:2}}>{relativeTime(a.created_at)}</Caps>
+              <V5Caps color={theme.muted} style={{marginTop:2}}>{relativeTime(a.created_at)}</V5Caps>
             </View>
           </View>;
         })}
-      </Block>:<Block style={{padding:14}}>
+      </V5Card>:<V5Card padding={14}>
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>Nothing’s happened in your family yet.</Text>
-        <Caps color={theme.muted} style={{marginTop:6}}>Capture a meal or money entry and it’ll show up here.</Caps>
-      </Block>}
+        <V5Caps color={theme.muted} style={{marginTop:6}}>Capture a meal or money entry and it’ll show up here.</V5Caps>
+      </V5Card>}
 
       {(function(){
         var myPendingCommitments=(promiseCommitments||[]).filter(function(c){
@@ -10565,13 +10569,15 @@ function FamilyScreen(){
         });
         if(myPendingCommitments.length===0)return null;
         return <View>
-          <Sec>Promises waiting on you</Sec>
+          <View style={{marginTop:18,marginBottom:10}}>
+            <V5SectionH title="Promises waiting on you"/>
+          </View>
           {myPendingCommitments.map(function(c){
             var p=(promises||[]).find(function(pp){return pp.id===c.promise_id;});
             if(!p)return null;
             var creator=(members||[]).find(function(m){return m.userId===p.created_by;});
             var creatorName=creator?rname(creator):'Someone';
-            return <View key={c.id} style={[z.card,{marginBottom:8,borderWidth:1,borderColor:theme.primary}]}>
+            return <V5Card key={c.id} style={{marginBottom:8,borderWidth:1,borderColor:theme.primary}}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}>
                 <View style={{flex:1}}>
                   <Text style={[z.txM,{color:theme.text}]}>{p.title}</Text>
@@ -10583,11 +10589,9 @@ function FamilyScreen(){
               <Text style={[z.body,{color:theme.text,marginTop:8}]}>
                 {'"'}{c.commitment_text}{'"'}
               </Text>
-              <View style={{flexDirection:'row',gap:8,marginTop:12}}>
-                <TouchableOpacity
-                  style={{flex:1,padding:10,borderRadius:8,
-                          backgroundColor:theme.primary,alignItems:'center'}}
-                  onPress={function(){
+              <View style={{flexDirection:'row',gap:8,marginTop:12,alignItems:'center'}}>
+                <View style={{flex:1}}>
+                  <V5Button variant="primary" size="sm" full onPress={function(){
                     Alert.alert('Confirm this?',
                       'Take this on as written. You can mark it done later or edit if needed.',
                       [
@@ -10597,15 +10601,12 @@ function FamilyScreen(){
                         }}
                       ]
                     );
-                  }}>
-                  <Text style={{color:'#fff',fontWeight:'500',fontSize:13}}>Confirm</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={{flex:1,padding:10,borderRadius:8,
-                          borderWidth:1,borderColor:theme.primary,alignItems:'center'}}
-                  onPress={function(){setEditingCommitment(c);}}>
-                  <Text style={{color:theme.primary,fontWeight:'500',fontSize:13}}>Edit & confirm</Text>
-                </TouchableOpacity>
+                  }}>Confirm</V5Button>
+                </View>
+                <View style={{flex:1}}>
+                  <V5Button variant="secondary" size="sm" full onPress={function(){setEditingCommitment(c);}}>Edit & confirm</V5Button>
+                </View>
+                {/* Decline kept bare-text inline — hierarchical: softer no, intentional visual quietness */}
                 <TouchableOpacity
                   style={{flex:1,padding:10,alignItems:'center'}}
                   onPress={function(){
@@ -10622,12 +10623,14 @@ function FamilyScreen(){
                   <Text style={{color:theme.muted,fontWeight:'500',fontSize:13}}>Decline</Text>
                 </TouchableOpacity>
               </View>
-            </View>;
+            </V5Card>;
           })}
         </View>;
       })()}
 
-      <Sec>Promises in motion</Sec>
+      <View style={{marginTop:18,marginBottom:10}}>
+        <V5SectionH title="Promises in motion"/>
+      </View>
       {(promises||[]).filter(function(p){return p.status==='active';}).length>0
         ?(function(){
           function latestSnapshot(commitmentId){
@@ -10641,80 +10644,81 @@ function FamilyScreen(){
             var totalDays=Math.max(1,Math.ceil((new Date(p.end_date)-new Date(p.start_date))/86400000));
             var elapsedDays=Math.max(0,Math.min(totalDays,Math.ceil((new Date()-new Date(p.start_date))/86400000)));
             var pctElapsed=totalDays>0?elapsedDays/totalDays:0;
-            return <TouchableOpacity key={p.id} style={[z.card,{backgroundColor:theme.surface,borderColor:theme.border,marginBottom:8}]}
-              onPress={function(){setActivePromiseDetail(p);}}>
-              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-                <Text style={[z.txM,{color:theme.text,flex:1,paddingRight:8}]}>{p.title}</Text>
-                <Text style={[z.cap,{color:theme.primary}]}>Active</Text>
-              </View>
-              <Text style={[z.cap,{color:theme.muted,marginTop:2,marginBottom:8}]}>
-                {displayDate(p.start_date)} to {displayDate(p.end_date)} {'·'} {elapsedDays} of {totalDays} days
-              </Text>
-              {pCommits.slice(0,4).map(function(c){
-                var member=(members||[]).find(function(m){return m.id===c.member_id;});
-                var name=rname(member);
-                var text=c.commitment_text&&c.commitment_text.length>60
-                  ?c.commitment_text.slice(0,57)+'...'
-                  :(c.commitment_text||'');
-                var snap=latestSnapshot(c.id);
+            return <TouchableOpacity key={p.id} onPress={function(){setActivePromiseDetail(p);}}>
+              <V5Card style={{marginBottom:8}}>
+                <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
+                  <Text style={[z.txM,{color:theme.text,flex:1,paddingRight:8}]}>{p.title}</Text>
+                  <Text style={[z.cap,{color:theme.primary}]}>Active</Text>
+                </View>
+                <Text style={[z.cap,{color:theme.muted,marginTop:2,marginBottom:8}]}>
+                  {displayDate(p.start_date)} to {displayDate(p.end_date)} {'·'} {elapsedDays} of {totalDays} days
+                </Text>
+                {pCommits.slice(0,4).map(function(c){
+                  var member=(members||[]).find(function(m){return m.id===c.member_id;});
+                  var name=rname(member);
+                  var text=c.commitment_text&&c.commitment_text.length>60
+                    ?c.commitment_text.slice(0,57)+'...'
+                    :(c.commitment_text||'');
+                  var snap=latestSnapshot(c.id);
 
-                if(c.commitment_type==='custom'||!snap||snap.progress_target===null){
+                  if(c.commitment_type==='custom'||!snap||snap.progress_target===null){
+                    return <View key={c.id} style={{marginBottom:6}}>
+                      <Text style={[z.body,{color:theme.text}]}>{name}{': "'}{text}{'"'}</Text>
+                      {c.manually_marked_done
+                        ?<Text style={[z.cap,{color:theme.primary}]}>marked done</Text>
+                        :<Text style={[z.cap,{color:theme.muted}]}>in progress</Text>}
+                    </View>;
+                  }
+
+                  var pctProgress=snap.progress_target>0
+                    ?Math.min(1,snap.progress_value/snap.progress_target)
+                    :0;
+                  var atRisk=pctElapsed>0.5&&pctProgress<0.5;
+                  var barColor=atRisk?theme.accent:theme.primary;
+
                   return <View key={c.id} style={{marginBottom:6}}>
                     <Text style={[z.body,{color:theme.text}]}>{name}{': "'}{text}{'"'}</Text>
-                    {c.manually_marked_done
-                      ?<Text style={[z.cap,{color:theme.primary}]}>marked done</Text>
-                      :<Text style={[z.cap,{color:theme.muted}]}>in progress</Text>}
+                    <View style={{marginTop:4}}>
+                      <V5Progress value={pctProgress*100} color={barColor} height={6}/>
+                    </View>
+                    <Text style={[z.cap,{color:theme.muted,marginTop:2}]}>
+                      {snap.progress_value} of {snap.progress_target}
+                      {atRisk?' · catching up':''}
+                    </Text>
                   </View>;
-                }
-
-                var pctProgress=snap.progress_target>0
-                  ?Math.min(1,snap.progress_value/snap.progress_target)
-                  :0;
-                var atRisk=pctElapsed>0.5&&pctProgress<0.5;
-                var barColor=atRisk?theme.accent:theme.primary;
-
-                return <View key={c.id} style={{marginBottom:6}}>
-                  <Text style={[z.body,{color:theme.text}]}>{name}{': "'}{text}{'"'}</Text>
-                  <View style={{height:6,backgroundColor:'#E8E5DD',borderRadius:3,marginTop:4,overflow:'hidden'}}>
-                    <View style={{height:6,width:(pctProgress*100)+'%',backgroundColor:barColor}}/>
-                  </View>
-                  <Text style={[z.cap,{color:theme.muted,marginTop:2}]}>
-                    {snap.progress_value} of {snap.progress_target}
-                    {atRisk?' · catching up':''}
-                  </Text>
-                </View>;
-              })}
+                })}
+              </V5Card>
             </TouchableOpacity>;
           });
         })()
-        :<Text style={[z.cap,{color:theme.muted}]}>No promises yet. The first one starts when you make it with someone.</Text>
+        :<V5Caps color={theme.muted}>No promises yet. The first one starts when you make it with someone.</V5Caps>
       }
       <View style={{alignSelf:'flex-start',marginTop:8,marginBottom:16}}>
-        <PrimaryButton onPress={function(){setShowNewPromise(true);}}>+ New promise</PrimaryButton>
+        <V5Button variant="primary" onPress={function(){setShowNewPromise(true);}}>+ New promise</V5Button>
       </View>
 
-      {/* Shared goal — single accent block per design. Tap → SharedGoalModal (view/edit/contribute). Multi-goal management lives on Finance tab. */}
+      {/* Shared goal — single accent card per design. Tap → SharedGoalModal (view/edit/contribute). Multi-goal management lives on Finance tab. */}
       {featuredSharedGoal?(function(){
         var g=featuredSharedGoal;
         var pct=Number(g.target_amount)>0?Math.round((Number(g.current_amount||0)/Number(g.target_amount))*100):0;
         var done=pct>=100;
         return <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setActiveSharedGoal(g);setShowSharedGoalModal(true);}} style={{marginTop:12}}>
-          <Block bg={theme.accent} style={{padding:22}}>
-            <Caps color="rgba(255,255,255,0.75)">Shared goal · {g.goal_name}</Caps>
+          <V5Card tone="accent" padding={22}>
+            <V5Caps color="rgba(255,255,255,0.75)">Shared goal · {g.goal_name}</V5Caps>
             <View style={{flexDirection:'row',alignItems:'baseline',marginTop:8}}>
               <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:36,letterSpacing:-1.4,color:'#fff',lineHeight:38}}>₹{fmt(g.current_amount||0)}</Text>
               <Text style={{fontFamily:FF.sans,fontWeight:'500',fontSize:14,color:'rgba(255,255,255,0.8)',marginLeft:6}}>/ ₹{fmt(g.target_amount||0)}</Text>
             </View>
             <View style={{marginTop:12}}>
-              <Progress value={Math.min(pct,100)} color="#fff" track="rgba(255,255,255,0.25)"/>
+              <V5Progress value={Math.min(pct,100)} color="#fff" track="rgba(255,255,255,0.25)"/>
             </View>
             <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:10}}>
               <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{pct}% there{(sharedGoals||[]).length>1?' · '+((sharedGoals||[]).length-1)+' more':''}</Text>
               <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{done?'🎉 Completed':'Tap to manage ›'}</Text>
             </View>
-          </Block>
+          </V5Card>
         </TouchableOpacity>;
-      })():<Caps color={theme.muted} style={{marginTop:14}}>No shared goals yet. Start one from the Finance tab.</Caps>}
+      })():<V5Caps color={theme.muted} style={{marginTop:14}}>No shared goals yet. Start one from the Finance tab.</V5Caps>}
 
       <View style={{height:32}}/>
     </ScrollView>
