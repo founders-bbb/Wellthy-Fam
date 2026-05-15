@@ -8857,19 +8857,19 @@ function FinanceScreen(){
         <View style={{flex:1}}><Inp label="Max amount" value={filters.max} onChangeText={function(v){setFilters(Object.assign({},filters,{max:v}));}} keyboardType="numeric"/></View>
       </View>
       <View style={{flexDirection:'row',gap:10,marginTop:8}}>
-        <View style={{flex:1}}><SecondaryButton full onPress={function(){setFilters({from:'',to:'',category:'',type:'all',min:'',max:''});}}>Clear all</SecondaryButton></View>
-        <View style={{flex:1}}><PrimaryButton full onPress={function(){setShowFilters(false);}}>Apply</PrimaryButton></View>
+        <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){setFilters({from:'',to:'',category:'',type:'all',min:'',max:''});}}>Clear all</V5Button></View>
+        <View style={{flex:1}}><V5Button variant="primary" full onPress={function(){setShowFilters(false);}}>Apply</V5Button></View>
       </View>
     </ModalSheet>}
 
     <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
-    {/* Header */}
+    {/* Header — tappable month kicker keeps inline (Home/Family precedent) */}
     <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',paddingTop:8,marginBottom:14}}>
       <View style={{flex:1,marginRight:12}}>
         <TouchableOpacity onPress={function(){haptic('light');setShowMonthPicker(true);}} accessibilityRole="button">
-          <Caps>{viewMonth.toLocaleString('en-IN',{month:'long',year:'numeric'})} ›</Caps>
+          <V5Caps>{viewMonth.toLocaleString('en-IN',{month:'long',year:'numeric'})} ›</V5Caps>
         </TouchableOpacity>
         <Text style={{fontFamily:FF.serif,fontSize:30,letterSpacing:-0.8,color:theme.text,marginTop:6}}>Finance</Text>
       </View>
@@ -8878,9 +8878,9 @@ function FinanceScreen(){
       </TouchableOpacity>
     </View>
 
-    {/* Saved this month — primary hero */}
-    <Block bg={theme.primary} style={{padding:22}}>
-      <Caps color="rgba(255,255,255,0.7)">Saved this month</Caps>
+    {/* Saved this month — primary hero (52-px stays inline, custom hero) */}
+    <V5Card tone="primary" padding={22}>
+      <V5Caps color="rgba(255,255,255,0.7)">Saved this month</V5Caps>
       <View style={{flexDirection:'row',alignItems:'baseline',marginTop:6}}>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,color:'#fff',opacity:0.85}}>₹</Text>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:52,letterSpacing:-2,color:'#fff',lineHeight:54}}>{fmt(Math.max(savings,0))}</Text>
@@ -8889,17 +8889,15 @@ function FinanceScreen(){
         <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{income>0?savePct+'% of earnings':'Add income to see savings rate'}</Text>
         <Text style={{fontFamily:FF.sans,fontSize:12,color:'rgba(255,255,255,0.85)'}}>{viewMonth.toLocaleString('en-IN',{month:'short'})}</Text>
       </View>
-    </Block>
+    </V5Card>
 
-    {/* 2-up: Earned / Spent */}
+    {/* 2-up: Earned / Spent — V5Stat tone="elevated" + V5Stat tone="accent-soft" (v5-native, accepts solid accent-soft bg shift) */}
     <View style={{flexDirection:'row',gap:10,marginTop:10}}>
-      <View style={{flex:1,backgroundColor:theme.surfaceElevated,borderRadius:20,padding:16}}>
-        <Caps>Earned</Caps>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.7,color:theme.text,marginTop:6}}>₹{fmt(income)}</Text>
+      <View style={{flex:1}}>
+        <V5Stat tone="elevated" label="Earned" prefix="₹" value={fmt(income)}/>
       </View>
-      <View style={{flex:1,backgroundColor:theme.accentLight,borderRadius:20,padding:16}}>
-        <Caps color={theme.accent}>Spent</Caps>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.7,color:theme.accent,marginTop:6}}>₹{fmt(expenses)}</Text>
+      <View style={{flex:1}}>
+        <V5Stat tone="accent-soft" label="Spent" prefix="₹" value={fmt(expenses)}/>
       </View>
     </View>
 
@@ -8909,7 +8907,7 @@ function FinanceScreen(){
         (financeGoals||[]).map(function(g){var t=Number(g.target||0);return{kind:'personal',id:g.id,name:g.name,current:Number(g.current||0),target:t,pct:t>0?(Number(g.current||0)/t)*100:0,raw:g};}),
         (financeSharedGoals||[]).map(function(g){var t=Number(g.target_amount||0);return{kind:'shared',id:g.id,name:g.goal_name,current:Number(g.current_amount||0),target:t,pct:t>0?(Number(g.current_amount||0)/t)*100:0,raw:g};})
       );
-      if(allGoals.length===0)return <Caps color={theme.muted} style={{marginTop:14}}>No money goals yet — start one below.</Caps>;
+      if(allGoals.length===0)return <V5Caps color={theme.muted} style={{marginTop:14}}>No money goals yet — start one below.</V5Caps>;
       var top3=allGoals.slice().sort(function(a,b){return b.pct-a.pct;}).slice(0,3);
       return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginTop:12}} contentContainerStyle={{gap:10,paddingRight:18}}>
         {top3.map(function(g){
@@ -8921,8 +8919,8 @@ function FinanceScreen(){
             borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,
           }}>
             <Text numberOfLines={1} ellipsizeMode="tail" style={{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:theme.text}}>{g.name}</Text>
-            <View style={{height:4,borderRadius:9999,backgroundColor:theme.surfaceElevated,marginTop:8,overflow:'hidden'}}>
-              <View style={{width:pct+'%',height:'100%',backgroundColor:fillColor}}/>
+            <View style={{marginTop:8}}>
+              <V5Progress value={pct} color={fillColor} height={4}/>
             </View>
             <Text style={{fontFamily:FF.sansBold,fontSize:14,fontWeight:'700',color:theme.text,marginTop:6}}>{pct}%</Text>
           </TouchableOpacity>;
@@ -8950,10 +8948,9 @@ function FinanceScreen(){
     </View>
 
     {/* Where it went — all categories sorted, tappable to filter (Phase 2.2.B) */}
-    <Block style={{padding:16,marginTop:12}}>
-      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>{memberFilterId?(financeFilteredMemberName||'Member')+'’s spending':'Where it went'}</Text>
-        <Caps color={theme.muted}>Tap to filter</Caps>
+    <V5Card padding={16} style={{marginTop:12}}>
+      <View style={{marginBottom:12}}>
+        <V5SectionH title={memberFilterId?(financeFilteredMemberName||'Member')+'’s spending':'Where it went'} sub="Tap to filter"/>
       </View>
       {(function(){
         var sorted=Object.keys(catData).map(function(c){return{cat:c,amt:catData[c]||0};}).filter(function(o){return o.amt>0;}).sort(function(a,b){return b.amt-a.amt;});
@@ -8970,11 +8967,11 @@ function FinanceScreen(){
               </View>
               <Text style={{fontFamily:FF.sansSemi,fontSize:13,fontWeight:'600',color:theme.text}}>₹{fmt(row.amt)}</Text>
             </View>
-            <Progress value={pct}/>
+            <V5Progress value={pct}/>
           </TouchableOpacity>;
         });
       })()}
-    </Block>
+    </V5Card>
 
     {/* Phase 6 — "Catch me up" entry: opens StatementUploadModal. Sits above Recent
         as a secondary CTA — primary stays the Capture button below the list. */}
@@ -9013,20 +9010,14 @@ function FinanceScreen(){
     <View style={{flexDirection:'row',gap:6,marginTop:12,marginBottom:6}}>
       {[['all','All'],['manual','Manual'],['statement','From statements']].map(function(pair){
         var sel=sourceFilter===pair[0];
-        return <TouchableOpacity key={'srcf_'+pair[0]} onPress={function(){haptic('light');setSourceFilter(pair[0]);}} style={{
-          paddingHorizontal:12,height:32,borderRadius:9999,
-          alignItems:'center',justifyContent:'center',
-          backgroundColor:sel?theme.primary:'transparent',
-          borderWidth:sel?0:1,borderColor:theme.border,
-        }}><Text style={{fontFamily:fontW(500),fontSize:12,color:sel?'#fff':theme.textSecondary}}>{pair[1]}</Text></TouchableOpacity>;
+        return <V5Chip key={'srcf_'+pair[0]} selected={sel} onPress={function(){haptic('light');setSourceFilter(pair[0]);}}>{pair[1]}</V5Chip>;
       })}
     </View>
 
     {/* Recent transactions — top 5 */}
-    <Block style={{padding:0,marginTop:6,overflow:'hidden'}}>
-      <View style={{paddingHorizontal:16,paddingTop:14,paddingBottom:8,flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Recent</Text>
-        <Caps color={theme.primary}>{filteredMonthTxs.length} this month</Caps>
+    <V5Card padding={0} style={{marginTop:6,overflow:'hidden'}}>
+      <View style={{paddingHorizontal:16,paddingTop:14,paddingBottom:8}}>
+        <V5SectionH title="Recent" sub={filteredMonthTxs.length+' this month'}/>
       </View>
       {filteredMonthTxs.slice(0,5).map(function(t){
         var isInc=t.category==='Income';
@@ -9038,7 +9029,7 @@ function FinanceScreen(){
         var slot=SLOTS[slotIdx%5]||SLOTS[0];
         var cc=CATS[t.category]||CATS.Uncat;
         return <View key={t.id} style={{flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:16,paddingVertical:12,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.border}}>
-          <Avatar name={t.memberName||'?'} color={slot.bg} size={32}/>
+          <V5Avatar name={t.memberName||'?'} color={slot.bg} size={32}/>
           <View style={{flex:1,minWidth:0}}>
             <View style={{flexDirection:'row',alignItems:'baseline',gap:6,flexWrap:'wrap'}}>
               <Text numberOfLines={1} style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text,flexShrink:1}}>{t.merchant}</Text>
@@ -9049,7 +9040,7 @@ function FinanceScreen(){
             </View>
             <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:4}}>
               <Pill bg={cc.bg} fg={cc.text}>{t.category||'Uncat'}</Pill>
-              <Caps color={theme.muted}>{displayDate(t.date)}</Caps>
+              <V5Caps color={theme.muted}>{displayDate(t.date)}</V5Caps>
             </View>
           </View>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,letterSpacing:-0.2,color:isInc?theme.primary:(isNonSpend?theme.textSecondary:theme.text)}}>
@@ -9060,32 +9051,32 @@ function FinanceScreen(){
       {filteredMonthTxs.length===0&&<View style={{paddingHorizontal:16,paddingVertical:14,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.border}}>
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted}}>No entries yet. Capture your first below.</Text>
       </View>}
-    </Block>
+    </V5Card>
 
     {/* Capture entry CTA */}
     <View style={{marginTop:14}}>
-      <PrimaryButton full onPress={function(){setShowTx(true);}}>+ Capture expense or income</PrimaryButton>
+      <V5Button variant="primary" full onPress={function(){setShowTx(true);}}>+ Capture expense or income</V5Button>
     </View>
 
-    {income===0&&<Block bg={theme.accentLight} style={{marginTop:10,borderLeftWidth:3,borderLeftColor:theme.accent,borderRadius:16,padding:14}}>
+    {income===0&&<View style={{backgroundColor:theme.accentLight,marginTop:10,borderLeftWidth:3,borderLeftColor:theme.accent,borderRadius:16,padding:14}}>
       <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,lineHeight:20}}>Add what you earned first to see what your family saved.</Text>
-    </Block>}
+    </View>}
 
     {/* More details divider */}
     <View style={{flexDirection:'row',alignItems:'center',marginTop:24,marginBottom:14}}>
       <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
-      <Caps color={theme.muted} style={{marginHorizontal:12}}>More details</Caps>
+      <V5Caps color={theme.muted} style={{marginHorizontal:12}}>More details</V5Caps>
       <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
     </View>
 
     <View style={{flexDirection:'row',gap:8,marginBottom:8}}>
-      <View style={{flex:1}}><SecondaryButton full onPress={function(){setShowFilters(true);}}>Filters</SecondaryButton></View>
+      <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){setShowFilters(true);}}>Filters</V5Button></View>
     </View>
     {unconfirmedRecurringTx.length>0&&<View style={[z.nudge,{marginTop:10,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}> 
       <Text style={[z.txM,{color:theme.text,marginBottom:6}]}>These usually happen — confirm if they did</Text>
       {unconfirmedRecurringTx.slice(0,5).map(function(t){return <View key={t.id} style={[z.row,{justifyContent:'space-between',alignItems:'center',marginBottom:6}]}> 
         <View style={{flex:1,paddingRight:8}}><Text style={[z.body,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(t.date)} · {'₹'}{fmt(t.amount)}</Text></View>
-        <View style={z.row}><View style={{marginRight:6}}><SecondaryButton onPress={function(){setEditTx(t);}} style={{height:32,paddingHorizontal:10}}>Edit</SecondaryButton></View><PrimaryButton onPress={function(){confirmTransaction(t);}} style={{height:32,paddingHorizontal:10}}>Confirm</PrimaryButton></View>
+        <View style={z.row}><View style={{marginRight:6}}><V5Button variant="secondary" size="sm" onPress={function(){setEditTx(t);}}>Edit</V5Button></View><V5Button variant="primary" size="sm" onPress={function(){confirmTransaction(t);}}>Confirm</V5Button></View>
       </View>;})}
     </View>}
     <Inp label="Search entries" value={searchText} onChangeText={setSearchText} placeholder="Search by what or where"/>
@@ -9103,30 +9094,39 @@ function FinanceScreen(){
     }} style={z.filterChip}><Text style={z.filterChipTx}>{f} ×</Text></TouchableOpacity>;})}</View>}
     <Text style={[z.cap,{marginBottom:8}]}>Showing {filteredMonthTxs.length} of {monthTxs.length} entries</Text>
 
-    <Sec>This month’s entries</Sec>{filteredMonthTxs.slice(0,25).map(function(t){var commentCount=(transactionComments||[]).filter(function(c){return c.transaction_id===t.id;}).length;return<View key={t.id} style={z.txRow}><TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}}><Text style={[z.body,{flex:1}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(t.date)} · {t.memberName||'Joint'}</Text></TouchableOpacity><Text style={[z.fv,{marginRight:8}]}>{'₹'}{fmt(t.amount)}</Text>{t.is_family_spending&&<Text style={[z.cap,{color:'#0F6E56',marginRight:6}]}>👨‍👩‍👧 Family</Text>}<TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){haptic('light');setCatPickTx(t);} else Alert.alert('Read only','Only admin can change other member entries.');}}><CategoryPill label={t.category||'Uncat'}/></TouchableOpacity><TouchableOpacity onPress={function(){setSelectedTxForComments(t);}} style={z.editBtn}><Text style={z.editTx}>💬</Text>{commentCount>0&&<View style={z.commentCountBadge}><Text style={z.commentCountTx}>{commentCount}</Text></View>}</TouchableOpacity><TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity><TouchableOpacity onPress={function(){deleteTx(t);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity></View>;})}
+    <View style={{marginTop:18,marginBottom:10}}>
+      <V5SectionH title="This month’s entries"/>
+    </View>{filteredMonthTxs.slice(0,25).map(function(t){var commentCount=(transactionComments||[]).filter(function(c){return c.transaction_id===t.id;}).length;return<View key={t.id} style={z.txRow}><TouchableOpacity style={{flex:1}} onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}}><Text style={[z.body,{flex:1}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{displayDate(t.date)} · {t.memberName||'Joint'}</Text></TouchableOpacity><Text style={[z.fv,{marginRight:8}]}>{'₹'}{fmt(t.amount)}</Text>{t.is_family_spending&&<Text style={[z.cap,{color:'#0F6E56',marginRight:6}]}>👨‍👩‍👧 Family</Text>}<TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){haptic('light');setCatPickTx(t);} else Alert.alert('Read only','Only admin can change other member entries.');}}><CategoryPill label={t.category||'Uncat'}/></TouchableOpacity><TouchableOpacity onPress={function(){setSelectedTxForComments(t);}} style={z.editBtn}><Text style={z.editTx}>💬</Text>{commentCount>0&&<View style={z.commentCountBadge}><Text style={z.commentCountTx}>{commentCount}</Text></View>}</TouchableOpacity><TouchableOpacity onPress={function(){if(canModifyMemberData(isAdmin,members,userId,t.memberId)){setEditTx(t);} else Alert.alert('Read only','Only admin can edit other member entries.');}} style={z.editBtn}><Text style={z.editTx}>✎</Text></TouchableOpacity><TouchableOpacity onPress={function(){deleteTx(t);}} style={z.editBtn}><Text style={[z.editTx,{color:'#E24B4A'}]}>🗑</Text></TouchableOpacity></View>;})}
     {filteredMonthTxs.length===0&&<Text style={[z.cap,{color:theme.muted}]}>Nothing matches those filters.</Text>}
-    <Sec>What you’re building toward</Sec>{[].concat((financeGoals||[]).map(function(g){var gt=(g.goal_type||((g.is_shared||g.goal_scope==='shared')?'shared':'personal'));return{kind:gt==='shared'?'shared':'personal',id:g.id,name:g.name,current:Number(g.current||0),target:Number(g.target||0),category:g.category||'General',raw:g,source:'goals'};}),(financeSharedGoals||[]).map(function(g){return{kind:'shared',id:g.id,name:g.goal_name,current:Number(g.current_amount||0),target:Number(g.target_amount||0),category:g.category||'General',raw:g,source:'shared_goals'};})).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return<TouchableOpacity key={g.kind+'-'+g.source+'-'+g.id} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]} onPress={function(){if(g.kind==='personal'){setEditGoal(g.raw);}else{setActiveSharedGoal(g.raw);setShowSharedGoalModal(true);}}} onLongPress={function(){if(g.kind==='shared'){haptic('medium');setGoalQuickAdd(g);}}} delayLongPress={350}><View style={[z.row,{justifyContent:'space-between',alignItems:'center'}]}><View style={{flex:1,paddingRight:8}}><View style={[z.row,{alignItems:'center',flexWrap:'wrap'}]}><Text style={[z.txM,{color:theme.text}]}>{g.name}</Text>{g.kind==='shared'&&<View style={z.goalFamilyBadge}><Text style={z.goalFamilyBadgeTx}>Family</Text></View>}{g.kind==='personal'&&<View style={[z.goalFamilyBadge,{backgroundColor:'#F2F2EE'}]}><Text style={[z.goalFamilyBadgeTx,{color:'#555'}]}>Personal</Text></View>}</View><Text style={[z.cap,{marginTop:4}]}>{g.category||'General'}</Text></View><Text style={[z.fv,{color:g.kind==='shared'?'#0F6E56':'#BA7517'}]}>{Math.min(pct,999)}%</Text></View><Text style={[z.cap,{marginVertical:6}]}>{fmt(g.current)} / {fmt(g.target)} progress</Text><Bar pct={Math.min(pct,100)} color={g.kind==='shared'?'#0F6E56':'#EF9F27'}/><Text style={[z.cap,{marginTop:4}]}>{g.kind==='shared'?'Tap to edit · Long-press to add a contribution':'Tap to edit goal'}</Text></TouchableOpacity>;})}
+    <View style={{marginTop:18,marginBottom:10}}>
+      <V5SectionH title="What you’re building toward"/>
+    </View>
+    {[].concat((financeGoals||[]).map(function(g){var gt=(g.goal_type||((g.is_shared||g.goal_scope==='shared')?'shared':'personal'));return{kind:gt==='shared'?'shared':'personal',id:g.id,name:g.name,current:Number(g.current||0),target:Number(g.target||0),category:g.category||'General',raw:g,source:'goals'};}),(financeSharedGoals||[]).map(function(g){return{kind:'shared',id:g.id,name:g.goal_name,current:Number(g.current_amount||0),target:Number(g.target_amount||0),category:g.category||'General',raw:g,source:'shared_goals'};})).map(function(g){var pct=g.target>0?Math.round((g.current/g.target)*100):0;return<TouchableOpacity key={g.kind+'-'+g.source+'-'+g.id} onPress={function(){if(g.kind==='personal'){setEditGoal(g.raw);}else{setActiveSharedGoal(g.raw);setShowSharedGoalModal(true);}}} onLongPress={function(){if(g.kind==='shared'){haptic('medium');setGoalQuickAdd(g);}}} delayLongPress={350}><V5Card style={{marginBottom:8}}><View style={[z.row,{justifyContent:'space-between',alignItems:'center'}]}><View style={{flex:1,paddingRight:8}}><View style={[z.row,{alignItems:'center',flexWrap:'wrap'}]}><Text style={[z.txM,{color:theme.text}]}>{g.name}</Text>{g.kind==='shared'&&<View style={z.goalFamilyBadge}><Text style={z.goalFamilyBadgeTx}>Family</Text></View>}{g.kind==='personal'&&<View style={[z.goalFamilyBadge,{backgroundColor:'#F2F2EE'}]}><Text style={[z.goalFamilyBadgeTx,{color:'#555'}]}>Personal</Text></View>}</View><Text style={[z.cap,{marginTop:4}]}>{g.category||'General'}</Text></View><Text style={[z.fv,{color:g.kind==='shared'?'#0F6E56':'#BA7517'}]}>{Math.min(pct,999)}%</Text></View><Text style={[z.cap,{marginVertical:6}]}>{fmt(g.current)} / {fmt(g.target)} progress</Text><V5Progress value={Math.min(pct,100)} color={g.kind==='shared'?'#0F6E56':'#EF9F27'}/><Text style={[z.cap,{marginTop:4}]}>{g.kind==='shared'?'Tap to edit · Long-press to add a contribution':'Tap to edit goal'}</Text></V5Card></TouchableOpacity>;})}
     {((financeGoals||[]).length===0&&(financeSharedGoals||[]).length===0)&&<Text style={[z.cap,{color:theme.muted}]}>No money goals yet. The first one starts below.</Text>}
-    <View style={{alignSelf:'flex-start'}}><PrimaryButton onPress={function(){setGoalContext('Finance');setShowGoal(true);}}>+ New money goal</PrimaryButton></View>
+    <View style={{alignSelf:'flex-start'}}><V5Button variant="primary" onPress={function(){setGoalContext('Finance');setShowGoal(true);}}>+ New money goal</V5Button></View>
 
     {(recurringSubscriptions||[]).length>0?<View>
-      <Sec>Monthly recurring</Sec>
+      <View style={{marginTop:18,marginBottom:10}}>
+        <V5SectionH title="Monthly recurring"/>
+      </View>
       <Text style={[z.cap,{color:theme.muted,marginBottom:8}]}>We watch for monthly outflows that look like subscriptions. Tap 'Not recurring' if we got it wrong.</Text>
       {(recurringSubscriptions||[]).map(function(s){
         var d=Number(s.median_interval_days||30);
         var freq=d<=10?'weekly':d<=20?'biweekly':d<=45?'monthly':d<=120?'quarterly':'yearly';
-        return <View key={s.id} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8}]}>
+        return <V5Card key={s.id} style={{marginBottom:8}}>
           <View style={[z.row,{justifyContent:'space-between'}]}>
             <Text style={[z.txM,{color:theme.text,flex:1,paddingRight:8}]}>{s.display_name}</Text>
             <Text style={[z.fv,{color:theme.text}]}>{'₹'}{fmt(s.median_amount||0)}</Text>
           </View>
           <Text style={[z.cap,{color:theme.muted}]}>{freq} · seen {s.occurrence_count||0} times · confidence {Math.round((s.confidence||0)*100)}%</Text>
           <TouchableOpacity style={{marginTop:8,alignSelf:'flex-start'}} onPress={function(){dismissRecurringSubscription&&dismissRecurringSubscription(s.id);}}><Text style={[z.cap,{color:'#E24B4A',fontWeight:'500'}]}>Not recurring</Text></TouchableOpacity>
-        </View>;
+        </V5Card>;
       })}
     </View>:<Text style={[z.cap,{color:theme.muted}]}>No recurring subscriptions detected yet. We watch your spending patterns over a few months and surface what looks like monthly outflows here.</Text>}
 
-    <Sec>Repeating entries</Sec>
+    <View style={{marginTop:18,marginBottom:10}}>
+      <V5SectionH title="Repeating entries"/>
+    </View>
     {(recurringTransactions||[]).map(function(r){
       var days=Math.floor((startOfDay(r.next_due_date)-startOfDay(new Date()))/86400000);
       var dueSoon=days>=0&&days<=7;
@@ -9138,11 +9138,13 @@ function FinanceScreen(){
           var stub={id:null,merchant:r.description,amount:r.amount,category:r.category||'',date:r.next_due_date,recurring_transaction_id:r.id};
           setEditTx(stub);
         }
-      }} style={[z.card,{backgroundColor:theme.card,borderColor:theme.border,marginBottom:8,borderColor:dueSoon?'#BA7517':'#E0E0DB'}]}> 
+      }}>
+      <V5Card style={{marginBottom:8,borderColor:dueSoon?'#BA7517':theme.hairline,borderWidth:dueSoon?1:StyleSheet.hairlineWidth}}>
       <View style={[z.row,{justifyContent:'space-between'}]}><Text style={[z.txM,{color:theme.text}]}>{r.description}</Text><Text style={[z.fv,{color:theme.text}]}>₹{fmt(r.amount)}</Text></View>
       <Text style={[z.cap,{color:theme.muted}]}>{r.transaction_type} · {r.frequency} · Next due {displayDate(r.next_due_date)}</Text>
       {dueSoon&&<Text style={[z.cap,{color:'#BA7517',marginTop:4,fontWeight:'500'}]}>Due in {days} day{days===1?'':'s'}</Text>}
       <TouchableOpacity style={{marginTop:8,alignSelf:'flex-start'}} onPress={function(){deactivateRecurring(r);}}><Text style={[z.cap,{color:'#E24B4A',fontWeight:'500'}]}>Disable</Text></TouchableOpacity>
+      </V5Card>
     </TouchableOpacity>;})}
     {(!recurringTransactions||recurringTransactions.length===0)&&<Text style={[z.cap,{color:theme.muted}]}>No recurring entries yet. Enable it when adding a transaction.</Text>}
     <View style={{height:32}}/></ScrollView></View>);
