@@ -19,7 +19,7 @@ import { GestureHandlerRootView, PanGestureHandler, State as GHState } from 'rea
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { PieChart, BarChart, LineChart } from 'react-native-chart-kit';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { supabase, EDGE_MEAL, EDGE_NUDGE, EDGE_UPDATE_PORTION, EDGE_PARSE_STATEMENT, EDGE_FINALIZE_STATEMENT, SUPABASE_ANON_KEY } from './utils/supabaseClient';
 import * as DocumentPicker from 'expo-document-picker';
 import { DB_COLUMNS } from './utils/constants';
@@ -1553,6 +1553,219 @@ function V5CloseX({onPress}){
       <Path d="M2 2l8 8M10 2l-8 8" stroke={theme.text} strokeWidth={1.8} strokeLinecap="round"/>
     </Svg>
   </V5IconBtn>;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v5 ATOMS — Saturated Forest (Part 3/3 · Composite)
+// Source: _design/handoff-v5/fr/atoms.jsx
+// ═══════════════════════════════════════════════════════════════
+
+// ─── V5Card ──────────────────────────────────────────────
+// One structural shape, seven tones. 24px radius, 18px padding default,
+// 0.5px hairline border on surface/sunk/elevated tones, no border on
+// primary/accent tones. NOTE: RN doesn't cascade text color through
+// View — for tone='primary' / 'accent' callers must set the child Text
+// color manually to theme.onPrimary / theme.onAccent.
+function V5Card({children,tone,padding,radius,border,style}){
+  var theme=useThemeColors();
+  var t=tone||'surface';
+  var pad=padding!=null?padding:18;
+  var rad=radius!=null?radius:24;
+  var bg=theme.surface,bd=theme.hairline,bw=StyleSheet.hairlineWidth;
+  if(t==='sunk'){bg=theme.surfaceSunk;bd=theme.hairlineSoft;}
+  else if(t==='elevated'){bg=theme.surfaceElevated;bd=theme.hairlineSoft;}
+  else if(t==='primary'){bg=theme.primary;bw=0;}
+  else if(t==='primary-soft'){bg=theme.primarySoft;bw=0;}
+  else if(t==='accent'){bg=theme.accent;bw=0;}
+  else if(t==='accent-soft'){bg=theme.accentSoft;bw=0;}
+  if(border===false){bw=0;}
+  return <View style={[{
+    backgroundColor:bg,borderRadius:rad,padding:pad,
+    borderWidth:bw,borderColor:bd,
+  },style]}>{children}</View>;
+}
+
+// ─── V5Stat ──────────────────────────────────────────────
+// Caps label + 24px tabular num + sub line, on a 20-radius bg with
+// 16px padding. Tones: surface (default), sunk, elevated, primary,
+// primary-soft, accent-soft.
+function V5Stat({label,value,suffix,prefix,sub,tone,style}){
+  var theme=useThemeColors();
+  var t=tone||'surface';
+  var bg,fg=theme.text,lc=theme.muted,sc=theme.textSecondary;
+  if(t==='sunk'){bg=theme.surfaceSunk;}
+  else if(t==='elevated'){bg=theme.surfaceElevated;}
+  else if(t==='primary-soft'){bg=theme.primarySoft;fg=theme.primary;lc=theme.primary;}
+  else if(t==='accent-soft'){bg=theme.accentSoft;fg=theme.accentDeep;lc=theme.accent;}
+  else if(t==='primary'){bg=theme.primary;fg=theme.onPrimary;lc=theme.onPrimary+'B3';sc=theme.onPrimary+'B3';}
+  else {bg=theme.surface;}
+  var hasBorder=t!=='primary'&&t!=='accent';
+  return <View style={[{
+    backgroundColor:bg,
+    borderWidth:hasBorder?StyleSheet.hairlineWidth:0,borderColor:theme.hairlineSoft,
+    borderRadius:20,padding:16,
+  },style]}>
+    <V5Caps color={lc}>{label}</V5Caps>
+    <View style={{flexDirection:'row',alignItems:'baseline',marginTop:6}}>
+      {prefix?<Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:14,color:fg,opacity:0.85,marginRight:2}}>{prefix}</Text>:null}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:24,letterSpacing:-0.8,color:fg,lineHeight:24,fontVariant:['tabular-nums']}}>{value}</Text>
+      {suffix?<Text style={{fontFamily:FF.sansMed,fontWeight:'500',fontSize:12,color:sc,marginLeft:4}}>{suffix}</Text>:null}
+    </View>
+    {sub?<Text style={{fontFamily:FF.sans,fontSize:11,color:sc,marginTop:6,lineHeight:16}}>{sub}</Text>:null}
+  </View>;
+}
+
+// ─── V5EmptyState ────────────────────────────────────────
+// One atom, three sizes. Replaces the 8 ad-hoc empty-state formats
+// catalogued in the AppCore inventory.
+function V5EmptyState({size,title,body,illustration,cta,onCta,secondaryCta,onSecondaryCta}){
+  var theme=useThemeColors();
+  var s=size||'card';
+  if(s==='inline'){
+    return <View style={{paddingVertical:14}}>
+      <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,lineHeight:19}}>{body||title}</Text>
+    </View>;
+  }
+  if(s==='card'){
+    return <V5Card tone="sunk" padding={20}>
+      {title?<Text style={{fontFamily:FF.serif,fontSize:18,fontWeight:'400',color:theme.text,marginBottom:6,letterSpacing:-0.3,lineHeight:23}}>{title}</Text>:null}
+      {body?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,lineHeight:19}}>{body}</Text>:null}
+      {cta?<TouchableOpacity onPress={onCta} style={{marginTop:12,alignSelf:'flex-start'}}>
+        <Text style={{fontFamily:FF.sansBold,fontSize:13,fontWeight:'700',color:theme.primary}}>{cta} →</Text>
+      </TouchableOpacity>:null}
+    </V5Card>;
+  }
+  // fullscreen
+  return <View style={{flex:1,justifyContent:'center',padding:24}}>
+    {illustration?<View style={{marginBottom:24}}>{illustration}</View>:null}
+    {title?<Text style={{fontFamily:FF.serif,fontSize:26,fontWeight:'400',color:theme.text,letterSpacing:-0.6,lineHeight:31,marginBottom:10}}>{title}</Text>:null}
+    {body?<Text style={{fontFamily:FF.sans,fontSize:14,color:theme.textSecondary,lineHeight:22}}>{body}</Text>:null}
+    {(cta||secondaryCta)?<View style={{flexDirection:'row',marginTop:24}}>
+      {cta?<View style={{marginRight:8}}><V5Button variant="primary" onPress={onCta}>{cta}</V5Button></View>:null}
+      {secondaryCta?<V5Button variant="secondary" onPress={onSecondaryCta}>{secondaryCta}</V5Button>:null}
+    </View>:null}
+  </View>;
+}
+
+// ─── V5Toast ─────────────────────────────────────────────
+// Pill-card notification with icon dot + optional title + body.
+// Tones: success (default, primary bg), error (danger bg), info
+// (text-on-bg inverted), soft (surface bg with hairline).
+function V5Toast({tone,title,body}){
+  var theme=useThemeColors();
+  var t=tone||'success';
+  var bg=theme.primary,fg=theme.onPrimary;
+  if(t==='error'){bg=theme.danger;fg='#fff';}
+  else if(t==='info'){bg=theme.text;fg=theme.bg;}
+  else if(t==='soft'){bg=theme.surface;fg=theme.text;}
+  var iconBg=t==='soft'?theme.primary:'rgba(255,255,255,0.18)';
+  var iconFg=t==='soft'?theme.onPrimary:fg;
+  return <View style={{
+    flexDirection:'row',alignItems:'center',alignSelf:'flex-start',
+    paddingVertical:10,paddingLeft:12,paddingRight:14,borderRadius:14,
+    backgroundColor:bg,
+    elevation:4,shadowColor:'#000',shadowOpacity:t==='soft'?0.06:0.16,shadowRadius:8,shadowOffset:{width:0,height:2},
+    borderWidth:t==='soft'?StyleSheet.hairlineWidth:0,borderColor:theme.hairline,
+  }}>
+    <View style={{
+      width:22,height:22,borderRadius:9999,marginRight:10,
+      backgroundColor:iconBg,
+      alignItems:'center',justifyContent:'center',
+    }}>
+      <Text style={{fontFamily:FF.sansBold,fontSize:12,fontWeight:'700',color:iconFg}}>{t==='error'?'!':'✓'}</Text>
+    </View>
+    <View style={{flexShrink:1}}>
+      {title?<Text style={{fontFamily:FF.sansBold,fontSize:13,fontWeight:'700',color:fg,lineHeight:17}}>{title}</Text>:null}
+      {body?<Text style={{fontFamily:FF.sans,fontSize:12,color:fg,opacity:0.78,marginTop:1}}>{body}</Text>:null}
+    </View>
+  </View>;
+}
+
+// ─── V5ListRow ───────────────────────────────────────────
+// Settings / modal list row, 52 tall. hairlineSoft separator on
+// bottom; pass last=true to suppress on final row.
+function V5ListRow({title,detail,leading,trailing,chevron,last,onPress,sub}){
+  var theme=useThemeColors();
+  return <TouchableOpacity disabled={!onPress} onPress={onPress} activeOpacity={onPress?0.7:1} style={{
+    flexDirection:'row',alignItems:'center',minHeight:52,
+    paddingVertical:12,paddingHorizontal:16,
+    borderBottomWidth:last?0:StyleSheet.hairlineWidth,borderBottomColor:theme.hairlineSoft,
+  }}>
+    {leading?<View style={{marginRight:12}}>{leading}</View>:null}
+    <View style={{flex:1,minWidth:0}}>
+      <Text style={{fontFamily:FF.sansMed,fontSize:15,fontWeight:'500',color:theme.text}}>{title}</Text>
+      {sub?<Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,marginTop:2}}>{sub}</Text>:null}
+    </View>
+    {detail?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginLeft:8}}>{detail}</Text>:null}
+    {trailing?<View style={{marginLeft:8}}>{trailing}</View>:null}
+    {chevron?<Svg width={7} height={12} viewBox="0 0 7 12" fill="none" style={{marginLeft:8}}>
+      <Path d="M1 1l5 5-5 5" stroke={theme.muted} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"/>
+    </Svg>:null}
+  </TouchableOpacity>;
+}
+
+// ─── V5TabIcon ───────────────────────────────────────────
+// SVG line icons for the 5 tabs (different geometries from the
+// existing TabIcon — these are the v5 set).
+function V5TabIcon({name,color}){
+  var s=22;
+  var sw=1.6;
+  if(name==='home')return <Svg width={s} height={s} viewBox="0 0 22 22" fill="none">
+    <Path d="M3 9.5L11 3l8 6.5V18a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 013 18V9.5z" stroke={color} strokeWidth={sw} strokeLinejoin="round"/>
+    <Path d="M8.5 19.5v-5.2a1 1 0 011-1h3a1 1 0 011 1v5.2" stroke={color} strokeWidth={sw} strokeLinejoin="round"/>
+  </Svg>;
+  if(name==='family')return <Svg width={s} height={s} viewBox="0 0 22 22" fill="none">
+    <Circle cx={7} cy={8} r={3} stroke={color} strokeWidth={sw}/>
+    <Circle cx={15} cy={8} r={3} stroke={color} strokeWidth={sw}/>
+    <Path d="M2 19c0-2.5 2.2-4.5 5-4.5S12 16.5 12 19" stroke={color} strokeWidth={sw} strokeLinecap="round"/>
+    <Path d="M10 19c0-2.5 2.2-4.5 5-4.5S20 16.5 20 19" stroke={color} strokeWidth={sw} strokeLinecap="round"/>
+  </Svg>;
+  if(name==='finance')return <Svg width={s} height={s} viewBox="0 0 22 22" fill="none">
+    <Rect x={3} y={6} width={16} height={11} rx={2.5} stroke={color} strokeWidth={sw}/>
+    <Path d="M3 10h16" stroke={color} strokeWidth={sw}/>
+    <Circle cx={15.5} cy={13.5} r={1} fill={color}/>
+  </Svg>;
+  if(name==='wellness')return <Svg width={s} height={s} viewBox="0 0 22 22" fill="none">
+    <Path d="M11 19s-6.5-4.2-6.5-9A4 4 0 018.5 6c1.1 0 1.9.5 2.5 1.3.6-.8 1.4-1.3 2.5-1.3A4 4 0 0117.5 10c0 4.8-6.5 9-6.5 9z" stroke={color} strokeWidth={sw} strokeLinejoin="round"/>
+  </Svg>;
+  if(name==='reflect')return <Svg width={s} height={s} viewBox="0 0 22 22" fill="none">
+    <Circle cx={11} cy={11} r={7.5} stroke={color} strokeWidth={sw}/>
+    <Path d="M11 3.5c-4 0-7.5 3.4-7.5 7.5" stroke={color} strokeWidth={sw} strokeLinecap="round" opacity={0.4}/>
+    <Circle cx={11} cy={11} r={2} fill={color}/>
+  </Svg>;
+  return null;
+}
+
+// ─── V5TabBar ────────────────────────────────────────────
+// Bottom 5-tab nav: Home / Family / Finance / Wellness / Reflect.
+// (Tab order matches the design canvas — note Family is 2nd, not
+// the current app's 3rd-position default.)
+function V5TabBar({active,onChange}){
+  var theme=useThemeColors();
+  var insets=useSafeAreaInsets();
+  var tabs=[
+    {id:'home',label:'Home'},
+    {id:'family',label:'Family'},
+    {id:'finance',label:'Finance'},
+    {id:'wellness',label:'Wellness'},
+    {id:'reflect',label:'Reflect'},
+  ];
+  return <View style={{
+    borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:theme.hairline,
+    backgroundColor:theme.surface,
+    paddingTop:8,paddingBottom:6+(insets.bottom||0),paddingHorizontal:4,
+    flexDirection:'row',justifyContent:'space-around',
+  }}>
+    {tabs.map(function(t){
+      var a=active===t.id;
+      return <TouchableOpacity key={t.id} onPress={function(){onChange&&onChange(t.id);}} activeOpacity={0.7} style={{
+        flex:1,alignItems:'center',paddingVertical:5,
+      }}>
+        <V5TabIcon name={t.id} color={a?theme.primary:theme.muted}/>
+        <Text style={{fontFamily:a?FF.sansBold:FF.sansSemi,fontSize:10,fontWeight:a?'700':'600',letterSpacing:0.1,color:a?theme.primary:theme.muted,marginTop:3}}>{t.label}</Text>
+      </TouchableOpacity>;
+    })}
+  </View>;
 }
 
 function MemberStatChip({label,value}){
