@@ -87,10 +87,11 @@ const REFLECTION_RULES = [
   },
   {
     // Bible Section 5: "celebrate actual behaviour, not aspirational behaviour."
-    // We deliberately do NOT compare avgSleepHrs to the user's stated q20 number
-    // from onboarding, because that comparison reads as scolding ("you said you
-    // would..."). The rule fires only when the actual sleep is genuinely short
-    // (< 6h), and the prompt explicitly forbids the comparison.
+    // We deliberately do NOT compare avgSleepHrs to the user's stated
+    // q24_sleep_hours number from onboarding (v2; was q20 in v1), because that
+    // comparison reads as scolding ("you said you would..."). The rule fires
+    // only when the actual sleep is genuinely short (< 6h), and the prompt
+    // explicitly forbids the comparison.
     id: 'p_wellness_sleep_solo',
     domain: 'wellness',
     type: 'pattern',
@@ -229,21 +230,27 @@ const REFLECTION_RULES = [
   },
   {
     // Hot-fix 2026-05-08: this rule was breaking character in production when
-    // q35_purpose was short or non-meaningful (e.g. "finance and wellness").
+    // q35_purpose (v1) was short or non-meaningful (e.g. "finance and wellness").
     // The model would refuse the task and ask the developer for more data.
     // Fixes: (1) only fire when purpose is a real sentence (>= 25 chars),
     // (2) include concrete weekly numbers so the model has data to anchor on,
     // (3) explicit guardrail against the "you said you would" scolding pattern.
+    //
+    // v2 migration: q35_purpose was v1's "Why are you here?" free-text. The v2
+    // equivalent is q10_why_today — "what made you open this app today?". The
+    // intent is the same: a personal stated reason we mirror back. Reads
+    // q10_why_today first with q35_purpose as fallback so the existing v1
+    // user (Dimple) still triggers this rule until they retake under v2.
     id: 'a_purpose_connection',
     domain: 'mindset',
     type: 'aspirational',
     priority: 55,
     trigger: (ctx: any) =>
-      typeof ctx.qData.q35_purpose === 'string'
-      && ctx.qData.q35_purpose.trim().length >= 25
+      typeof (ctx.qData.q10_why_today || ctx.qData.q35_purpose) === 'string'
+      && (ctx.qData.q10_why_today || ctx.qData.q35_purpose).trim().length >= 25
       && ctx.totalThisWeek > 0,
     prompt: (ctx: any) =>
-      `Situation: ${ctx.firstName} once shared their reason for being here: "${ctx.qData.q35_purpose}". This week they spent ₹${fmt(ctx.totalThisWeek)} total${ctx.topCat ? `, mostly on ${ctx.topCat} (₹${fmt(ctx.topCatAmt)})` : ''}${ctx.weeklyMealsLogged ? ` and logged ${ctx.weeklyMealsLogged} meal${ctx.weeklyMealsLogged === 1 ? '' : 's'}` : ''}. Connect one specific thing from this week back to that purpose. Do not say "you said you would" or anything that sounds like calling them out. Personal, grounded, never preachy. One sentence.`,
+      `Situation: ${ctx.firstName} once shared why they opened this app: "${ctx.qData.q10_why_today || ctx.qData.q35_purpose}". This week they spent ₹${fmt(ctx.totalThisWeek)} total${ctx.topCat ? `, mostly on ${ctx.topCat} (₹${fmt(ctx.topCatAmt)})` : ''}${ctx.weeklyMealsLogged ? ` and logged ${ctx.weeklyMealsLogged} meal${ctx.weeklyMealsLogged === 1 ? '' : 's'}` : ''}. Connect one specific thing from this week back to that reason. Do not say "you said you would" or anything that sounds like calling them out. Personal, grounded, never preachy. One sentence.`,
   },
 ]
 

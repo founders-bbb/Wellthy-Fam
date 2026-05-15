@@ -4127,44 +4127,28 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
   }
 
   async function finalizeQuestionnaire(){
-    var questionnaireAnswers={
-      name:normalizeText(qAnswers.q1_name)||null,
-      email:normalizeText(qAnswers.q1_email||'')||null,
-      phone:normalizeText(qAnswers.q1_phone||'')||null,
-      dateOfBirth:qAnswers.q2_dob?isoDate(qAnswers.q2_dob):null,
-      gender:normalizeText(qAnswers.q3_gender||'')||null,
-      height:(function(){
-        if(qAnswers.q18_height_unit==='ft'){
-          var ft=parseNumericAnswer(qAnswers.q18_height_ft);
-          var inch=parseNumericAnswer(qAnswers.q18_height_in)||0;
-          if(ft===null)return null;
-          return Math.round((ft*30.48 + inch*2.54)*10)/10;
-        }
-        return qAnswers.q18_height?Number(qAnswers.q18_height):null;
-      })(),
-      weight:(function(){
-        if(qAnswers.q19_weight_unit==='lbs'){
-          var lbs=parseNumericAnswer(qAnswers.q19_weight);
-          return lbs===null?null:Math.round(lbs*0.45359237*10)/10;
-        }
-        return qAnswers.q19_weight?Number(qAnswers.q19_weight):null;
-      })(),
-      location:normalizeText(qAnswers.q3_location)||null,
-      occupation:normalizeText(qAnswers.q5_occupation)||null,
-      language:normalizeText(qAnswers.q4_language)||null,
-    };
+    // Convert v2 q22/q23 to canonical units (cm / kg) before mirroring to the
+    // users table. height/weight columns are unit-agnostic numerics; we set
+    // height_unit/weight_unit to 'cm'/'kg' so downstream code reads consistent
+    // values. q22_height_unit / q23_weight_unit stay in questionnaire_data
+    // for audit / re-edit purposes.
+    var heightUnit=qAnswers.q22_height_unit||'cm';
+    var weightUnit=qAnswers.q23_weight_unit||'kg';
+    var rawHeight=parseNumericAnswer(qAnswers.q22_height);
+    var rawWeight=parseNumericAnswer(qAnswers.q23_weight);
+    var heightCm=rawHeight===null?null:(heightUnit==='ft'?Math.round(rawHeight*30.48*10)/10:rawHeight);
+    var weightKg=rawWeight===null?null:(weightUnit==='lbs'?Math.round(rawWeight*0.45359237*10)/10:rawWeight);
 
     var submitPayload={
-      name:questionnaireAnswers.name,
-      email:questionnaireAnswers.email,
-      phone:questionnaireAnswers.phone,
-      [DB_COLUMNS.USERS.DOB]:questionnaireAnswers.dateOfBirth,
-      [DB_COLUMNS.USERS.GENDER]:questionnaireAnswers.gender,
-      [DB_COLUMNS.USERS.HEIGHT]:questionnaireAnswers.height,
-      [DB_COLUMNS.USERS.WEIGHT]:questionnaireAnswers.weight,
-      [DB_COLUMNS.USERS.LOCATION]:questionnaireAnswers.location,
-      [DB_COLUMNS.USERS.OCCUPATION]:questionnaireAnswers.occupation,
-      [DB_COLUMNS.USERS.LANGUAGE]:questionnaireAnswers.language,
+      name:normalizeText(qAnswers.q1_name)||null,
+      [DB_COLUMNS.USERS.DOB]:qAnswers.q2_dob?isoDate(qAnswers.q2_dob):null,
+      [DB_COLUMNS.USERS.HEIGHT]:heightCm,
+      [DB_COLUMNS.USERS.WEIGHT]:weightKg,
+      height_unit:'cm',
+      weight_unit:'kg',
+      [DB_COLUMNS.USERS.LOCATION]:normalizeText(qAnswers.q3_location)||null,
+      [DB_COLUMNS.USERS.OCCUPATION]:normalizeText(qAnswers.q5_occupation)||null,
+      [DB_COLUMNS.USERS.LANGUAGE]:normalizeText(qAnswers.q4_language)||null,
       [DB_COLUMNS.USERS.QUESTIONNAIRE_COMPLETED]:true,
       [DB_COLUMNS.USERS.QUESTIONNAIRE_DATA]:qAnswers,
       [DB_COLUMNS.USERS.QUESTIONNAIRE_PENDING]:false,
@@ -7851,7 +7835,7 @@ function LogSleepModal({visible,onClose,initialDate}){
     // Pre-fill hours from this user's last logged sleep, else their q20 target, else 7.
     var lastForMid=defaultMid?(wellness||[]).filter(function(w){return (w.memberId||w.member_id)===defaultMid&&w.sleep_hours!=null;}).sort(function(a,b){return String(b.date).localeCompare(String(a.date));})[0]:null;
     if(lastForMid&&lastForMid.sleep_hours!=null){setHrs(Number(lastForMid.sleep_hours));}
-    else if(userProfile&&userProfile.questionnaire_data&&Number(userProfile.questionnaire_data.q20_sleep_hours)>0){setHrs(Number(userProfile.questionnaire_data.q20_sleep_hours));}
+    else if(userProfile&&userProfile.questionnaire_data&&Number(userProfile.questionnaire_data.q24_sleep_hours)>0){setHrs(Number(userProfile.questionnaire_data.q24_sleep_hours));}
     else{setHrs(7);}
   },[visible,initialDate]);
 
@@ -9262,15 +9246,15 @@ function WellnessScreen(){
   var yesterdayDate=new Date();yesterdayDate.setDate(yesterdayDate.getDate()-1);
   var yesterdayISO=isoDate(yesterdayDate);
   var yesterdayW=wellness.filter(function(w){return w.date===yesterdayISO;});
-  // Sleep target per member: q20_sleep_hours from current user's questionnaire if
-  // available (1–12h range); else 7h (adult default). family_members has no dob
-  // column and role doesn't encode age, so non-current-user members all get 7h.
-  // The user can adjust by tapping "+ Sleep" and saving — the bar reflects the
-  // most-recent value as soon as a sleep row exists.
+  // Sleep target per member: q24_sleep_hours from current user's questionnaire if
+  // available (v2 slider range 4–10h); else 7h (adult default). family_members
+  // has no dob column and role doesn't encode age, so non-current-user members
+  // all get 7h. The user can adjust by tapping "+ Sleep" and saving — the bar
+  // reflects the most-recent value as soon as a sleep row exists.
   function sleepTargetFor(member){
     if(member&&member.userId===userId){
-      var q20=Number(userProfile&&userProfile.questionnaire_data&&userProfile.questionnaire_data.q20_sleep_hours);
-      if(q20>=1&&q20<=12)return q20;
+      var q24=Number(userProfile&&userProfile.questionnaire_data&&userProfile.questionnaire_data.q24_sleep_hours);
+      if(q24>=1&&q24<=12)return q24;
     }
     return 7;
   }
@@ -12850,7 +12834,7 @@ function AppInner(){
     var map={};
     (r.data||[]).forEach(function(u){
       var q=u.questionnaire_data||{};
-      var weightKg=parseWeightKg(u.weight||q.q19_weight,u.weight_unit||q.q19_weight_unit||'kg');
+      var weightKg=parseWeightKg(u.weight||q.q23_weight,u.weight_unit||q.q23_weight_unit||'kg');
       map[u.id]={
         userId:u.id,
         name:u.name||q.q1_name||'',
