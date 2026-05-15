@@ -3703,9 +3703,10 @@ function InviteJoinScreen({onBack,onJoined,initialCode}){
 }
 
 // ═══════════════════════════════════════════════════════════════
-// QUESTIONNAIRE (PHASE 4 FINAL - 38 QUESTIONS)
+// QUESTIONNAIRE — v2 (50 questions / 5 pages)
+// Source: Onboarding_Questionnaire_v2_Spec.md
 // ═══════════════════════════════════════════════════════════════
-var Q_TOTAL_PAGES=7;
+var Q_TOTAL_PAGES=5;
 var Q_LOCATION_OPTIONS=['Bengaluru','Hyderabad','Chennai','Mumbai','Delhi','Kolkata','Pune','Ahmedabad','Jaipur','Lucknow','Kanpur','Nagpur','Indore','Bhopal','Patna','Chandigarh','Coimbatore','Visakhapatnam','Mysuru','Vijayawada','Kochi','Surat','Nashik','Varanasi','Other'];
 var Q_LANGUAGE_OPTIONS=['English','Hindi','Tamil','Telugu','Kannada','Malayalam','Marathi','Gujarati','Punjabi','Bengali','Odia','Urdu','Other'];
 var Q_FAMILY_OPTIONS=['Just me','Partner','Kids','Parents','Extended'];
@@ -3751,56 +3752,74 @@ var Q_QUIT_REASON_OPTIONS=['Too many notifications','It started feeling like eve
 
 function createDefaultQuestionnaireAnswers(){
   return {
+    // ─── Page 1 — Who you are, who you live with ───
     q1_name:'',
     q2_dob:null,
     q3_location:'',
+    q3_neighbourhood:'',
     q4_language:'',
     q5_occupation:'',
-    q6_family:[],
-    q6_children_count:'',
-    q7_passions:[],
+    q6_household:[],
+    q7_kids_stages:[],
+    q8_money_handler:'',
+    q9_income_source:'',
+    q10_why_today:'',
 
-    q8_spending_awareness:'',
-    q9_spending_regret:'',
-    q10_savings_investments:'',
-    q11_has_loans:'',
-    q11_loan_types:[],
-    q12_money_stress:5,
-    q13_spender_type:'',
-    q14_financial_worry:'',
-    q15_goal_1year:'',
-    q16_goal_5year:'',
-    q17_stopping_you:'',
+    // ─── Page 2 — How money moves through your house ───
+    q11_income_band:'',
+    q12_savings_percent:'',
+    q13_savings_vehicles:[],
+    q14_has_loans:'',
+    q14_loan_types:[],
+    q14_emi_percent:'',
+    q15_last_regret:'',
+    q16_money_fight:[],
+    q16_money_fight_other:'',
+    q17_statement_visibility:'',
+    q18_emergency_funding:'',
+    q19_money_stress:5,
+    q20_goal_1year:'',
+    q21_goal_5year:'',
 
-    q18_height:'',
-    q18_height_unit:'cm',
-    q18_height_ft:'',
-    q18_height_in:'',
-    q19_weight:'',
-    q19_weight_unit:'kg',
-    q20_sleep_hours:7,
-    q21_exercise:'',
-    q21_exercise_types:[],
-    q22_protein_awareness:'',
-    q23_water_glasses:8,
-    q24_smoking:'',
-    q25_alcohol:'',
-    q26_health_conditions:'',
-    q26_conditions_list:'',
-    q27_energy_level:5,
+    // ─── Page 3 — The family plate ───
+    q22_height:'',
+    q22_height_unit:'cm',
+    q23_weight:'',
+    q23_weight_unit:'kg',
+    q24_sleep_hours:7,
+    q25_cook:'',
+    q26_family_dinners:'',
+    q27_delivery_frequency:'',
+    q28_protein_beliefs:[],
+    q29_health_conditions:[],
+    q29_conditions_detail:'',
+    q30_smoking:'',
+    q31_alcohol:'',
+    q32_water_glasses:8,
+    q33_food_fix:'',
 
-    q28_screen_time:'',
-    q29_morning_phone:'',
-    q30_social_detox:'',
-    q31_mindfulness:'',
-    q32_mental_exhaustion:'',
-    q33_family_time:3,
-    q34_mental_drain:'',
+    // ─── Page 4 — The phone, the screen, and the room ───
+    q34_screen_time:'',
+    q35_morning_reach:'',
+    q36_phone_at_dinner:'',
+    q37_family_time_daily:'',
+    q38_kids_screen_time:'',
+    q39_unphotographed:'',
+    q40_mental_drain:'',
+    q40_mental_drain_detail:'',
+    q41_mental_exhaustion:'',
+    q42_hardest_time:'',
 
-    q35_purpose:'',
-    q36_looking_for:'',
-    q37_consistency:'',
-    q38_legacy:'',
+    // ─── Page 5 — What you want from this ───
+    q43_first_insight:[],
+    q44_pacing:'',
+    q45_sharing:'',
+    q46_worried_about:'',
+    q47_one_habit:'',
+    q48_one_change:'',
+    q49_quit_reason:[],
+    q49_quit_reason_other:'',
+    q50_anything_else:'',
   };
 }
 
