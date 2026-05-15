@@ -9996,30 +9996,23 @@ function ReflectScreen(){
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
       {/* Header */}
-      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',paddingTop:8,marginBottom:14}}>
-        <View style={{flex:1,marginRight:12}}>
-          <Caps>{new Date().toLocaleString('en-IN',{month:'long',year:'numeric'})}</Caps>
-          <Text style={{fontFamily:FF.serif,fontSize:36,letterSpacing:-1,color:theme.text,marginTop:6,lineHeight:38}}>Reflections</Text>
-        </View>
-        <TouchableOpacity onPress={function(){setShowCalendar(true);}} style={{
-          width:40,height:40,borderRadius:9999,
-          backgroundColor:theme.surfaceElevated,
-          alignItems:'center',justifyContent:'center',
-        }}>
-          <CalendarIcon size={20} color={theme.text}/>
-        </TouchableOpacity>
-      </View>
+      <V5PageTitle
+        kicker={new Date().toLocaleString('en-IN',{month:'long',year:'numeric'})}
+        title="Reflections"
+        serif
+        trailing={<V5IconBtn onPress={function(){setShowCalendar(true);}}><CalendarIcon size={18} color={theme.text}/></V5IconBtn>}
+      />
 
-      {/* Overall reflections banner */}
+      {/* Overall reflections banner — kept inline (no v5 atom for sub-page serif banner) */}
       <Text style={{fontFamily:FF.serif,fontSize:22,letterSpacing:-0.4,color:theme.text,marginTop:8,marginBottom:6}}>Overall reflections</Text>
-      <Caps color={theme.muted} style={{marginBottom:10}}>Patterns across money and wellness</Caps>
+      <V5Caps color={theme.muted} style={{marginBottom:10}}>Patterns across money and wellness</V5Caps>
 
-      {/* Pattern hero — primary block with italic-serif prose + 2 stats */}
-      <Block bg={theme.primary} style={{padding:20}}>
+      {/* Pattern hero — primary card with italic-serif prose + 2 stats */}
+      <V5Card tone="primary" padding={20}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}>
-          <Caps color="rgba(255,255,255,0.7)">The pattern this week</Caps>
+          <V5Caps color="rgba(255,255,255,0.7)">The pattern this week</V5Caps>
           {visibleTodayNudge&&<TouchableOpacity onPress={function(){dismissNudge&&dismissNudge(visibleTodayNudge.id);}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
-            <Caps color="rgba(255,255,255,0.85)">Dismiss</Caps>
+            <V5Caps color="rgba(255,255,255,0.85)">Dismiss</V5Caps>
           </TouchableOpacity>}
         </View>
         <Text style={{fontFamily:FF.serifItalic,fontSize:19,color:'#fff',marginTop:8,lineHeight:25}}>
@@ -10028,42 +10021,42 @@ function ReflectScreen(){
         <View style={{height:StyleSheet.hairlineWidth,backgroundColor:'rgba(255,255,255,0.25)',marginVertical:16}}/>
         <View style={{flexDirection:'row',gap:24}}>
           <View style={{flex:1}}>
-            <Caps color="rgba(255,255,255,0.7)">Days on rhythm</Caps>
+            <V5Caps color="rgba(255,255,255,0.7)">Days on rhythm</V5Caps>
             <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:'#fff',marginTop:4}}>{daysOnRhythm}<Text style={{fontSize:14,fontWeight:'500',color:'rgba(255,255,255,0.7)'}}> / 7</Text></Text>
           </View>
           <View style={{flex:1}}>
-            <Caps color="rgba(255,255,255,0.7)">Streak</Caps>
+            <V5Caps color="rgba(255,255,255,0.7)">Streak</V5Caps>
             <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:'#fff',marginTop:4}}>{personalStreak}<Text style={{fontSize:14,fontWeight:'500',color:'rgba(255,255,255,0.7)'}}> {personalStreak===1?'day':'days'}</Text></Text>
           </View>
         </View>
-      </Block>
+      </V5Card>
 
-      {/* Finance banner */}
+      {/* Finance banner — kept inline */}
       <Text style={{fontFamily:FF.serif,fontSize:22,letterSpacing:-0.4,color:theme.text,marginTop:24,marginBottom:6}}>Reflections on Finance</Text>
-      <Caps color={theme.muted} style={{marginBottom:10}}>How money has been moving this month</Caps>
+      <V5Caps color={theme.muted} style={{marginBottom:10}}>How money has been moving this month</V5Caps>
 
       {/* Savings hero */}
       <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setTrendModal({kind:'spend'});}}>
-        <Block style={{padding:20}}>
-          <Hero label="Saved this month" prefix="₹" value={fmt(Math.max(savedThisMonth,0))} size={36} accent={theme.primary}/>
+        <V5Card padding={20}>
+          <V5Hero label="Saved this month" prefix="₹" value={fmt(Math.max(savedThisMonth,0))} size={36} color={theme.primary}/>
           <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:14,lineHeight:20}}>
             {monthIncome>0?savingsRate+'% of your earnings · tap for full trend':'Add some income to see your savings rate · tap for full trend'}
           </Text>
-        </Block>
+        </V5Card>
       </TouchableOpacity>
 
-      {/* Wellness banner */}
+      {/* Wellness banner — kept inline */}
       <Text style={{fontFamily:FF.serif,fontSize:22,letterSpacing:-0.4,color:theme.text,marginTop:24,marginBottom:6}}>Reflections on Wellness</Text>
-      <Caps color={theme.muted} style={{marginBottom:10}}>What your bodies have been telling you</Caps>
+      <V5Caps color={theme.muted} style={{marginBottom:10}}>What your bodies have been telling you</V5Caps>
 
-      {/* Protein hero */}
+      {/* Protein hero — translucent accentLight bg preserved via style override (decision: hold solid accent-soft for a later cross-screen pass) */}
       <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setTrendModal({kind:'protein'});}}>
-        <Block bg={theme.accentLight} style={{padding:20}}>
-          <Hero label="Family avg protein" value={familyAvgProtein+'g'} suffix="/ day" size={36} accent={theme.accent}/>
+        <V5Card padding={20} border={false} style={{backgroundColor:theme.accentLight}}>
+          <V5Hero label="Family avg protein" value={familyAvgProtein+'g'} suffix="/ day" size={36} color={theme.accent}/>
           <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:14,lineHeight:20}}>
             Across {familySize} member{familySize===1?'':'s'} · last 7 days · tap for full trend
           </Text>
-        </Block>
+        </V5Card>
       </TouchableOpacity>
 
       {/* Member chip strip — drill into one member's reflections. Top hero cards stay aggregate.
@@ -10087,10 +10080,9 @@ function ReflectScreen(){
       </View>
 
       {/* Phase B5: Activity this week — per-member minutes total, sorted descending. Mirrors Protein this week pattern. */}
-      <Block style={{marginTop:12,padding:16}}>
-        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-          <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>Activity this week</Text>
-          <Caps>min · last 7 days</Caps>
+      <V5Card style={{marginTop:12}} padding={16}>
+        <View style={{marginBottom:12}}>
+          <V5SectionH title="Activity this week" sub="min · last 7 days"/>
         </View>
         {(function(){
           var rows=(members||[]).map(function(m){
@@ -10098,38 +10090,38 @@ function ReflectScreen(){
             return{member:m,minutes:mins};
           }).sort(function(a,b){return b.minutes-a.minutes;});
           var hasAny=rows.some(function(r){return r.minutes>0;});
-          if(!hasAny)return <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,paddingVertical:6}}>No activity logged this week. Walks, workouts, yoga — they all count.</Text>;
+          if(!hasAny)return <V5EmptyState size="inline" body="No activity logged this week. Walks, workouts, yoga — they all count."/>;
           var maxMins=rows.reduce(function(mx,r){return Math.max(mx,r.minutes);},1);
           return rows.map(function(r,i,arr){
             var pct=Math.round((r.minutes/Math.max(maxMins,1))*100);
             return <View key={'aw_'+r.member.id} style={{marginBottom:i<arr.length-1?12:0}}>
               <View style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:6}}>
-                <Avatar name={r.member.name||'?'} color={SLOTS[i%5].bg} size={22}/>
+                <V5Avatar name={r.member.name||'?'} color={SLOTS[i%5].bg} size={22}/>
                 <Text style={{flex:1,fontFamily:FF.sans,fontSize:14,fontWeight:'500',color:theme.text}}>{r.member.name}</Text>
                 <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:13,color:r.minutes>0?theme.primary:theme.muted}}>{r.minutes} min</Text>
               </View>
-              <Progress value={pct} color={r.minutes>0?theme.primary:theme.surfaceElevated}/>
+              <V5Progress value={pct} color={r.minutes>0?theme.primary:theme.surfaceElevated}/>
             </View>;
           });
         })()}
-      </Block>
+      </V5Card>
 
       {/* Reflect now CTA */}
       <View style={{marginTop:20}}>
-        <PrimaryButton full onPress={generateNow}>Reflect now</PrimaryButton>
+        <V5Button variant="primary" full onPress={generateNow}>Reflect now</V5Button>
       </View>
 
       {/* More details divider */}
       <View style={{flexDirection:'row',alignItems:'center',marginTop:32,marginBottom:14}}>
         <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
-        <Caps color={theme.muted} style={{marginHorizontal:12}}>More details</Caps>
+        <V5Caps color={theme.muted} style={{marginHorizontal:12}}>More details</V5Caps>
         <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
       </View>
 
       {/* How the week went */}
-      <Block style={{padding:16}}>
+      <V5Card padding={16}>
         <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setSelectedDate(new Date());setCurrentMonth(startOfDay(new Date()));}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'baseline',marginBottom:14}}>
-          <Caps>Average daily completeness</Caps>
+          <V5Caps>Average daily completeness</V5Caps>
           <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.8,color:theme.text}}>{weeklyAvg}<Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}>%</Text></Text>
         </TouchableOpacity>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-end',height:90}}>
@@ -10139,68 +10131,70 @@ function ReflectScreen(){
             var barColor=w.percent>=100?theme.primary:w.percent>=50?theme.accent:theme.danger;
             return <TouchableOpacity key={w.date} activeOpacity={0.7} onPress={function(){haptic('light');setSelectedDate(barDate);setDayDetailDate(barDate);setShowDayDetail(true);}} style={{flex:1,alignItems:'center'}}>
               <View style={{height:Math.max((w.percent/100)*70,4),width:'70%',borderRadius:6,backgroundColor:barColor}}/>
-              <Caps color={theme.muted} size={9} ls={0.4} style={{marginTop:6}}>{['M','T','W','T','F','S','S'][i]}</Caps>
+              <V5Caps color={theme.muted} style={{marginTop:6,fontSize:9,letterSpacing:0.4}}>{['M','T','W','T','F','S','S'][i]}</V5Caps>
             </TouchableOpacity>;
           })}
         </View>
-      </Block>
+      </V5Card>
 
       {/* Past reflections */}
-      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:8}}>Past reflections</Text>
+      <View style={{marginTop:22,marginBottom:8}}>
+        <V5SectionH title="Past reflections"/>
+      </View>
       <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
-        <View style={{flex:1}}><SecondaryButton full onPress={function(){setHistoryOpen(true);}}>{selectedHistoryDate?selectedHistoryDate:'Filter by date'}</SecondaryButton></View>
-        {selectedHistoryDate?<View style={{flex:0.6}}><SecondaryButton full onPress={function(){setSelectedHistoryDate('');}}>Clear</SecondaryButton></View>:null}
+        <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){setHistoryOpen(true);}}>{selectedHistoryDate?selectedHistoryDate:'Filter by date'}</V5Button></View>
+        {selectedHistoryDate?<View style={{flex:0.6}}><V5Button variant="secondary" full onPress={function(){setSelectedHistoryDate('');}}>Clear</V5Button></View>:null}
       </View>
       <ModalSheet visible={historyOpen} title="Choose date" onClose={function(){setHistoryOpen(false);}}>
         <DateField label="Reflection date" value={selectedHistoryDate?new Date(selectedHistoryDate):new Date()} onChange={function(d){setSelectedHistoryDate(isoDate(d));setHistoryOpen(false);}} maximumDate={new Date()}/>
-        <SecondaryButton full onPress={function(){setHistoryOpen(false);}}>Done</SecondaryButton>
+        <V5Button variant="secondary" full onPress={function(){setHistoryOpen(false);}}>Done</V5Button>
       </ModalSheet>
       {historyList.slice(0,10).map(function(n){
-        return <Block key={n.id} style={{padding:14,marginBottom:8}}>
+        return <V5Card key={n.id} padding={14} style={{marginBottom:8}}>
           <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
-            <Caps style={{flex:1,marginRight:8}}>{n.domain||'general'} · {displayDate(n.sent_at)}</Caps>
+            <V5Caps style={{flex:1,marginRight:8}}>{n.domain||'general'} · {displayDate(n.sent_at)}</V5Caps>
             <TouchableOpacity onPress={function(){dismissNudge&&dismissNudge(n.id);}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
-              <Caps color={theme.accent}>Dismiss</Caps>
+              <V5Caps color={theme.accent}>Dismiss</V5Caps>
             </TouchableOpacity>
           </View>
           <Text style={{fontFamily:FF.sans,fontSize:14,color:theme.text,lineHeight:20}}>{n.nudge_text}</Text>
-        </Block>;
+        </V5Card>;
       })}
-      {historyList.length===0&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>No reflections for this date.</Text>}
+      {historyList.length===0&&<V5EmptyState size="inline" body="No reflections for this date."/>}
 
       {/* What you spend on */}
-      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:8}}>{memberFilterId?(reflectFilteredMemberName||'Member')+'’s spending':'What you spend on'}</Text>
+      <View style={{marginTop:22,marginBottom:8}}>
+        <V5SectionH title={memberFilterId?(reflectFilteredMemberName||'Member')+'’s spending':'What you spend on'}/>
+      </View>
       <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
         {['week','month','quarter'].map(function(p){
           var sel=analyticsPeriod===p;
-          return <TouchableOpacity key={p} style={[z.chip,sel&&z.chipSel]} onPress={function(){haptic('light');setAnalyticsPeriod(p);}}>
-            <Text style={[z.chipTx,sel&&z.chipSelTx]}>{p}</Text>
-          </TouchableOpacity>;
+          return <V5Chip key={p} selected={sel} onPress={function(){haptic('light');setAnalyticsPeriod(p);}}>{p}</V5Chip>;
         })}
       </View>
-      {pieData.length>0?<Block style={{padding:14}}>
+      {pieData.length>0?<V5Card padding={14}>
         <PieChart data={pieData} width={Math.min(Dimensions.get('window').width-56,340)} height={170} accessor="amount" backgroundColor="transparent" paddingLeft="8" chartConfig={{color:function(){return theme.text;}}}/>
-      </Block>:<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>No spending data for selected period.</Text>}
+      </V5Card>:<V5EmptyState size="inline" body="No spending data for selected period."/>}
 
       {/* Daily spend bars */}
-      <Block style={{padding:14,marginTop:10}}>
-        <Caps>What was spent each day this week</Caps>
+      <V5Card padding={14} style={{marginTop:10}}>
+        <V5Caps>What was spent each day this week</V5Caps>
         <BarChart data={{labels:days.map(function(d){return d.label;}),datasets:[{data:days.map(function(d){return d.value;})}]}} width={Math.min(Dimensions.get('window').width-56,340)} height={180} fromZero yAxisLabel="₹" withInnerLines={false} showBarTops={false} chartConfig={{backgroundGradientFrom:theme.surface,backgroundGradientTo:theme.surface,decimalPlaces:0,color:function(){return theme.primary;},labelColor:function(){return theme.textSecondary;},propsForBackgroundLines:{strokeWidth:0,stroke:'transparent'}}} style={{marginTop:8,borderRadius:8}}/>
         <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:4}}>
           {days.map(function(d,i){
             return <TouchableOpacity key={'spendday'+i} onPress={function(){haptic('light');setDayDetailDate(toDate(d.date));setSelectedDate(toDate(d.date));setShowDayDetail(true);}} style={{flex:1,alignItems:'center',paddingVertical:6}}>
-              <Caps color={theme.primary}>{d.label}</Caps>
+              <V5Caps color={theme.primary}>{d.label}</V5Caps>
             </TouchableOpacity>;
           })}
         </View>
-      </Block>
+      </V5Card>
 
       {/* The whole month — Phase 2.4.A: collapsed by default, tap header to expand */}
       <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setShowWholeMonth(function(v){return !v;});}} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginTop:22,marginBottom:showWholeMonth?8:0}}>
         <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text}}>The whole month</Text>
         <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.muted}}>{showWholeMonth?'▼':'▶'}</Text>
       </TouchableOpacity>
-      {showWholeMonth?<Block style={{padding:14}}>
+      {showWholeMonth?<V5Card padding={14}>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
           <TouchableOpacity onPress={function(){setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()-1,1));}} hitSlop={{top:6,bottom:6,left:6,right:6}}>
             <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.primary}}>‹ Prev</Text>
@@ -10212,7 +10206,7 @@ function ReflectScreen(){
         </View>
         <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:6}}>
           {['M','T','W','T','F','S','S'].map(function(d,idx){
-            return <Caps key={d+'_'+idx} color={theme.muted} style={{width:'14%',textAlign:'center'}}>{d}</Caps>;
+            return <V5Caps key={d+'_'+idx} color={theme.muted} style={{width:'14%',textAlign:'center'}}>{d}</V5Caps>;
           })}
         </View>
         <View style={{flexDirection:'row',flexWrap:'wrap'}}>
@@ -10234,21 +10228,23 @@ function ReflectScreen(){
             </TouchableOpacity>;
           })}
         </View>
-        <Caps color={theme.muted} style={{marginTop:8,textAlign:'center'}}>Tap a day to select. Tap again or long-press to see the day in detail.</Caps>
-      </Block>:null}
+        <V5Caps color={theme.muted} style={{marginTop:8,textAlign:'center'}}>Tap a day to select. Tap again or long-press to see the day in detail.</V5Caps>
+      </V5Card>:null}
 
       {/* On this day */}
       <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setDayDetailDate(selectedDate);setShowDayDetail(true);}} style={{marginTop:10}}>
-        <Block style={{padding:14}}>
+        <V5Card padding={14}>
           <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>On this day: {displayDate(selectedDate)}</Text>
-          <Caps color={theme.muted} style={{marginTop:4}}>Captured: {selectedSummary.completed}/5 ({selectedSummary.percent}%)</Caps>
-          <Caps color={theme.muted} style={{marginTop:2}}>Entries: {selectedTx.length} · Meals: {selectedMeals.length} · Body logs: {selectedWell.length}</Caps>
-          <Caps color={theme.primary} style={{marginTop:8}}>Open day in detail ›</Caps>
-        </Block>
+          <V5Caps color={theme.muted} style={{marginTop:4}}>Captured: {selectedSummary.completed}/5 ({selectedSummary.percent}%)</V5Caps>
+          <V5Caps color={theme.muted} style={{marginTop:2}}>Entries: {selectedTx.length} · Meals: {selectedMeals.length} · Body logs: {selectedWell.length}</V5Caps>
+          <V5Caps color={theme.primary} style={{marginTop:8}}>Open day in detail ›</V5Caps>
+        </V5Card>
       </TouchableOpacity>
 
       {/* Things due soon */}
-      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginTop:22,marginBottom:8}}>Things due soon</Text>
+      <View style={{marginTop:22,marginBottom:8}}>
+        <V5SectionH title="Things due soon"/>
+      </View>
       {upcomingRecurring.map(function(r){
         return <TouchableOpacity activeOpacity={0.7} key={r.id} onPress={function(){
           var related=(transactions||[]).find(function(t){return t.recurring_transaction_id===r.id;});
@@ -10259,16 +10255,16 @@ function ReflectScreen(){
             setEditTx(stub);
           }
         }} style={{marginBottom:8}}>
-          <Block style={{padding:14}}>
+          <V5Card padding={14}>
             <View style={{flexDirection:'row',justifyContent:'space-between'}}>
               <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{r.description}</Text>
               <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>₹{fmt(r.amount)}</Text>
             </View>
-            <Caps color={theme.muted} style={{marginTop:4}}>Due: {displayDate(r.next_due_date)} · {r.frequency}</Caps>
-          </Block>
+            <V5Caps color={theme.muted} style={{marginTop:4}}>Due: {displayDate(r.next_due_date)} · {r.frequency}</V5Caps>
+          </V5Card>
         </TouchableOpacity>;
       })}
-      {upcomingRecurring.length===0&&<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.muted,marginBottom:8}}>Nothing due in the next 7 days.</Text>}
+      {upcomingRecurring.length===0&&<V5EmptyState size="inline" body="Nothing due in the next 7 days."/>}
 
       <View style={{height:32}}/>
     </ScrollView>
