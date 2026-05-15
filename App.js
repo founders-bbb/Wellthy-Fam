@@ -14,6 +14,23 @@ import {
   DMSerifDisplay_400Regular,
   DMSerifDisplay_400Regular_Italic,
 } from '@expo-google-fonts/dm-serif-display';
+// v5 Saturated Forest typography:
+//   Instrument Serif replaces DM Serif Display for editorial moments
+//     (page titles, reflection callouts, marketing copy).
+//   JetBrains Mono is new — used for ledger numerics (currency,
+//     durations, percentages, timestamps).
+// DM Serif Display kept loaded as defensive backup for any unmigrated
+// callsite hardcoding the old font name; sweep at end of Phase 2.
+import {
+  InstrumentSerif_400Regular,
+  InstrumentSerif_400Regular_Italic,
+} from '@expo-google-fonts/instrument-serif';
+import {
+  JetBrainsMono_400Regular,
+  JetBrainsMono_500Medium,
+  JetBrainsMono_600SemiBold,
+  JetBrainsMono_700Bold,
+} from '@expo-google-fonts/jetbrains-mono';
 
 import AppCore from './AppCore';
 import { supabase } from './utils/supabaseClient';
@@ -48,16 +65,27 @@ const MODULE_REGISTRY = {
 };
 
 export default function App() {
-  // Load DM Sans + DM Serif Display per the Design Guide.
+  // Load DM Sans + Instrument Serif + JetBrains Mono per v5 Saturated Forest.
+  // DM Serif Display kept loaded as defensive backup until Phase 2 sweep.
   const [fontsLoaded] = useFonts({
+    // DM Sans (UI workhorse — unchanged from v4)
     'DMSans-Light':         DMSans_300Light,
     'DMSans-Regular':       DMSans_400Regular,
     'DMSans-Medium':        DMSans_500Medium,
     'DMSans-SemiBold':      DMSans_600SemiBold,
     'DMSans-Bold':          DMSans_700Bold,
     'DMSans-Italic':        DMSans_400Regular_Italic,
-    'DMSerif-Regular':      DMSerifDisplay_400Regular,
-    'DMSerif-Italic':       DMSerifDisplay_400Regular_Italic,
+    // Instrument Serif (v5 editorial — replaces DM Serif Display)
+    'InstrumentSerif-Regular': InstrumentSerif_400Regular,
+    'InstrumentSerif-Italic':  InstrumentSerif_400Regular_Italic,
+    // JetBrains Mono (v5 ledger numerics — new)
+    'JetBrainsMono-Regular':   JetBrainsMono_400Regular,
+    'JetBrainsMono-Medium':    JetBrainsMono_500Medium,
+    'JetBrainsMono-SemiBold':  JetBrainsMono_600SemiBold,
+    'JetBrainsMono-Bold':      JetBrainsMono_700Bold,
+    // DM Serif Display (legacy — defensive backup, swept end of Phase 2)
+    'DMSerif-Regular':         DMSerifDisplay_400Regular,
+    'DMSerif-Italic':          DMSerifDisplay_400Regular_Italic,
   });
 
   // Email-auth STEP 3: deep-link handler for Supabase PKCE auth callbacks.
@@ -115,10 +143,10 @@ export default function App() {
   }, []);
 
   if (!fontsLoaded) {
-    // Quiet splash — same warm-cream background as the rest of the app
+    // Quiet splash — Saturated Forest parchment bg + deep-moss spinner
     return (
-      <View style={{ flex: 1, backgroundColor: '#F7F3EA', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color="#4A5A2C" />
+      <View style={{ flex: 1, backgroundColor: '#FAF1DC', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color="#2F4A2D" />
       </View>
     );
   }

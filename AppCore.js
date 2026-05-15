@@ -25,19 +25,32 @@ import * as DocumentPicker from 'expo-document-picker';
 import { DB_COLUMNS } from './utils/constants';
 
 // ─────────────────────────────────────────────────────────────────
-// FONT FAMILIES — DM Sans + DM Serif Display per FamilyOS Design Guide
+// FONT FAMILIES — v5 Saturated Forest typography
+// DM Sans (UI), Instrument Serif (editorial), JetBrains Mono (numerics).
 // Loaded by App.js via useFonts(); these strings reference the keys we
-// registered in @expo-google-fonts/dm-sans + dm-serif-display imports.
+// registered in @expo-google-fonts/{dm-sans, instrument-serif, jetbrains-mono}.
+// DM Serif Display still loaded as defensive backup until Phase 2 sweep.
 // ─────────────────────────────────────────────────────────────────
 var FF = {
+  // ─── DM Sans (UI workhorse) ──────────────────────────────
   sans:        'DMSans-Regular',
   sansLight:   'DMSans-Light',
   sansMed:     'DMSans-Medium',
   sansSemi:    'DMSans-SemiBold',
   sansBold:    'DMSans-Bold',
   sansItalic:  'DMSans-Italic',
-  serif:       'DMSerif-Regular',
-  serifItalic: 'DMSerif-Italic',
+  // ─── Instrument Serif (v5 editorial) ─────────────────────
+  // serif/serifItalic now resolve to Instrument Serif; any callsite using
+  // FF.serif gets the v5 face immediately. serifDM kept as escape hatch.
+  serif:       'InstrumentSerif-Regular',
+  serifItalic: 'InstrumentSerif-Italic',
+  serifDM:     'DMSerif-Regular',         // legacy escape hatch
+  serifDMItalic:'DMSerif-Italic',         // legacy escape hatch
+  // ─── JetBrains Mono (v5 ledger numerics) ─────────────────
+  mono:        'JetBrainsMono-Regular',
+  monoMed:     'JetBrainsMono-Medium',
+  monoSemi:    'JetBrainsMono-SemiBold',
+  monoBold:    'JetBrainsMono-Bold',
 };
 // Use weight + family pair so DM Sans renders correctly across iOS/Android
 function fontW(weight){
