@@ -1111,13 +1111,7 @@ function ModalSheet({visible,title,onClose,children,scroll}){
           <View style={{width:36,height:4,borderRadius:2,backgroundColor:theme.muted,alignSelf:'center',marginBottom:16}}/>
           <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
             <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:22,letterSpacing:-0.4,color:theme.text}}>{title||''}</Text>
-            <TouchableOpacity onPress={onClose} style={{
-              width:32,height:32,borderRadius:9999,
-              backgroundColor:theme.surfaceElevated,
-              alignItems:'center',justifyContent:'center',
-            }}>
-              <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:16,color:theme.textSecondary}}>×</Text>
-            </TouchableOpacity>
+            <V5CloseX onPress={onClose}/>
           </View>
           <Body {...(bodyProps||{})}>{children}</Body>
         </View>
