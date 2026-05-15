@@ -2105,6 +2105,80 @@ function V5MonoNum({children,size,weight,color,style}){
   },style]}>{children}</Text>;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v5 LAYOUT HELPERS
+// Source: _design/handoff-v5/fr/v4-helpers.jsx
+// Thin wrappers used by every v4 tab screen for consistent spacing.
+// ═══════════════════════════════════════════════════════════════
+
+// ─── V5Pad ───────────────────────────────────────────────
+// 18px horizontal padding + gap-between-children flex column.
+function V5Pad({children,gap,style}){
+  return <View style={[{paddingHorizontal:18,gap:gap!=null?gap:14},style]}>
+    {children}
+  </View>;
+}
+
+// ─── V5Body ──────────────────────────────────────────────
+// Scrollable content body. Maps to RN ScrollView with bottom padding.
+function V5Body({children,gap,paddingTop,refreshControl,style,contentStyle}){
+  var pt=paddingTop!=null?paddingTop:4;
+  return <ScrollView style={[{flex:1},style]} contentContainerStyle={[{paddingTop:pt,paddingBottom:28,gap:gap!=null?gap:14},contentStyle]} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+    {children}
+  </ScrollView>;
+}
+
+// ─── V5SectionH ──────────────────────────────────────────
+// Compact section header used by v4 tab screens. h2 sans 15/700 with
+// optional sub-label + LivePulse "live" dot.
+// Note: this is the SectionH from v4-helpers.jsx (15px), distinct from
+// V5SectionHeader in 3a (16px, action link). Phase 2 sweep collapses
+// the two atoms.
+function V5SectionH({title,action,onAction,sub,live}){
+  var theme=useThemeColors();
+  return <View style={{flexDirection:'row',alignItems:'baseline',justifyContent:'space-between',marginTop:6}}>
+    <View style={{flexDirection:'row',alignItems:'baseline',flex:1,minWidth:0}}>
+      <Text style={{fontFamily:FF.sansBold,fontSize:15,fontWeight:'700',letterSpacing:-0.2,color:theme.text}}>{title}</Text>
+      {sub?<Text style={{fontFamily:FF.sans,fontSize:11,color:theme.muted,marginLeft:8}}>· {sub}</Text>:null}
+      {live?<View style={{marginLeft:8,alignSelf:'center'}}><V5LivePulse/></View>:null}
+    </View>
+    {action?<TouchableOpacity onPress={onAction}>
+      <Text style={{fontFamily:FF.sansBold,fontSize:12,fontWeight:'700',color:theme.primary,letterSpacing:0.1}}>{action}</Text>
+    </TouchableOpacity>:null}
+  </View>;
+}
+
+// ─── V5MiniStat ──────────────────────────────────────────
+// 2×2 grid tile. Optional 28px ring (top-right) + MiniArea sparkline
+// overlay at bottom. v5 replacement for HomeScreen's 2×2 stat grid.
+function V5MiniStat({label,value,sub,suffix,prefix,tone,ringValue,ringColor,sparkData,accent,style}){
+  var theme=useThemeColors();
+  var t=tone||'surface';
+  var bg=t==='sunk'?theme.surfaceSunk:t==='elevated'?theme.surfaceElevated:theme.surface;
+  return <View style={[{
+    backgroundColor:bg,
+    borderWidth:StyleSheet.hairlineWidth,borderColor:theme.hairlineSoft,
+    borderRadius:18,padding:14,
+    minHeight:110,overflow:'hidden',position:'relative',
+  },style]}>
+    <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+      <V5Caps>{label}</V5Caps>
+      {ringValue!=null?<V5ActivityRing size={28} stroke={3} value={ringValue} color={ringColor||theme.primary}>
+        <Text style={{fontFamily:FF.sansBold,fontSize:9,fontWeight:'700',color:theme.text,fontVariant:['tabular-nums']}}>{Math.round(ringValue)}</Text>
+      </V5ActivityRing>:null}
+    </View>
+    <View style={{flexDirection:'row',alignItems:'baseline',marginTop:8}}>
+      {prefix?<Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:12,color:theme.text,opacity:0.7,marginRight:2}}>{prefix}</Text>:null}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:22,letterSpacing:-0.7,color:theme.text,lineHeight:22,fontVariant:['tabular-nums']}}>{value}</Text>
+      {suffix?<Text style={{fontFamily:FF.sansMed,fontWeight:'500',fontSize:11,color:theme.textSecondary,marginLeft:2}}>{suffix}</Text>:null}
+    </View>
+    {sub?<Text style={{fontFamily:FF.sans,fontSize:11,color:theme.textSecondary,lineHeight:15,marginTop:8}}>{sub}</Text>:null}
+    {sparkData?<View pointerEvents="none" style={{position:'absolute',bottom:0,left:0,right:0,opacity:0.55}}>
+      <V5MiniArea data={sparkData} width={200} height={32} color={accent||theme.primary} opacity={0.22}/>
+    </View>:null}
+  </View>;
+}
+
 function MemberStatChip({label,value}){
   var theme=useThemeColors();
   return <View style={{
