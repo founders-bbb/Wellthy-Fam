@@ -1125,6 +1125,211 @@ function ModalSheet({visible,title,onClose,children,scroll}){
   </Modal>;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v5 ATOMS — Saturated Forest (Part 1/3 · Primitives)
+// Source: _design/handoff-v5/fr/atoms.jsx
+//
+// Convention: V5{Name}. Old atoms (Caps, Hero, Block, PrimaryButton,
+// SecondaryButton, Sec, etc.) remain untouched. Phase 2 migrates
+// callsites screen-by-screen; a sweep commit at the END of Phase 2
+// removes the old atoms and renames V5{Name} → {Name}.
+// ═══════════════════════════════════════════════════════════════
+
+// v5 token extensions (member identity palette — used by V5Avatar).
+// Conceptually part of the theme tokens layer; lives here to stay
+// adjacent to its consumers. V5_CATS lives with V5CategoryPill in 3b.
+var V5_MEMBER_COLORS={
+  light:['#3D5743','#A8512A','#5E437A','#2C4D6B','#7A4416','#345746','#74436B'],
+  dark: ['#9CB59A','#DD9C68','#B4A2D0','#8FBADE','#E6B98F','#9CC9B0','#D8AED1'],
+};
+
+// ─── V5Caps ──────────────────────────────────────────────
+// Uppercase 10/700 micro-label. Eyebrow above hero numbers, above
+// section headers, above small captions.
+function V5Caps({children,color,style}){
+  var theme=useThemeColors();
+  return <Text style={[{
+    fontFamily:FF.sansBold,fontWeight:'700',fontSize:10,
+    letterSpacing:0.9,textTransform:'uppercase',
+    color:color||theme.muted,
+  },style]}>{children}</Text>;
+}
+
+// ─── V5Hero ──────────────────────────────────────────────
+// Big-number-with-respect: Caps eyebrow + large tight number with
+// optional prefix (₹) and suffix (/ 8 glasses, days, etc).
+// `onTone` flips to onPrimary colors for use inside primary-tone Cards.
+function V5Hero({label,value,prefix,suffix,size,color,onTone}){
+  var theme=useThemeColors();
+  var fs=size||42;
+  var fg=color||(onTone?theme.onPrimary:theme.text);
+  var labelColor=onTone?(theme.onPrimary+'B3'):theme.muted;
+  var subColor=onTone?(theme.onPrimary+'B3'):theme.textSecondary;
+  return <View>
+    {label?<V5Caps color={labelColor}>{label}</V5Caps>:null}
+    <View style={{flexDirection:'row',alignItems:'baseline',marginTop:6}}>
+      {prefix?<Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:fs*0.46,color:fg,opacity:0.85,marginRight:2}}>{prefix}</Text>:null}
+      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:fs,letterSpacing:-fs*0.038,color:fg,lineHeight:fs,fontVariant:['tabular-nums']}}>{value}</Text>
+      {suffix?<Text style={{fontFamily:FF.sansMed,fontWeight:'500',fontSize:fs*0.32,color:subColor,marginLeft:6}}>{suffix}</Text>:null}
+    </View>
+  </View>;
+}
+
+// ─── V5Avatar ────────────────────────────────────────────
+// Circle with photo OR stable-hash-colored initials. ring=true wraps
+// in a 2px theme.bg "moat" with a 1.5px primary border (or pass a
+// number/color for custom ring).
+function V5Avatar({name,color,size,photo,ring,ringColor}){
+  var theme=useThemeColors();
+  var s=size||28;
+  var MC=V5_MEMBER_COLORS[theme.mode==='dark'?'dark':'light'];
+  var n=name||'?';
+  var idx=n.split('').reduce(function(a,c){return(a+c.charCodeAt(0))%MC.length;},0);
+  var bg=color||MC[idx];
+  var initials=n.split(/\s+/).map(function(p){return p[0];}).filter(Boolean).slice(0,2).join('').toUpperCase();
+  var inner=<View style={{
+    width:s,height:s,borderRadius:9999,backgroundColor:bg,
+    alignItems:'center',justifyContent:'center',overflow:'hidden',
+  }}>
+    {photo
+      ? <Image source={{uri:photo}} style={{width:s,height:s,borderRadius:9999}}/>
+      : <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:Math.max(10,s*0.4),color:theme.onPrimary,letterSpacing:-0.2}}>{initials}</Text>}
+  </View>;
+  if(!ring)return inner;
+  var ringW=ring===true?1.5:ring;
+  return <View style={{
+    padding:2,borderRadius:9999,backgroundColor:theme.bg,
+    borderWidth:ringW,borderColor:ringColor||theme.primary,
+  }}>{inner}</View>;
+}
+
+// ─── V5AvatarStack ───────────────────────────────────────
+// Overlapping avatars + overflow "+N" chip when over `max`.
+function V5AvatarStack({names,colors,size,max,gap}){
+  var s=size||24;
+  var mx=max||4;
+  var g=gap||6;
+  var arr=names||[];
+  var visible=arr.slice(0,mx);
+  var overflow=arr.length-mx;
+  return <View style={{flexDirection:'row',alignItems:'center'}}>
+    {visible.map(function(n,i){
+      return <View key={n+i} style={{marginLeft:i===0?0:-g,zIndex:visible.length-i}}>
+        <V5Avatar name={n} color={(colors||[])[i]} size={s} ring/>
+      </View>;
+    })}
+    {overflow>0?<View style={{marginLeft:-g,zIndex:0}}>
+      <V5AvatarOverflowChip size={s} count={overflow}/>
+    </View>:null}
+  </View>;
+}
+function V5AvatarOverflowChip({size,count}){
+  var theme=useThemeColors();
+  return <View style={{
+    width:size,height:size,borderRadius:9999,
+    backgroundColor:theme.surfaceElevated,
+    alignItems:'center',justifyContent:'center',
+    borderWidth:2,borderColor:theme.bg,
+  }}>
+    <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:Math.max(9,size*0.36),color:theme.textSecondary}}>+{count}</Text>
+  </View>;
+}
+
+// ─── V5Progress ──────────────────────────────────────────
+// Single-value horizontal bar, 6px tall by default.
+function V5Progress({value,color,track,height}){
+  var theme=useThemeColors();
+  var h=height||6;
+  var fill=color||theme.primary;
+  var tr=track||theme.surfaceElevated;
+  var v=Math.max(0,Math.min(100,value||0));
+  return <View style={{height:h,backgroundColor:tr,borderRadius:h/2,overflow:'hidden'}}>
+    <View style={{height:'100%',width:v+'%',backgroundColor:fill,borderRadius:h/2}}/>
+  </View>;
+}
+
+// ─── V5PageTitle ─────────────────────────────────────────
+// Top-of-tab title. Optional Caps kicker + h1 (or serif display).
+// Trailing slot holds an action (typically a "+ Invite"-style link or
+// IconBtn from step 3b).
+function V5PageTitle({kicker,title,serif,trailing,sub}){
+  var theme=useThemeColors();
+  var titleStyle=serif?{
+    fontFamily:FF.serif,fontWeight:'400',fontSize:32,letterSpacing:-1,
+    color:theme.text,lineHeight:34,marginTop:kicker?4:0,
+  }:{
+    fontFamily:FF.sansBold,fontWeight:'700',fontSize:28,letterSpacing:-0.9,
+    color:theme.text,lineHeight:31,marginTop:kicker?4:0,
+  };
+  return <View style={{paddingHorizontal:20,paddingTop:4,paddingBottom:14,flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}>
+    <View style={{flex:1,minWidth:0,marginRight:12}}>
+      {kicker?<V5Caps>{kicker}</V5Caps>:null}
+      <Text style={titleStyle}>{title}</Text>
+      {sub?<Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,marginTop:6,lineHeight:19}}>{sub}</Text>:null}
+    </View>
+    {trailing?<View style={{flexShrink:0,marginTop:kicker?18:4}}>{trailing}</View>:null}
+  </View>;
+}
+
+// ─── V5SectionHeader ─────────────────────────────────────
+// h2 16/700 with optional primary-text action link. Replaces the
+// existing 20px <Sec> at Phase 2 sweep. Note: v4-helpers.jsx ships a
+// near-twin called SectionH (15/700, with optional `sub` + LivePulse) —
+// step 5 will port SectionH separately as V5SectionH; collapse the two
+// at sweep time.
+function V5SectionHeader({title,action,onAction}){
+  var theme=useThemeColors();
+  return <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:22,marginBottom:10,paddingHorizontal:20}}>
+    <Text style={{fontFamily:FF.sansBold,fontSize:16,fontWeight:'700',letterSpacing:-0.3,color:theme.text}}>{title}</Text>
+    {action?<TouchableOpacity onPress={onAction}>
+      <Text style={{fontFamily:FF.sansBold,fontSize:12,fontWeight:'700',color:theme.primary,letterSpacing:0.1}}>{action}</Text>
+    </TouchableOpacity>:null}
+  </View>;
+}
+
+// ─── V5NavBar ────────────────────────────────────────────
+// Top-of-screen nav for modals + secondary screens. 3-col layout:
+// 44px leading slot / centered title / 44px trailing slot.
+function V5NavBar({title,leading,trailing,serif}){
+  var theme=useThemeColors();
+  return <View style={{
+    paddingTop:10,paddingBottom:12,paddingHorizontal:16,
+    flexDirection:'row',alignItems:'center',
+    borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.hairlineSoft,
+  }}>
+    <View style={{width:44,alignItems:'flex-start'}}>{leading||null}</View>
+    <View style={{flex:1,alignItems:'center'}}>
+      <Text numberOfLines={1} style={serif?{
+        fontFamily:FF.serif,fontWeight:'400',fontSize:20,letterSpacing:-0.3,color:theme.text,
+      }:{
+        fontFamily:FF.sansBold,fontWeight:'700',fontSize:15,letterSpacing:-0.2,color:theme.text,
+      }}>{title||''}</Text>
+    </View>
+    <View style={{width:44,alignItems:'flex-end'}}>{trailing||null}</View>
+  </View>;
+}
+
+// ─── V5FRLogo ────────────────────────────────────────────
+// "Hearth + heart" brand mark (matches the launcher icon). The
+// `wordmark` variant adds "Family Room" in Instrument Serif. `tint`
+// overrides the moss roof color (e.g. white when on a primary block).
+function V5FRLogo({size,variant,tint}){
+  var theme=useThemeColors();
+  var s=size||28;
+  var pc=tint||theme.primary;
+  var ac=theme.accent;
+  if(variant==='wordmark'){
+    return <View style={{flexDirection:'row',alignItems:'center'}}>
+      <V5FRLogo size={s} tint={tint}/>
+      <Text style={{fontFamily:FF.serif,fontWeight:'400',fontSize:s*0.85,letterSpacing:-0.5,color:theme.text,marginLeft:10}}>Family Room</Text>
+    </View>;
+  }
+  return <Svg width={s} height={s} viewBox="0 0 64 64">
+    <Path d="M14 32 L32 16 L50 32" stroke={pc} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    <Path d="M32 46 C27 41 22 37 22 32 a5 5 0 015-5 c2.5 0 4 1.2 5 3 c1-1.8 2.5-3 5-3 a5 5 0 015 5 c0 5-5 9-10 14z" fill={ac}/>
+  </Svg>;
+}
+
 function MemberStatChip({label,value}){
   var theme=useThemeColors();
   return <View style={{
