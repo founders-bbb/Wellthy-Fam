@@ -9454,6 +9454,11 @@ function WellnessScreen(){
                 {over>0?<Text style={{fontFamily:FF.sans,color:'rgba(255,255,255,0.85)'}}>{' (+'+(over===Math.floor(over)?Math.floor(over):over.toFixed(1))+'h)'}</Text>:null}
               </Text>;
             }
+            // FamilyMemberBar: bespoke vertical "fill toward ceiling"
+            // composite, no v5 equivalent. V5 foundation has horizontal
+            // progress + circular ring primitives but no vertical-fill
+            // primitive. Add V5VerticalBar to viz.jsx in a future
+            // foundation-extension session, then migrate this call.
             return <FamilyMemberBar
               key={item.member.id||firstName}
               member={{initials:initials,name:firstName,current:item.current,target:item.target}}
@@ -9551,6 +9556,11 @@ function WellnessScreen(){
                 <Text style={{fontFamily:FF.sans,color:'rgba(255,255,255,0.7)'}}>{' / '+item.target+'h'}</Text>
               </Text>;
             }
+            // FamilyMemberBar: bespoke vertical "fill toward ceiling"
+            // composite, no v5 equivalent. V5 foundation has horizontal
+            // progress + circular ring primitives but no vertical-fill
+            // primitive. Add V5VerticalBar to viz.jsx in a future
+            // foundation-extension session, then migrate this call.
             return <FamilyMemberBar
               key={'sleep_'+(item.member.id||firstName)}
               member={{initials:initials,name:firstName,current:item.current,target:item.target}}
