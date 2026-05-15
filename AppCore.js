@@ -3881,14 +3881,19 @@ function ProgressIndicator({page,total}){
 
 function QuestionText({children}){return <Text style={z.qQuestionText}>{children}</Text>;}
 
-function ChipSelector({options,value,onChange,multi}){
+function ChipSelector({options,value,onChange,multi,max}){
   var selected=multi?(Array.isArray(value)?value:[]):(value||'');
-  return <View style={[z.row,{flexWrap:'wrap',gap:8}]}> 
+  // When `max` is set in multi mode, chips that would exceed the cap are
+  // disabled (not hidden — visible-but-greyed signals the limit). Already-
+  // selected chips remain tappable to deselect.
+  var atCap=multi&&typeof max==='number'&&selected.length>=max;
+  return <View style={[z.row,{flexWrap:'wrap',gap:8}]}>
     {(options||[]).map(function(opt,idx){
       var label=typeof opt==='string'?opt:opt.label;
       var val=typeof opt==='string'?opt:opt.value;
-      var isSel=multi?selected.includes(val):(selected===val);
-      return <TouchableOpacity key={'chip_'+String(val)+'_'+idx} style={[z.chip,isSel&&z.chipSel]} onPress={function(){
+      var isSel=multi?selected.indexOf(val)>=0:(selected===val);
+      var disabled=atCap&&!isSel;
+      return <TouchableOpacity key={'chip_'+String(val)+'_'+idx} disabled={disabled} activeOpacity={0.7} style={[z.chip,isSel&&z.chipSel,disabled&&{opacity:0.4}]} onPress={function(){
         if(multi){
           var next=isSel?selected.filter(function(v){return v!==val;}):selected.concat([val]);
           onChange&&onChange(next);
@@ -3996,6 +4001,10 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
     function reqText(key,msg){if(!normalizeText(answers[key]))errs[key]=msg||'This field is required.';}
     function reqPick(key,msg){if(!answers[key])errs[key]=msg||'Please select an option.';}
     function reqMulti(key,msg){if(!Array.isArray(answers[key])||answers[key].length===0)errs[key]=msg||'Please select at least one option.';}
+    function reqMultiMax(key,max,msg){
+      if(!Array.isArray(answers[key])||answers[key].length===0)errs[key]=msg||'Please select at least one option.';
+      else if(answers[key].length>max)errs[key]='Please select up to '+max+' options.';
+    }
     function reqNumber(key,min,max,msg){
       var n=parseNumericAnswer(answers[key]);
       if(n===null)errs[key]=msg||'Please enter a valid number.';
@@ -4003,78 +4012,100 @@ function QuestionnaireScreen({userId,onComplete,isModal,onSkipped}){
       else if(max!==undefined && n>max)errs[key]='Maximum allowed is '+max+'.';
     }
 
+    // Household composition (q6) drives kids-conditional branches on pages 1 and 4.
+    // For invitees, q6 is inherited from the creator at finalize time so isn't in
+    // their local answers — they skip the kids-stages and kids-screen-time questions.
+    var hasKids=(answers.q6_household||[]).indexOf('Kids under 12')!==-1
+             ||(answers.q6_household||[]).indexOf('Teenagers')!==-1;
+
     if(page===1){
       reqText('q1_name');
       if(!answers.q2_dob)errs.q2_dob='Date of birth is required.';
       reqPick('q3_location');
+      // q3_neighbourhood is optional
       reqPick('q4_language');
       reqText('q5_occupation');
-      // Family composition (q6) is family-level — only the creator answers it. Invitees inherit from the family.
+      // Household composition (q6) is family-level — invitees inherit from creator.
       if(!isInvitee){
-        reqMulti('q6_family');
-        if((answers.q6_family||[]).includes('Kids'))reqNumber('q6_children_count',1,10,'Please enter number of children (1-10).');
+        reqMulti('q6_household');
+        if(hasKids)reqMulti('q7_kids_stages');
       }
-      reqMulti('q7_passions');
+      reqPick('q8_money_handler');
+      reqPick('q9_income_source');
+      reqText('q10_why_today');
     }
     if(page===2){
-      reqPick('q8_spending_awareness');
-      reqText('q9_spending_regret');
-      reqPick('q10_savings_investments');
-      reqPick('q11_has_loans');
-      if(answers.q11_has_loans==='Yes')reqMulti('q11_loan_types');
-      if(typeof answers.q12_money_stress!=='number')errs.q12_money_stress='Please select stress score.';
+      reqPick('q11_income_band');
+      reqPick('q12_savings_percent');
+      if(answers.q12_savings_percent && answers.q12_savings_percent!=='No idea'){
+        reqMulti('q13_savings_vehicles');
+      }
+      reqPick('q14_has_loans');
+      if(answers.q14_has_loans==='Yes'){
+        reqMulti('q14_loan_types');
+        reqPick('q14_emi_percent');
+      }
+      reqText('q15_last_regret');
+      reqMulti('q16_money_fight');
+      if((answers.q16_money_fight||[]).indexOf('Something else')!==-1){
+        reqText('q16_money_fight_other');
+      }
+      reqPick('q17_statement_visibility');
+      reqPick('q18_emergency_funding');
+      if(typeof answers.q19_money_stress!=='number')errs.q19_money_stress='Please select stress score.';
+      reqText('q20_goal_1year');
+      reqText('q21_goal_5year');
     }
     if(page===3){
-      reqPick('q13_spender_type');
-      reqPick('q14_financial_worry');
-      reqText('q15_goal_1year');
-      reqText('q16_goal_5year');
-      // q17 optional
+      // Height + weight ranges are unit-aware (spec gives cm/kg equivalents;
+      // unit-specific ranges below catch the bad-units case more accurately).
+      if(answers.q22_height_unit==='ft'){
+        reqNumber('q22_height',2,8,'Please enter valid height in feet (2-8).');
+      }else{
+        reqNumber('q22_height',50,260,'Please enter valid height in cm (50-260).');
+      }
+      if(answers.q23_weight_unit==='lbs'){
+        reqNumber('q23_weight',44,660,'Please enter valid weight in lbs (44-660).');
+      }else{
+        reqNumber('q23_weight',20,300,'Please enter valid weight in kg (20-300).');
+      }
+      if(typeof answers.q24_sleep_hours!=='number')errs.q24_sleep_hours='Please set sleep hours.';
+      reqPick('q25_cook');
+      reqPick('q26_family_dinners');
+      reqPick('q27_delivery_frequency');
+      reqMulti('q28_protein_beliefs');
+      reqMulti('q29_health_conditions');
+      var hasCondition=(answers.q29_health_conditions||[]).some(function(c){return c!=='None';});
+      if(hasCondition)reqText('q29_conditions_detail');
+      reqPick('q30_smoking');
+      reqPick('q31_alcohol');
+      if(typeof answers.q32_water_glasses!=='number')errs.q32_water_glasses='Please set water target.';
+      reqText('q33_food_fix');
     }
     if(page===4){
-      // Height: validate based on unit
-      if(answers.q18_height_unit==='ft'){
-        var ft=parseNumericAnswer(answers.q18_height_ft);
-        var inch=parseNumericAnswer(answers.q18_height_in);
-        if(ft===null)errs.q18_height='Please enter feet.';
-        else if(ft<2 || ft>8)errs.q18_height='Feet must be 2-8.';
-        else if(inch!==null && (inch<0 || inch>11))errs.q18_height='Inches must be 0-11.';
-      }else{
-        reqNumber('q18_height',50,260,'Please enter valid height in cm (50-260).');
-      }
-      // Weight: validate based on unit
-      if(answers.q19_weight_unit==='lbs'){
-        reqNumber('q19_weight',44,660,'Please enter valid weight in lbs (44-660).');
-      }else{
-        reqNumber('q19_weight',20,300,'Please enter valid weight in kg (20-300).');
-      }
-      if(typeof answers.q20_sleep_hours!=='number')errs.q20_sleep_hours='Please set sleep hours.';
-      reqPick('q21_exercise');
-      if(answers.q21_exercise==='Yes')reqMulti('q21_exercise_types');
-      reqPick('q22_protein_awareness');
+      reqPick('q34_screen_time');
+      reqPick('q35_morning_reach');
+      reqPick('q36_phone_at_dinner');
+      reqPick('q37_family_time_daily');
+      if(hasKids)reqPick('q38_kids_screen_time');
+      reqPick('q39_unphotographed');
+      reqPick('q40_mental_drain');
+      // q40_mental_drain_detail is optional
+      reqPick('q41_mental_exhaustion');
+      reqText('q42_hardest_time');
     }
     if(page===5){
-      if(typeof answers.q23_water_glasses!=='number')errs.q23_water_glasses='Please set water target.';
-      reqPick('q24_smoking');
-      reqPick('q25_alcohol');
-      reqPick('q26_health_conditions');
-      if(answers.q26_health_conditions==='Yes')reqText('q26_conditions_list');
-      if(typeof answers.q27_energy_level!=='number')errs.q27_energy_level='Please set your energy level.';
-    }
-    if(page===6){
-      reqPick('q28_screen_time');
-      reqPick('q29_morning_phone');
-      reqPick('q30_social_detox');
-      reqPick('q31_mindfulness');
-      reqPick('q32_mental_exhaustion');
-      if(typeof answers.q33_family_time!=='number')errs.q33_family_time='Please select family time.';
-      reqPick('q34_mental_drain');
-    }
-    if(page===7){
-      reqText('q35_purpose');
-      reqPick('q36_looking_for');
-      reqPick('q37_consistency');
-      reqText('q38_legacy');
+      reqMultiMax('q43_first_insight',2);
+      reqPick('q44_pacing');
+      reqPick('q45_sharing');
+      reqPick('q46_worried_about');
+      reqText('q47_one_habit');
+      reqText('q48_one_change');
+      reqMulti('q49_quit_reason');
+      if((answers.q49_quit_reason||[]).indexOf('Something else')!==-1){
+        reqText('q49_quit_reason_other');
+      }
+      // q50_anything_else is optional
     }
     return errs;
   }
