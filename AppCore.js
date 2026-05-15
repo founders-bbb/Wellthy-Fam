@@ -8320,8 +8320,8 @@ function HomeScreen(){
         <Text style={{fontFamily:fontW(500),fontWeight:'500',fontSize:18,color:theme.text,textAlign:'center',marginBottom:10}}>We'll see you in the morning.</Text>
         <Text style={{fontFamily:FF.sans,fontSize:13,color:theme.textSecondary,textAlign:'center',lineHeight:19,marginBottom:32}}>If something happened today you want to remember, the log buttons are still here.</Text>
         <View style={{flexDirection:'row',gap:12,alignSelf:'stretch'}}>
-          <View style={{flex:1}}><SecondaryButton full onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'open_meal',mealType:'dinner',nonce:Date.now()});navigation.navigate('Wellness');}}>Log meal</SecondaryButton></View>
-          <View style={{flex:1}}><SecondaryButton full onPress={function(){haptic('light');setShowQuickLog(true);}}>Log transaction</SecondaryButton></View>
+          <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'open_meal',mealType:'dinner',nonce:Date.now()});navigation.navigate('Wellness');}}>Log meal</V5Button></View>
+          <View style={{flex:1}}><V5Button variant="secondary" full onPress={function(){haptic('light');setShowQuickLog(true);}}>Log transaction</V5Button></View>
         </View>
       </View>
       <TouchableOpacity onPress={function(){setShowFullAppOverride(true);}} style={{paddingVertical:14,alignItems:'center'}}>
@@ -8337,11 +8337,11 @@ function HomeScreen(){
     <ScrollView style={z.fl} contentContainerStyle={z.pad} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={theme.primary} colors={[theme.primary]}/>}
     >
-    {/* Header */}
+    {/* Header — kept inline: V5PageTitle can't preserve tappable month chevron + tappable family name + avatar stack + gear in one slot */}
     <View style={[z.hdr,{paddingTop:12}]}>
       <View style={{flex:1}}>
         <TouchableOpacity onPress={function(){haptic('light');jumpToReflectMonth();}} accessibilityRole="button">
-          <Text style={[z.caps,{color:theme.muted,marginBottom:4}]}>{now.toLocaleString('en-IN',{month:'long',year:'numeric'})} {'›'}</Text>
+          <V5Caps color={theme.muted} style={{marginBottom:4}}>{now.toLocaleString('en-IN',{month:'long',year:'numeric'})} {'›'}</V5Caps>
         </TouchableOpacity>
         <TouchableOpacity onPress={function(){haptic('light');navigation.navigate('Family');}} accessibilityRole="button">
           <Text style={[z.famNm,{color:theme.text,fontSize:24}]} numberOfLines={1}>{familyName||'Your Family'}</Text>
@@ -8355,10 +8355,10 @@ function HomeScreen(){
       </TouchableOpacity>
     </View>
 
-    {/* Streak hero — primary olive, white-on-primary */}
-    <View style={{borderRadius:24,backgroundColor:theme.primary,padding:22,marginTop:12}}>
+    {/* Streak hero — primary card. 56-px streak number stays inline (V5Hero defaults don't match; kept custom per inventory) */}
+    <V5Card tone="primary" padding={22} style={{marginTop:12}}>
       <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-        <Caps color="rgba(255,255,255,0.7)">Your streak</Caps>
+        <V5Caps color="rgba(255,255,255,0.7)">Your streak</V5Caps>
         <InfoIcon
           title="How streak is calculated"
           body="Your streak counts a day when all 3 meals (breakfast, lunch, dinner) and screen time are logged. Money entries don't count — they're optional, since not everyone in the family earns. Water is target-based, so it's tracked separately."
@@ -8374,43 +8374,52 @@ function HomeScreen(){
           ?'Streak running since '+streakSinceLabel+'. Keep it going.'
           :'A fresh start. Capture today and the streak begins.'}
       </Text>
-    </View>
+    </V5Card>
 
-    {/* 2x2 grid: Protein / Spent / Screen / Logged — Phase 2.1.B replaced Water tile with Protein. */}
+    {/* 2x2 grid: Protein / Spent / Screen / Logged — Phase 2.1.B replaced Water tile with Protein.
+        Phase 2 migration: hand-rolled tiles → V5MiniStat. Protein progress now a 28-px ring (replaces inline Progress bar);
+        InfoIcon on Protein tile dropped (collides with ring slot — info content also lives in Wellness tab). */}
     <View style={{flexDirection:'row',flexWrap:'wrap',gap:10,marginTop:12}}>
-      <View style={{width:'48%',backgroundColor:theme.surfaceElevated,borderRadius:20,padding:16,position:'relative'}}>
-        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-          <Caps>Protein</Caps>
-          <InfoIcon
-            title="Protein target on Home"
-            body="Shown here is your Regular protein target. If you're working out, the Active target is higher — see the Wellness tab for both."
-          />
-        </View>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:26,letterSpacing:-0.8,color:theme.text,marginTop:6}}>{myProteinCurrent}{myProteinRegularTarget>0?<Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}> / {myProteinRegularTarget}g</Text>:<Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}>g</Text>}</Text>
-        {myProteinRegularTarget>0?<View style={{marginTop:8}}>
-          <Progress value={Math.min((myProteinCurrent/myProteinRegularTarget)*100,100)}/>
-        </View>:null}
+      <View style={{width:'48%'}}>
+        <V5MiniStat
+          label="Protein"
+          value={myProteinCurrent}
+          suffix={myProteinRegularTarget>0?' / '+myProteinRegularTarget+'g':'g'}
+          ringValue={myProteinRegularTarget>0?Math.min((myProteinCurrent/myProteinRegularTarget)*100,100):null}
+        />
       </View>
-      <View style={{width:'48%',backgroundColor:theme.primaryLight,borderRadius:20,padding:16}}>
-        <Caps color={theme.primary}>Spent</Caps>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:26,letterSpacing:-0.8,color:theme.primaryDeep,marginTop:6}}>₹{fmt(todayExpense)}</Text>
-        <Caps color={theme.textSecondary} style={{marginTop:6}}>{todayTxCount} transaction{todayTxCount===1?'':'s'}</Caps>
+      <View style={{width:'48%'}}>
+        <V5MiniStat
+          label="Spent"
+          value={fmt(todayExpense)}
+          prefix="₹"
+          sub={todayTxCount+' transaction'+(todayTxCount===1?'':'s')}
+          style={{backgroundColor:theme.primaryLight}}
+        />
       </View>
-      <View style={{width:'48%',backgroundColor:theme.accentLight,borderRadius:20,padding:16}}>
-        <Caps color={theme.accent}>Screen time</Caps>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:26,letterSpacing:-0.8,color:theme.accent,marginTop:6}}>{todayScreen>0?formatHrs(todayScreen):'—'}</Text>
-        <Caps color={theme.textSecondary} style={{marginTop:6}}>today</Caps>
+      <View style={{width:'48%'}}>
+        <V5MiniStat
+          label="Screen time"
+          value={todayScreen>0?formatHrs(todayScreen):'—'}
+          sub="today"
+          style={{backgroundColor:theme.accentLight}}
+        />
       </View>
-      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setDayDetailDate(new Date());setShowDayDetail(true);}} style={{width:'48%',backgroundColor:theme.surfaceElevated,borderRadius:20,padding:16}}>
-        <Caps>Logged</Caps>
-        <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:26,letterSpacing:-0.8,color:theme.text,marginTop:6}}>{todayItemsLogged} <Text style={{fontSize:14,fontWeight:'500',color:theme.textSecondary}}>item{todayItemsLogged===1?'':'s'}</Text></Text>
-        <Caps color={theme.textSecondary} style={{marginTop:6}}>{todayPending>0?todayPending+' still pending':'all caught up'}</Caps>
+      <TouchableOpacity activeOpacity={0.85} onPress={function(){haptic('light');setDayDetailDate(new Date());setShowDayDetail(true);}} style={{width:'48%'}}>
+        <V5MiniStat
+          label="Logged"
+          value={todayItemsLogged}
+          suffix={' item'+(todayItemsLogged===1?'':'s')}
+          sub={todayPending>0?todayPending+' still pending':'all caught up'}
+        />
       </TouchableOpacity>
     </View>
 
     {/* Did I hit my targets? */}
-    <Block style={{padding:14,marginTop:12}}>
-      <Text style={{fontFamily:FF.sansBold,fontWeight:'700',fontSize:18,letterSpacing:-0.4,color:theme.text,marginBottom:6}}>Did I hit my targets?</Text>
+    <V5Card padding={14} style={{marginTop:12}}>
+      <View style={{marginBottom:6}}>
+        <V5SectionH title="Did I hit my targets?"/>
+      </View>
       {targetRows.map(function(row,i,arr){
         var unknown=row.state==='unknown';
         return <View key={row.key} style={{
@@ -8455,12 +8464,12 @@ function HomeScreen(){
           </View>}
         </View>;
       })}
-    </Block>
+    </V5Card>
 
     {/* More details divider */}
     <View style={{flexDirection:'row',alignItems:'center',marginTop:24,marginBottom:14}}>
       <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
-      <Caps color={theme.muted} style={{marginHorizontal:12}}>More details</Caps>
+      <V5Caps color={theme.muted} style={{marginHorizontal:12}}>More details</V5Caps>
       <View style={{flex:1,height:StyleSheet.hairlineWidth,backgroundColor:theme.border}}/>
     </View>
 
@@ -8507,26 +8516,28 @@ function HomeScreen(){
 
     {!todayStatus.loading&&isAllCaughtUp&&!memberFilterId&&<View style={[z.ok,{marginTop:10,backgroundColor:theme.primaryLight}]}><Text style={[z.okTx,{color:theme.primary}]}>Today is fully captured ✓</Text></View>}
 
-    {/* Stats strip — every tile is now tappable */}
-    <View style={[z.strip,{marginTop:10,marginBottom:16}]}>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>Daily average</Text><Text style={[z.tileVal,{color:theme.text}]}>{'₹'}{fmt(avgDaily)}</Text></TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){if(topCat&&topCat!=='-'){haptic('light');jumpToFinanceCategory(topCat);}}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>Most went to</Text><Text style={[z.tileVal,{color:theme.text}]} numberOfLines={1}>{topCat}</Text></TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');navigation.navigate('Family');}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>In your family</Text><Text style={[z.tileVal,{color:theme.text}]}>{members.length}</Text></TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_goals',nonce:Date.now()});navigation.navigate('Finance');}} style={[z.tile,{backgroundColor:theme.surfaceElevated}]}><Text style={[z.tileLbl,{color:theme.textSecondary}]}>Goal progress</Text><Text style={[z.tileVal,{color:theme.text}]}>{goalsPct}%</Text></TouchableOpacity>
+    {/* Stats strip — every tile is now tappable. Phase 2 migration: z.tile → V5Stat. */}
+    <View style={{flexDirection:'row',gap:8,marginTop:10,marginBottom:16}}>
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={{flex:1}}><V5Stat tone="elevated" label="Daily average" prefix="₹" value={fmt(avgDaily)}/></TouchableOpacity>
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){if(topCat&&topCat!=='-'){haptic('light');jumpToFinanceCategory(topCat);}}} style={{flex:1}}><V5Stat tone="elevated" label="Most went to" value={topCat}/></TouchableOpacity>
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');navigation.navigate('Family');}} style={{flex:1}}><V5Stat tone="elevated" label="In your family" value={members.length}/></TouchableOpacity>
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');setQuickAction&&setQuickAction({action:'focus_goals',nonce:Date.now()});navigation.navigate('Finance');}} style={{flex:1}}><V5Stat tone="elevated" label="Goal progress" value={goalsPct} suffix="%"/></TouchableOpacity>
     </View>
 
-    <Sec>How this week is going</Sec>
-    <View style={[z.card,{backgroundColor:theme.card,borderColor:theme.border}]}>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}> 
+    <View style={{marginTop:6}}>
+      <V5SectionH title="How this week is going"/>
+    </View>
+    <V5Card style={{marginTop:10}}>
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginBottom:8}]}>
         <Text style={[z.sub,{color:theme.textSecondary}]}>Today</Text>
         <Text style={[z.fv,{color:getCompletionColor(todaysCompletion.percent)}]}>{todaysCompletion.completed}/5 ({todaysCompletion.percent}%)</Text>
       </TouchableOpacity>
-      <Bar pct={todaysCompletion.percent} color={getCompletionColor(todaysCompletion.percent)} h={8}/>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginTop:10,marginBottom:6}]}> 
+      <V5Progress value={todaysCompletion.percent} color={getCompletionColor(todaysCompletion.percent)} height={8}/>
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginTop:10,marginBottom:6}]}>
         <Text style={[z.sub,{color:theme.textSecondary}]}>Weekly average</Text>
         <Text style={[z.fv,{color:theme.text}]}>{weeklyAvg}% {weeklyTrend===0?'':weeklyTrend>0?'↑':'↓'}{weeklyTrend===0?'':Math.abs(weeklyTrend)+'%'}</Text>
       </TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginBottom:6}]}> 
+      <TouchableOpacity activeOpacity={0.7} onPress={function(){haptic('light');jumpToReflectThisWeek();}} style={[z.row,{justifyContent:'space-between',marginBottom:6}]}>
         <Text style={[z.sub,{color:theme.textSecondary}]}>Days fully captured in a row</Text>
         <Text style={[z.fv,{color:theme.text}]}>{streak} day{streak===1?'':'s'}</Text>
       </TouchableOpacity>
@@ -8538,7 +8549,7 @@ function HomeScreen(){
           <Text style={[z.cap,{color:theme.muted}]}>Weakest: {worstDay?worstDay.date:'-'}</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </V5Card>
 
     {/* Phase 2.1.G: Yesterday's pending moved here from above the stats strip — sits after weekly status, before unconfirmed entries. */}
     {showCatchup&&<View style={[z.nudge,{marginTop:14,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}>
@@ -8549,15 +8560,16 @@ function HomeScreen(){
       {catchup.map(function(c){return<TouchableOpacity key={c.key} style={[z.row,{paddingVertical:6}]} onPress={function(){runChecklistAction(c);}}><View style={[z.checkbox,{borderColor:theme.accent}]}/><Text style={[z.body,{color:theme.text,flex:1}]}>{c.label}</Text><Text style={[z.cap,{color:theme.accent,fontWeight:'600'}]}>Open</Text></TouchableOpacity>;})}
     </View>}
 
-    {unconf.length>0&&<View><Sec>Waiting for you to confirm</Sec>{unconf.slice(0,5).map(function(t){return<SwipeableTxCard key={t.id} tx={t} onConfirm={function(){confirmTx(t.id);}} onEdit={function(){setEditTx(t);}}><View style={[z.card,{backgroundColor:theme.card,borderColor:theme.border}]}><View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><View style={{flex:1}}><Text style={[z.txM,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.memberName||'Joint'}</Text></View><Text style={[z.txM,{color:theme.text}]}>{'₹'}{fmt(t.amount)}</Text></View><View style={[z.row,{justifyContent:'space-between'}]}><CategoryPill label={t.category||'Uncat'}/><View style={z.row}><TouchableOpacity onPress={function(){setEditTx(t);}} style={z.editBtn}><Text style={z.editTx}>{'✎'}</Text></TouchableOpacity><PrimaryButton onPress={function(){confirmTx(t.id);}}>Confirm</PrimaryButton></View></View></View></SwipeableTxCard>;})}<Text style={[z.cap,{textAlign:'center',marginTop:4,color:theme.muted}]}>Swipe right to confirm · Swipe left to edit</Text></View>}
+    {unconf.length>0&&<View><View style={{marginTop:18}}><V5SectionH title="Waiting for you to confirm"/></View>{unconf.slice(0,5).map(function(t){return<SwipeableTxCard key={t.id} tx={t} onConfirm={function(){confirmTx(t.id);}} onEdit={function(){setEditTx(t);}}><V5Card style={{marginTop:10}}><View style={[z.row,{justifyContent:'space-between',marginBottom:8}]}><View style={{flex:1}}><Text style={[z.txM,{color:theme.text}]}>{t.merchant}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.memberName||'Joint'}</Text></View><Text style={[z.txM,{color:theme.text}]}>{'₹'}{fmt(t.amount)}</Text></View><View style={[z.row,{justifyContent:'space-between'}]}><CategoryPill label={t.category||'Uncat'}/><View style={z.row}><TouchableOpacity onPress={function(){setEditTx(t);}} style={z.editBtn}><Text style={z.editTx}>{'✎'}</Text></TouchableOpacity><V5Button variant="primary" onPress={function(){confirmTx(t.id);}}>Confirm</V5Button></View></View></V5Card></SwipeableTxCard>;})}<Text style={[z.cap,{textAlign:'center',marginTop:4,color:theme.muted}]}>Swipe right to confirm · Swipe left to edit</Text></View>}
     {/* PHASE 6 #6: 'Still pending today' moved to top of Home (above), this duplicate removed. */}
-    <View style={{alignSelf:'flex-start',marginTop:16}}><PrimaryButton onPress={function(){setShowTx(true);}}>+ Capture an entry</PrimaryButton></View>
-    <Sec>The last seven days</Sec><View style={[z.card,{backgroundColor:theme.card,borderColor:theme.border}]}><View style={z.barRow}>{weekSpend.map(function(amt,i){
+    <View style={{alignSelf:'flex-start',marginTop:16}}><V5Button variant="primary" onPress={function(){setShowTx(true);}}>+ Capture an entry</V5Button></View>
+    <View style={{marginTop:18}}><V5SectionH title="The last seven days"/></View>
+    <V5Card style={{marginTop:10}}><View style={z.barRow}>{weekSpend.map(function(amt,i){
       var dayOffset=6-i;
       var barDate=addDays(now,-dayOffset);
       return<TouchableOpacity key={i} activeOpacity={0.7} onPress={function(){haptic('light');openDayDetail(barDate);}} style={z.barC}><View style={[z.bar,{height:Math.max((amt/maxSp)*80,4),backgroundColor:theme.primary}]}/><Text style={[z.barL,{color:theme.muted}]}>{dayLabels[(now.getDay()-6+i+7)%7]}</Text></TouchableOpacity>;
-    })}</View><Text style={[z.note,{color:theme.textSecondary}]}>Total: {'₹'}{fmt(weekSpend.reduce(function(a,b){return a+b;},0))}</Text></View>
-    {scopedTxs.length>0&&<View><Sec>Latest</Sec>{scopedTxs.slice(0,5).map(function(t){return<TouchableOpacity key={t.id} style={[z.actR,{borderBottomColor:theme.border}]} onPress={function(){setEditTx(t);}}><View style={{flex:1}}><Text style={[z.actTx,{color:theme.text}]}>{t.memberName||'Joint'} {'₹'}{fmt(t.amount)} {t.category}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.merchant}</Text></View><Text style={[z.cap,{color:theme.muted}]}>{'✎'}</Text></TouchableOpacity>;})}</View>}
+    })}</View><Text style={[z.note,{color:theme.textSecondary}]}>Total: {'₹'}{fmt(weekSpend.reduce(function(a,b){return a+b;},0))}</Text></V5Card>
+    {scopedTxs.length>0&&<View><View style={{marginTop:18}}><V5SectionH title="Latest"/></View>{scopedTxs.slice(0,5).map(function(t){return<TouchableOpacity key={t.id} style={[z.actR,{borderBottomColor:theme.border}]} onPress={function(){setEditTx(t);}}><View style={{flex:1}}><Text style={[z.actTx,{color:theme.text}]}>{t.memberName||'Joint'} {'₹'}{fmt(t.amount)} {t.category}</Text><Text style={[z.cap,{color:theme.muted}]}>{t.merchant}</Text></View><Text style={[z.cap,{color:theme.muted}]}>{'✎'}</Text></TouchableOpacity>;})}</View>}
     {scopedTxs.length===0&&<View style={[z.nudge,{marginTop:20,backgroundColor:theme.accentLight,borderLeftColor:theme.accent}]}><Text style={[z.nudgeTx,{color:theme.text}]}>{memberFilterId?'No entries captured for '+(filteredMemberName||'this member')+' yet.':'Nothing captured yet. The first entry is the hardest.'}</Text></View>}
     <View style={{height:32}}/></ScrollView>
     <TouchableOpacity
