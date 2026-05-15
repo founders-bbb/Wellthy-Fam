@@ -876,16 +876,33 @@ function Sec({children}){
   var theme=useThemeColors();
   return<Text style={[z.sec,{color:theme.text}]}>{children}</Text>;
 }
+// Composite phase item 5 — Inp refactored to compose V5Field + V5Input under
+// its existing public API. Keeps all 50+ callsites working unchanged while
+// the underlying rendering now flows through the v5 atoms. Prop name
+// translations: secure → secureTextEntry. Multiline preserved via V5Input's
+// own multiline branch (96-px min-height, top-aligned text).
 function Inp({label,value,onChangeText,secure,placeholder,keyboardType,multiline,maxLength}){
-  var theme=useThemeColors();
   return(<View style={{marginBottom:12}}>
-    {label?<Text style={[z.inpLabel,{color:theme.textSecondary}]}>{label}</Text>:null}
-    <TextInput style={[z.inp,{backgroundColor:theme.surface,color:theme.text,borderColor:theme.border},multiline&&{height:80,textAlignVertical:'top'}]} value={value} onChangeText={onChangeText}
-      secureTextEntry={secure} placeholder={placeholder} placeholderTextColor={theme.muted}
-      keyboardType={keyboardType||'default'} multiline={multiline} maxLength={maxLength}/>
+    <V5Field label={label}>
+      <V5Input
+        value={value}
+        onChangeText={onChangeText}
+        secureTextEntry={secure}
+        placeholder={placeholder}
+        keyboardType={keyboardType||'default'}
+        multiline={multiline}
+        maxLength={maxLength}
+      />
+    </V5Field>
   </View>);
 }
 
+// DateField: bespoke composite wrapping @react-native-community/
+// datetimepicker with label + value display + Done CTA. No v5
+// equivalent — V5Input + V5Field cover text inputs but the v5
+// foundation has no native-picker-wrapping composite. Build
+// V5DateField in a future foundation-extension session, then
+// migrate the 13 callsites here.
 function DateField({label,value,onChange,minimumDate,maximumDate,placeholder,defaultPickerDate}){
   var[show,setShow]=useState(false);
   var theme=useThemeColors();
