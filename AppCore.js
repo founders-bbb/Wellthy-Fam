@@ -2476,12 +2476,9 @@ function MemberStatChip({label,value}){
 
 function MemberStreakRing({member,onPress}){
   var theme=useThemeColors();
-  var r=26;
-  var c=2*Math.PI*r;
   var streak=Number(member.streak)||0;
   var best=Math.max(Number(member.best)||1,1);
   var pct=Math.min(100,(streak/best)*100);
-  var dashOffset=c-(c*pct)/100;
   return <Pressable onPress={onPress} style={function(state){return {
     backgroundColor:theme.surface,
     borderWidth:StyleSheet.hairlineWidth,borderColor:theme.border,
@@ -2489,15 +2486,11 @@ function MemberStreakRing({member,onPress}){
     opacity:state.pressed?0.7:1,
   };}}>
     <View style={{flexDirection:'row',alignItems:'center'}}>
-      <View style={{width:64,height:64,marginRight:12}}>
-        <Svg width="64" height="64" viewBox="0 0 64 64">
-          <Circle cx="32" cy="32" r={r} fill="none" stroke={theme.surfaceElevated} strokeWidth="5"/>
-          <Circle cx="32" cy="32" r={r} fill="none" stroke={theme.accent} strokeWidth="5" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={dashOffset} transform="rotate(-90 32 32)"/>
-        </Svg>
-        <View style={{position:'absolute',width:64,height:64,alignItems:'center',justifyContent:'center'}}>
+      <View style={{marginRight:12}}>
+        <V5ActivityRing size={64} stroke={5} value={pct} color={theme.accent}>
           <Text style={{fontFamily:FF.sansBold,fontSize:18,color:theme.text,letterSpacing:-0.5,lineHeight:20}}>{streak}</Text>
           <Text style={{fontFamily:FF.sansBold,fontSize:7.5,color:theme.muted,letterSpacing:0.6,textTransform:'uppercase',marginTop:1}}>Days</Text>
-        </View>
+        </V5ActivityRing>
       </View>
       <View style={{flex:1,minWidth:0}}>
         <View style={{flexDirection:'row',alignItems:'center'}}>
