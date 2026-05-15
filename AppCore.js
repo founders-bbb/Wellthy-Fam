@@ -1330,6 +1330,231 @@ function V5FRLogo({size,variant,tint}){
   </Svg>;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// v5 ATOMS — Saturated Forest (Part 2/3 · Interactive)
+// Source: _design/handoff-v5/fr/atoms.jsx
+// ═══════════════════════════════════════════════════════════════
+
+// v5 token extension (category color coding — used by V5CategoryPill).
+// Note: keys differ from current app's CATS (Daily Essentials, House Bills,
+// Lifestyle, Cash, Uncat). Phase 2 modal migration will need a key-mapping
+// step where transactions get rebranded to v5 category names.
+var V5_CATS={
+  light:{
+    Groceries:   {bg:'#E5E9D3',fg:'#3F5125'},
+    Utilities:   {bg:'#E0E2EC',fg:'#363F62'},
+    Travel:      {bg:'#F1DFC8',fg:'#7A4416'},
+    Health:      {bg:'#F1D9D6',fg:'#702824'},
+    Dining:      {bg:'#F0E0CB',fg:'#7A4D15'},
+    Schools:     {bg:'#E0E6DD',fg:'#395241'},
+    Income:      {bg:'#DDE3D3',fg:'#2F4234'},
+    Transfer:    {bg:'#E5DDC8',fg:'#5E4F2D'},
+    Subscription:{bg:'#E6DEEB',fg:'#4B3960'},
+  },
+  dark:{
+    Groceries:   {bg:'rgba(132,150,90,0.18)', fg:'#B7C99A'},
+    Utilities:   {bg:'rgba(110,128,178,0.18)',fg:'#B6C0DE'},
+    Travel:      {bg:'rgba(196,132,72,0.18)', fg:'#E6B98F'},
+    Health:      {bg:'rgba(196,98,90,0.18)',  fg:'#E3A9A3'},
+    Dining:      {bg:'rgba(196,148,72,0.18)', fg:'#E6C190'},
+    Schools:     {bg:'rgba(112,150,124,0.18)',fg:'#A8C8B7'},
+    Income:      {bg:'rgba(132,156,108,0.18)',fg:'#BDD3A8'},
+    Transfer:    {bg:'rgba(168,150,108,0.18)',fg:'#D6C49E'},
+    Subscription:{bg:'rgba(154,124,180,0.18)',fg:'#CDB6E0'},
+  },
+};
+
+// ─── V5Button ────────────────────────────────────────────
+// Single button atom with six variants, three sizes (sm:36/md:48/lg:56),
+// all radius 12. Replaces PrimaryButton + SecondaryButton + the inline
+// button patterns catalogued in the AppCore inventory.
+function V5Button({children,variant,size,full,onPress,leading,trailing,disabled,style,textStyle}){
+  var theme=useThemeColors();
+  var v=variant||'primary';
+  var sz=size||'md';
+  var heights={sm:36,md:48,lg:56};
+  var h=heights[sz]||48;
+  var baseFont=sz==='sm'?13:14;
+  var bg,fg,bd='transparent',bw=0;
+  if(v==='primary'){bg=theme.primary;fg=theme.onPrimary;}
+  else if(v==='secondary'){bg='transparent';fg=theme.primary;bd=theme.primary;bw=1.5;}
+  else if(v==='tertiary'){bg=theme.surfaceElevated;fg=theme.textSecondary;}
+  else if(v==='destructive'){bg='transparent';fg=theme.danger;bd=theme.danger;bw=1.5;}
+  else if(v==='accent'){bg=theme.accent;fg=theme.onAccent;}
+  else if(v==='on-tone'){bg=theme.onPrimary;fg=theme.primary;}
+  else {bg=theme.primary;fg=theme.onPrimary;}
+  return <TouchableOpacity disabled={disabled} onPress={onPress} activeOpacity={0.8} style={[{
+    height:h,borderRadius:12,paddingHorizontal:sz==='sm'?14:22,
+    backgroundColor:bg,
+    borderWidth:bw,borderColor:bd,
+    flexDirection:'row',alignItems:'center',justifyContent:'center',
+    opacity:disabled?0.5:1,
+    alignSelf:full?'stretch':'flex-start',
+  },style]}>
+    {leading?<View style={{marginRight:8}}>{leading}</View>:null}
+    <Text style={[{fontFamily:FF.sansBold,fontWeight:'700',fontSize:baseFont,color:fg,letterSpacing:-0.1},textStyle]}>{children}</Text>
+    {trailing?<View style={{marginLeft:8}}>{trailing}</View>:null}
+  </TouchableOpacity>;
+}
+
+// ─── V5Chip ──────────────────────────────────────────────
+// Selectable filter chip OR static-tone tag. selected=true gives a
+// 1.5px primary border with primarySoft bg. tone='soft' gives a
+// borderless surfaceElevated chip. Default is hairline border on surface.
+function V5Chip({children,selected,tone,fg,bg,onPress,leading,style}){
+  var theme=useThemeColors();
+  var _bg=bg,_fg=fg,_bd=theme.hairline,_bw=StyleSheet.hairlineWidth;
+  if(selected){_bg=theme.primarySoft;_fg=theme.primary;_bd=theme.primary;_bw=1.5;}
+  else if(tone==='soft'){_bg=theme.surfaceElevated;_fg=theme.textSecondary;_bd='transparent';_bw=0;}
+  else if(!bg){_bg=theme.surface;_fg=theme.textSecondary;}
+  return <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={[{
+    flexDirection:'row',alignItems:'center',
+    paddingVertical:6,paddingHorizontal:12,borderRadius:9999,
+    backgroundColor:_bg,
+    borderWidth:_bw,borderColor:_bd,
+    alignSelf:'flex-start',
+  },style]}>
+    {leading?<View style={{marginRight:6}}>{leading}</View>:null}
+    <Text style={{fontFamily:FF.sansSemi,fontSize:12,fontWeight:'600',color:_fg}}>{children}</Text>
+  </TouchableOpacity>;
+}
+
+// ─── V5CategoryPill ──────────────────────────────────────
+// Static label color-coded by category lookup (V5_CATS). Non-interactive.
+function V5CategoryPill({cat,style}){
+  var theme=useThemeColors();
+  var lookup=V5_CATS[theme.mode==='dark'?'dark':'light'];
+  var c=(lookup&&lookup[cat])||{bg:theme.surfaceElevated,fg:theme.textSecondary};
+  return <View style={[{
+    flexDirection:'row',alignItems:'center',alignSelf:'flex-start',
+    paddingVertical:3,paddingHorizontal:9,borderRadius:9999,
+    backgroundColor:c.bg,
+  },style]}>
+    <Text style={{fontFamily:FF.sansSemi,fontSize:11,fontWeight:'600',color:c.fg,letterSpacing:0.05}}>{cat}</Text>
+  </View>;
+}
+
+// ─── V5Input ─────────────────────────────────────────────
+// RN-backed TextInput (the web atom is display-only; we need real
+// input handling). Hairline border by default, 1.5px primary when
+// focused, 1.5px danger when error. Supports leading/trailing/prefix
+// slots and multiline.
+function V5Input({value,onChangeText,placeholder,leading,trailing,prefix,multiline,focused,error,keyboardType,secureTextEntry,maxLength,style,inputStyle,onFocus,onBlur}){
+  var theme=useThemeColors();
+  var bd=error?theme.danger:focused?theme.primary:theme.hairline;
+  var bw=focused||error?1.5:StyleSheet.hairlineWidth;
+  return <View style={[{
+    backgroundColor:theme.surface,borderRadius:12,
+    borderWidth:bw,borderColor:bd,
+    paddingHorizontal:14,
+    paddingVertical:multiline?14:0,
+    flexDirection:'row',alignItems:multiline?'flex-start':'center',
+    minHeight:multiline?96:48,
+  },style]}>
+    {leading?<View style={{marginRight:10}}>{leading}</View>:null}
+    {prefix?<Text style={{color:theme.textSecondary,fontFamily:FF.sans,fontSize:15,marginRight:6}}>{prefix}</Text>:null}
+    <TextInput
+      value={value}
+      onChangeText={onChangeText}
+      placeholder={placeholder}
+      placeholderTextColor={theme.muted}
+      multiline={multiline}
+      keyboardType={keyboardType}
+      secureTextEntry={secureTextEntry}
+      maxLength={maxLength}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      style={[{flex:1,fontFamily:FF.sans,fontSize:15,color:theme.text,padding:0,minHeight:multiline?72:24,textAlignVertical:multiline?'top':'center'},inputStyle]}
+    />
+    {trailing?<View style={{marginLeft:10}}>{trailing}</View>:null}
+  </View>;
+}
+
+// ─── V5Field ─────────────────────────────────────────────
+// Caps label + child input(s) + optional hint line. Standard form
+// composition pattern.
+function V5Field({label,hint,children}){
+  var theme=useThemeColors();
+  return <View>
+    {label?<V5Caps style={{marginBottom:8}}>{label}</V5Caps>:null}
+    {children}
+    {hint?<Text style={{fontFamily:FF.sans,fontSize:12,color:theme.muted,marginTop:6}}>{hint}</Text>:null}
+  </View>;
+}
+
+// ─── V5OptionRow ─────────────────────────────────────────
+// Radio (type='radio', default) or checkbox (type='check') row.
+// Selected state: primarySoft bg + 1.5px primary border.
+function V5OptionRow({title,desc,selected,type,leading,trailing,onPress}){
+  var theme=useThemeColors();
+  var bd=selected?theme.primary:theme.hairline;
+  var indicator;
+  if(type==='check'){
+    indicator=<View style={{
+      width:22,height:22,borderRadius:6,
+      backgroundColor:selected?theme.primary:'transparent',
+      borderWidth:1.5,borderColor:selected?theme.primary:theme.muted,
+      alignItems:'center',justifyContent:'center',
+    }}>
+      {selected?<Text style={{color:theme.onPrimary,fontSize:13,fontWeight:'700'}}>✓</Text>:null}
+    </View>;
+  } else {
+    indicator=<View style={{
+      width:22,height:22,borderRadius:9999,
+      borderWidth:1.5,borderColor:selected?theme.primary:theme.muted,
+      alignItems:'center',justifyContent:'center',
+    }}>
+      {selected?<View style={{width:10,height:10,borderRadius:9999,backgroundColor:theme.primary}}/>:null}
+    </View>;
+  }
+  return <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={{
+    backgroundColor:selected?theme.primarySoft:theme.surface,
+    borderWidth:selected?1.5:StyleSheet.hairlineWidth,borderColor:bd,
+    borderRadius:14,paddingVertical:12,paddingHorizontal:14,
+    flexDirection:'row',alignItems:'flex-start',
+  }}>
+    {leading?<View style={{marginRight:12}}>{leading}</View>:null}
+    <View style={{marginRight:12,marginTop:1}}>{indicator}</View>
+    <View style={{flex:1,minWidth:0}}>
+      <Text style={{fontFamily:FF.sansSemi,fontSize:14,fontWeight:'600',color:theme.text}}>{title}</Text>
+      {desc?<Text style={{fontFamily:FF.sans,fontSize:12,color:theme.textSecondary,marginTop:3,lineHeight:17}}>{desc}</Text>:null}
+    </View>
+    {trailing||null}
+  </TouchableOpacity>;
+}
+
+// ─── V5IconBtn ───────────────────────────────────────────
+// 36×36 round button with surfaceElevated bg. Children = inline icon.
+function V5IconBtn({children,onPress,style}){
+  var theme=useThemeColors();
+  return <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={[{
+    width:36,height:36,borderRadius:9999,
+    backgroundColor:theme.surfaceElevated,
+    alignItems:'center',justifyContent:'center',
+  },style]}>
+    {children}
+  </TouchableOpacity>;
+}
+
+// ─── V5BackArrow / V5CloseX ──────────────────────────────
+// IconBtn-wrapped SVG glyphs for modal/nav affordances.
+function V5BackArrow({onPress}){
+  var theme=useThemeColors();
+  return <V5IconBtn onPress={onPress}>
+    <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
+      <Path d="M9 2L4 7l5 5" stroke={theme.text} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"/>
+    </Svg>
+  </V5IconBtn>;
+}
+function V5CloseX({onPress}){
+  var theme=useThemeColors();
+  return <V5IconBtn onPress={onPress}>
+    <Svg width={12} height={12} viewBox="0 0 12 12" fill="none">
+      <Path d="M2 2l8 8M10 2l-8 8" stroke={theme.text} strokeWidth={1.8} strokeLinecap="round"/>
+    </Svg>
+  </V5IconBtn>;
+}
+
 function MemberStatChip({label,value}){
   var theme=useThemeColors();
   return <View style={{
