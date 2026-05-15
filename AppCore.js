@@ -119,65 +119,92 @@ var WELLNESS_GOAL_CATEGORY_OPTIONS=[
 ];
 
 // ─────────────────────────────────────────────────────────────────
-// THEME TOKENS — Olive Grove (Light + Dark)
-// Source of truth: _design/all-screens.jsx → PALETTES.{light,dark}.
-// Canonical keys match the design (bg, surface, surfaceElevated, primary,
-// primaryLight, primaryDeep, accent, accentLight, text, textSecondary,
-// muted, border, danger). Legacy keys (background, card, primaryOn,
-// warning, success, overlay, navBar*, statusBar) are kept as aliases /
-// derivations so existing AppCore consumers keep working.
+// THEME TOKENS — Saturated Forest (v5)
+// Source of truth: _design/handoff-v5/fr/tokens.jsx → PALETTES.saturatedForest.
+//
+// v5 palette migration — Saturated Forest tokens live alongside legacy
+// aliases (background, card, primaryOn, primaryLight, accentLight, border,
+// warning, success, etc.). Aliases removed in a sweep commit at the END
+// of Phase 2 once every screen consumes v5 tokens. Until then, both
+// naming schemes are intentional, not a bug.
+//
+// Visual nuance: primaryLight/accentLight stay as translucent rgba in
+// light mode (the old behavior — semi-transparent tint over the bg),
+// while the new v5 primarySoft/accentSoft are SOLID pale earth tones.
+// Both are wired correctly; migrating a callsite from primaryLight to
+// primarySoft shifts the feel from "translucent overlay" to "solid pale".
+// In dark mode both names resolve to the same translucent rgba (v5's
+// dark spec is translucent for soft tones too).
 // ─────────────────────────────────────────────────────────────────
 var LIGHT_THEME={
   mode:'light',
-  // Canonical (design)
-  bg:'#F7F3EA',
-  surface:'#FFFFFF',
-  surfaceElevated:'#EFEADE',
-  primary:'#4A5A2C',
-  primaryLight:'rgba(74,90,44,0.12)',
-  primaryDeep:'#3A481F',
-  accent:'#A85436',
-  accentLight:'rgba(168,84,54,0.12)',
-  text:'#1A1208',
-  textSecondary:'#6B5E52',
-  muted:'#A89D95',
-  border:'#E8E2D4',
-  danger:'#C94040',
-  // Legacy aliases / derivations
-  background:'#F7F3EA',
-  card:'#FFFFFF',
-  primaryOn:'#FFFFFF',
-  warning:'#A85436',
-  success:'#4A5A2C',
+  // ─── v5 Saturated Forest (canonical) ────────────────────────────
+  bg:'#FAF1DC',
+  surface:'#FFFAE3',
+  surfaceElevated:'#EFE2C2',
+  surfaceSunk:'#E5D6B0',
+  primary:'#2F4A2D',
+  primaryDeep:'#1B2F19',
+  primarySoft:'#D6DEC8',
+  accent:'#D26A4A',
+  accentDeep:'#A14729',
+  accentSoft:'#F4D5C1',
+  text:'#1A1408',
+  textSecondary:'#564A34',
+  muted:'#9A8D72',
+  hairline:'#DACDA8',
+  hairlineSoft:'#E5D8B3',
+  danger:'#A8332C',
+  dangerSoft:'#F1D9D6',
+  onPrimary:'#FAF3DC',
+  onAccent:'#FAF3DC',
+  // ─── Legacy aliases (kept until Phase 2 sweep) ──────────────────
+  background:'#FAF1DC',                 // alias of bg
+  card:'#FFFAE3',                        // alias of surface
+  border:'#DACDA8',                      // alias of hairline
+  primaryLight:'rgba(47,74,45,0.12)',    // translucent — distinct from v5 primarySoft (solid)
+  accentLight:'rgba(210,106,74,0.12)',   // translucent — distinct from v5 accentSoft (solid)
+  primaryOn:'#FAF3DC',                   // alias of onPrimary
+  warning:'#D26A4A',                     // legacy: warning === accent
+  success:'#2F4A2D',                     // legacy: success === primary
   overlay:'rgba(0,0,0,0.4)',
-  navBarBg:'#F7F3EA',
-  navBarShadow:'rgba(74,90,44,0.18)',
+  navBarBg:'#FAF1DC',                    // alias of bg in light
+  navBarShadow:'rgba(47,74,45,0.18)',
   statusBar:'dark-content',
 };
 var DARK_THEME={
   mode:'dark',
-  // Canonical (design)
-  bg:'#161310',
-  surface:'#211D18',
-  surfaceElevated:'#2C2720',
-  primary:'#9DB066',
-  primaryLight:'rgba(157,176,102,0.16)',
-  primaryDeep:'#B8CC81',
-  accent:'#E08967',
-  accentLight:'rgba(224,137,103,0.16)',
-  text:'#F2EDE3',
-  textSecondary:'#A89D8B',
-  muted:'#6B5E52',
-  border:'#332D26',
-  danger:'#E26666',
-  // Legacy aliases / derivations
-  background:'#161310',
-  card:'#211D18',
-  primaryOn:'#1A1208',
-  warning:'#E08967',
-  success:'#9DB066',
+  // ─── v5 Saturated Forest (canonical) ────────────────────────────
+  bg:'#11140C',
+  surface:'#181C12',
+  surfaceElevated:'#212618',
+  surfaceSunk:'#0B0E07',
+  primary:'#9DBE94',
+  primaryDeep:'#B6D2AD',
+  primarySoft:'rgba(157,190,148,0.15)',
+  accent:'#E08861',
+  accentDeep:'#EFA482',
+  accentSoft:'rgba(224,136,97,0.15)',
+  text:'#ECE3CB',
+  textSecondary:'#A39880',
+  muted:'#6A6248',
+  hairline:'#2A2D1B',
+  hairlineSoft:'#212413',
+  danger:'#DC7770',
+  dangerSoft:'rgba(220,119,112,0.14)',
+  onPrimary:'#11140C',
+  onAccent:'#11140C',
+  // ─── Legacy aliases (kept until Phase 2 sweep) ──────────────────
+  background:'#11140C',                 // alias of bg
+  card:'#181C12',                        // alias of surface
+  border:'#2A2D1B',                      // alias of hairline
+  primaryLight:'rgba(157,190,148,0.15)', // === primarySoft in dark (both translucent)
+  accentLight:'rgba(224,136,97,0.15)',   // === accentSoft in dark
+  primaryOn:'#11140C',                   // alias of onPrimary
+  warning:'#E08861',                     // legacy: warning === accent
+  success:'#9DBE94',                     // legacy: success === primary
   overlay:'rgba(0,0,0,0.6)',
-  navBarBg:'#211D18',
+  navBarBg:'#181C12',                    // alias of surface (slight elevation in dark)
   navBarShadow:'rgba(0,0,0,0.5)',
   statusBar:'light-content',
 };
