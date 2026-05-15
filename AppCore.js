@@ -2548,13 +2548,9 @@ function FamilyMemberRing({member,variant,ringDiameter,ringStroke,onPress,aboveL
   var theme=useThemeColors();
   var d=ringDiameter||56;
   var sw=ringStroke||(d>=52?4:3.5);
-  var cx=d/2;
-  var r=cx-sw/2-2;
-  var c=2*Math.PI*r;
   var current=Number(member.current)||0;
   var target=Math.max(Number(member.target)||1,1);
   var pct=Math.min(100,(current/target)*100);
-  var dashOffset=c-(c*pct)/100;
   var isScreentime=variant==='screentime';
   var arcColor=isScreentime?(current>target?theme.warning:'#fff'):'#fff';
   var trackColor='rgba(255,255,255,0.18)';
@@ -2562,15 +2558,9 @@ function FamilyMemberRing({member,variant,ringDiameter,ringStroke,onPress,aboveL
   var unitWord=isScreentime?'hours':'grams';
   var a11yLabel=(member.name||'')+': '+current+' of '+target+' '+unitWord+', '+Math.round(pct)+' percent';
   var aboveBlock=aboveLabel?<View style={{marginBottom:4,maxWidth:d+8,alignItems:'center'}}>{aboveLabel}</View>:null;
-  var ringSvg=<View style={{width:d,height:d}}>
-    <Svg width={d} height={d} viewBox={'0 0 '+d+' '+d}>
-      <Circle cx={cx} cy={cx} r={r} fill="none" stroke={trackColor} strokeWidth={sw}/>
-      <Circle cx={cx} cy={cx} r={r} fill="none" stroke={arcColor} strokeWidth={sw} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={dashOffset} transform={'rotate(-90 '+cx+' '+cx+')'}/>
-    </Svg>
-    <View style={{position:'absolute',width:d,height:d,alignItems:'center',justifyContent:'center'}}>
-      <Text style={{fontFamily:FF.sansBold,fontSize:initSize,color:'#fff',letterSpacing:-0.2}}>{member.initials||'?'}</Text>
-    </View>
-  </View>;
+  var ringSvg=<V5ActivityRing size={d} stroke={sw} value={pct} color={arcColor} track={trackColor}>
+    <Text style={{fontFamily:FF.sansBold,fontSize:initSize,color:'#fff',letterSpacing:-0.2}}>{member.initials||'?'}</Text>
+  </V5ActivityRing>;
   var nameLabel=<Text numberOfLines={1} ellipsizeMode="tail" style={{
     fontFamily:FF.sansSemi,fontSize:11,
     color:'rgba(255,255,255,0.78)',
