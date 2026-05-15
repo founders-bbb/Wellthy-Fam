@@ -19,7 +19,8 @@ import { GestureHandlerRootView, PanGestureHandler, State as GHState } from 'rea
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { PieChart, BarChart, LineChart } from 'react-native-chart-kit';
-import Svg, { Path, Circle, Rect } from 'react-native-svg';
+import Svg, { Path, Circle, Rect, G, Defs, Pattern } from 'react-native-svg';
+import { BlurView } from 'expo-blur';
 import { supabase, EDGE_MEAL, EDGE_NUDGE, EDGE_UPDATE_PORTION, EDGE_PARSE_STATEMENT, EDGE_FINALIZE_STATEMENT, SUPABASE_ANON_KEY } from './utils/supabaseClient';
 import * as DocumentPicker from 'expo-document-picker';
 import { DB_COLUMNS } from './utils/constants';
@@ -1766,6 +1767,342 @@ function V5TabBar({active,onChange}){
       </TouchableOpacity>;
     })}
   </View>;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v5 VIZ — Saturated Forest data primitives
+// Source: _design/handoff-v5/fr/viz.jsx
+// 14 SVG-based viz atoms. All built on react-native-svg (already a
+// dep). V5GlassNav additionally uses expo-blur's BlurView. V5LivePulse
+// uses RN's Animated.loop since CSS @keyframes don't exist in RN.
+// ═══════════════════════════════════════════════════════════════
+
+// ─── V5ActivityRing ──────────────────────────────────────
+// Circular SVG progress. Apple-Health vocabulary. Children render
+// at the centre. label = uppercase caps below, sub = caption below.
+function V5ActivityRing({size,stroke,value,color,track,children,label,sub}){
+  var theme=useThemeColors();
+  var sz=size||64;
+  var sw=stroke||6;
+  var c=color||theme.primary;
+  var tr=track||theme.surfaceElevated;
+  var r=(sz-sw)/2;
+  var circ=2*Math.PI*r;
+  var v=Math.max(0,Math.min(100,value||0));
+  var dash=(v/100)*circ;
+  return <View style={{alignItems:'center'}}>
+    <View style={{width:sz,height:sz}}>
+      <Svg width={sz} height={sz} viewBox={'0 0 '+sz+' '+sz}>
+        <G rotation={-90} origin={sz/2+', '+sz/2}>
+          <Circle cx={sz/2} cy={sz/2} r={r} fill="none" stroke={tr} strokeWidth={sw}/>
+          <Circle cx={sz/2} cy={sz/2} r={r} fill="none" stroke={c} strokeWidth={sw}
+            strokeDasharray={dash+' '+(circ-dash)} strokeLinecap="round"/>
+        </G>
+      </Svg>
+      <View style={{position:'absolute',top:0,left:0,right:0,bottom:0,alignItems:'center',justifyContent:'center'}}>
+        {children}
+      </View>
+    </View>
+    {label?<Text style={{fontFamily:FF.sansBold,fontSize:9.5,fontWeight:'700',letterSpacing:0.6,textTransform:'uppercase',color:theme.muted,marginTop:4}}>{label}</Text>:null}
+    {sub?<Text style={{fontFamily:FF.sans,fontSize:10,color:theme.textSecondary,marginTop:2}}>{sub}</Text>:null}
+  </View>;
+}
+
+// ─── V5MultiRing ─────────────────────────────────────────
+// Concentric activity rings (Apple-Health 3-up). `rings` is an array
+// of {value, color, track?}.
+function V5MultiRing({size,rings,stroke,gap}){
+  var theme=useThemeColors();
+  var sz=size||120;
+  var sw=stroke||8;
+  var g=gap||3;
+  var center=sz/2;
+  return <Svg width={sz} height={sz} viewBox={'0 0 '+sz+' '+sz}>
+    <G rotation={-90} origin={center+', '+center}>
+      {(rings||[]).map(function(ring,i){
+        var r=(sz-sw)/2-i*(sw+g);
+        if(r<=0)return null;
+        var circ=2*Math.PI*r;
+        var v=Math.max(0,Math.min(100,ring.value||0));
+        var dash=(v/100)*circ;
+        return <G key={i}>
+          <Circle cx={center} cy={center} r={r} fill="none"
+            stroke={ring.track||theme.surfaceElevated} strokeWidth={sw}/>
+          <Circle cx={center} cy={center} r={r} fill="none"
+            stroke={ring.color} strokeWidth={sw}
+            strokeDasharray={dash+' '+(circ-dash)} strokeLinecap="round"/>
+        </G>;
+      })}
+    </G>
+  </Svg>;
+}
+
+// ─── V5Sparkline ─────────────────────────────────────────
+// Tiny inline line chart with optional area fill + end dot.
+function V5Sparkline({data,width,height,color,fill,dot,strokeWidth}){
+  var theme=useThemeColors();
+  var w=width||80,h=height||22;
+  var c=color||theme.primary;
+  var sw=strokeWidth||1.5;
+  if(!data||data.length<2)return null;
+  var min=Math.min.apply(null,data),max=Math.max.apply(null,data);
+  var span=max-min||1;
+  var xStep=w/(data.length-1);
+  var pts=data.map(function(v,i){return[i*xStep,h-((v-min)/span)*h*0.85-2];});
+  var line='M'+pts.map(function(p){return p.join(',');}).join(' L');
+  var area=line+' L'+w+','+h+' L0,'+h+' Z';
+  var last=pts[pts.length-1];
+  return <Svg width={w} height={h} viewBox={'0 0 '+w+' '+h}>
+    {fill?<Path d={area} fill={fill} opacity={0.18}/>:null}
+    <Path d={line} stroke={c} strokeWidth={sw} fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+    {(dot!==false)?<Circle cx={last[0]} cy={last[1]} r={2.4} fill={c}/>:null}
+  </Svg>;
+}
+
+// ─── V5MiniArea ──────────────────────────────────────────
+// Sparkline variant emphasizing fill; used as bg inside hero blocks.
+function V5MiniArea({data,width,height,color,opacity}){
+  var theme=useThemeColors();
+  var w=width||200,h=height||60;
+  var c=color||theme.primary;
+  var op=opacity!=null?opacity:0.22;
+  if(!data||data.length<2)return null;
+  var min=Math.min.apply(null,data),max=Math.max.apply(null,data);
+  var span=max-min||1;
+  var xStep=w/(data.length-1);
+  var pts=data.map(function(v,i){return[i*xStep,h-((v-min)/span)*h*0.9-2];});
+  var line='M'+pts.map(function(p){return p.join(',');}).join(' L');
+  var area=line+' L'+w+','+h+' L0,'+h+' Z';
+  return <Svg width={w} height={h} viewBox={'0 0 '+w+' '+h}>
+    <Path d={area} fill={c} opacity={op}/>
+    <Path d={line} stroke={c} strokeWidth={1.5} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.9}/>
+  </Svg>;
+}
+
+// ─── V5Heatmap ───────────────────────────────────────────
+// GitHub-style cell grid (last 30 days / family × 7 days).
+// `cells` is a flat array of numbers or {value, label} laid row-major.
+function V5Heatmap({cols,cells,cellSize,gap,color,max,showLegend}){
+  var theme=useThemeColors();
+  var c=color||theme.primary;
+  var cs=cellSize||12;
+  var gp=gap!=null?gap:3;
+  var co=cols||7;
+  var mx=max||1;
+  var rows=[];
+  for(var i=0;i<(cells||[]).length;i+=co){rows.push((cells||[]).slice(i,i+co));}
+  return <View>
+    <View>
+      {rows.map(function(row,ri){
+        return <View key={ri} style={{flexDirection:'row',marginBottom:ri===rows.length-1?0:gp}}>
+          {row.map(function(cell,ci){
+            var v=(cell&&cell.value!==undefined)?cell.value:cell;
+            var empty=v===0||v==null;
+            var op=empty?1:(0.25+(v/mx)*0.75);
+            return <View key={ci} style={{
+              width:cs,height:cs,
+              borderRadius:cs>16?4:2.5,
+              backgroundColor:empty?theme.surfaceElevated:c,
+              opacity:op,
+              borderWidth:empty?StyleSheet.hairlineWidth:0,borderColor:theme.hairlineSoft,
+              marginRight:ci===row.length-1?0:gp,
+            }}/>;
+          })}
+        </View>;
+      })}
+    </View>
+    {showLegend?<View style={{flexDirection:'row',alignItems:'center',marginTop:6}}>
+      <Text style={{fontFamily:FF.sans,fontSize:9.5,color:theme.muted,marginRight:4}}>less</Text>
+      {[0.25,0.5,0.75,1].map(function(o,i){
+        return <View key={i} style={{width:cs,height:cs,borderRadius:2.5,backgroundColor:c,opacity:o,marginRight:4}}/>;
+      })}
+      <Text style={{fontFamily:FF.sans,fontSize:9.5,color:theme.muted}}>more</Text>
+    </View>:null}
+  </View>;
+}
+
+// ─── V5SegmentedProgress ─────────────────────────────────
+// Discrete-cell horizontal bar (e.g. promises: each day a segment).
+// `done` cells use primary, `missed` cells use accent, rest are
+// surfaceElevated.
+function V5SegmentedProgress({total,done,missed,color,missedColor,height,gap}){
+  var theme=useThemeColors();
+  var t=total||14;
+  var d=done||0;
+  var m=missed||0;
+  var c=color||theme.primary;
+  var mc=missedColor||theme.accent;
+  var h=height||8;
+  var gp=gap!=null?gap:2;
+  return <View style={{flexDirection:'row',height:h}}>
+    {Array.from({length:t}).map(function(_,i){
+      var bg=theme.surfaceElevated;
+      if(i<d)bg=c;
+      else if(i<d+m)bg=mc;
+      return <View key={i} style={{flex:1,backgroundColor:bg,borderRadius:2,marginRight:i===t-1?0:gp,opacity:i<d?1:i<d+m?0.85:1}}/>;
+    })}
+  </View>;
+}
+
+// ─── V5StackedBar ────────────────────────────────────────
+// Horizontal stack of category segments. Used in Finance "where it
+// went" strip. `segments` is [{value, color, label?}].
+function V5StackedBar({segments,height,radius,gap,labelInside}){
+  var h=height||10;
+  var r=radius||5;
+  var gp=gap!=null?gap:2;
+  var segs=segments||[];
+  var total=segs.reduce(function(s,x){return s+(x.value||0);},0)||1;
+  return <View style={{flexDirection:'row',height:h,borderRadius:r,overflow:'hidden'}}>
+    {segs.map(function(s,i){
+      var pct=(s.value/total)*100;
+      return <View key={i} style={{width:pct+'%',backgroundColor:s.color,marginRight:i===segs.length-1?0:gp,alignItems:'center',justifyContent:'center'}}>
+        {labelInside&&pct>12?<Text style={{fontFamily:FF.sansBold,fontSize:9,fontWeight:'700',color:'#fff',letterSpacing:0.3}}>{s.label}</Text>:null}
+      </View>;
+    })}
+  </View>;
+}
+
+// ─── V5HistBars ──────────────────────────────────────────
+// Small vertical bars with one highlight. emphasis='last' highlights
+// the rightmost bar; pass highlightIdx to override.
+function V5HistBars({data,labels,height,color,highlightColor,highlightIdx,emphasis}){
+  var theme=useThemeColors();
+  var arr=data||[];
+  var lbl=labels||[];
+  var h=height||56;
+  var c=color||theme.primary;
+  var hc=highlightColor||theme.accent;
+  var hIdx=highlightIdx!=null?highlightIdx:-1;
+  var emp=emphasis||'last';
+  var mx=Math.max.apply(null,arr.concat([1]));
+  return <View style={{flexDirection:'row',alignItems:'flex-end',height:h+16}}>
+    {arr.map(function(v,i){
+      var hi=(emp==='last'&&i===arr.length-1)||i===hIdx;
+      return <View key={i} style={{flex:1,alignItems:'center',marginRight:i===arr.length-1?0:4}}>
+        <View style={{width:'100%',height:(v/mx)*h,backgroundColor:hi?hc:c,opacity:hi?1:0.5,borderRadius:3}}/>
+        {lbl[i]?<Text style={{fontFamily:FF.sansBold,fontSize:9,fontWeight:'700',letterSpacing:0.4,color:hi?theme.text:theme.muted,textTransform:'uppercase',marginTop:4}}>{lbl[i]}</Text>:null}
+      </View>;
+    })}
+  </View>;
+}
+
+// ─── V5RangeBar ──────────────────────────────────────────
+// Horizontal from-to band. Used for sleep ranges. Wrap-around aware
+// (if from > to in clock-hour terms, renders two segments).
+function V5RangeBar({from,to,color,height,totalSpan,startHour}){
+  var theme=useThemeColors();
+  var c=color||theme.primary;
+  var h=height||8;
+  var ts=totalSpan||24;
+  var sh=startHour!=null?startHour:18;
+  function norm(x){var n=x-sh;if(n<0)n+=24;return n;}
+  var f=norm(from),t=norm(to);
+  return <View style={{position:'relative',height:h,backgroundColor:theme.surfaceElevated,borderRadius:h/2,overflow:'hidden'}}>
+    {f<t
+      ?<View style={{position:'absolute',top:0,height:'100%',left:(f/ts)*100+'%',width:((t-f)/ts)*100+'%',backgroundColor:c,borderRadius:h/2}}/>
+      :<View style={{flex:1}}>
+        <View style={{position:'absolute',top:0,height:'100%',left:(f/ts)*100+'%',width:((ts-f)/ts)*100+'%',backgroundColor:c}}/>
+        <View style={{position:'absolute',top:0,height:'100%',left:0,width:(t/ts)*100+'%',backgroundColor:c}}/>
+      </View>}
+  </View>;
+}
+
+// ─── V5LivePulse ─────────────────────────────────────────
+// Pulsing dot for "live / new / recently updated" indicators. RN
+// Animated.loop replaces CSS @keyframes from the web atom.
+function V5LivePulse({color,size}){
+  var theme=useThemeColors();
+  var c=color||theme.accent;
+  var s=size||8;
+  var scaleRef=useRef(new Animated.Value(1)).current;
+  var opacityRef=useRef(new Animated.Value(0.4)).current;
+  useEffect(function(){
+    var loop=Animated.loop(Animated.sequence([
+      Animated.parallel([
+        Animated.timing(scaleRef,{toValue:2.2,duration:1200,useNativeDriver:true}),
+        Animated.timing(opacityRef,{toValue:0,duration:1200,useNativeDriver:true}),
+      ]),
+      Animated.parallel([
+        Animated.timing(scaleRef,{toValue:1,duration:0,useNativeDriver:true}),
+        Animated.timing(opacityRef,{toValue:0.4,duration:400,useNativeDriver:true}),
+      ]),
+    ]));
+    loop.start();
+    return function(){loop.stop();};
+  },[]);
+  return <View style={{width:s,height:s}}>
+    <Animated.View style={{position:'absolute',width:s,height:s,borderRadius:9999,backgroundColor:c,transform:[{scale:scaleRef}],opacity:opacityRef}}/>
+    <View style={{position:'absolute',width:s,height:s,borderRadius:9999,backgroundColor:c}}/>
+  </View>;
+}
+
+// ─── V5GridBg ────────────────────────────────────────────
+// Subtle dotted-grid bg pattern. Renders as an absolute-positioned
+// SVG with a <Pattern> tile.
+function V5GridBg({size,opacity,color,style}){
+  var theme=useThemeColors();
+  var c=color||theme.hairline;
+  var op=opacity!=null?opacity:0.5;
+  var d=size||16;
+  return <View pointerEvents="none" style={[{position:'absolute',top:0,left:0,right:0,bottom:0,opacity:op},style]}>
+    <Svg width="100%" height="100%">
+      <Defs>
+        <Pattern id="v5gridBg" x="0" y="0" width={d} height={d} patternUnits="userSpaceOnUse">
+          <Circle cx={0.6} cy={0.6} r={0.6} fill={c}/>
+        </Pattern>
+      </Defs>
+      <Rect x="0" y="0" width="100%" height="100%" fill="url(#v5gridBg)"/>
+    </Svg>
+  </View>;
+}
+
+// ─── V5GlassNav ──────────────────────────────────────────
+// Frosted top nav (expo-blur BlurView). Sits absolute over the
+// screen with backdrop blur + tint matching theme bg.
+function V5GlassNav({children,height}){
+  var theme=useThemeColors();
+  var insets=useSafeAreaInsets();
+  var contentH=height||56;
+  return <BlurView intensity={80} tint={theme.mode==='dark'?'dark':'light'} style={{
+    position:'absolute',top:0,left:0,right:0,zIndex:30,
+    paddingTop:insets.top,paddingHorizontal:16,
+    height:contentH+insets.top,
+    borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:theme.hairlineSoft,
+    flexDirection:'row',alignItems:'center',
+  }}>
+    {children}
+  </BlurView>;
+}
+
+// ─── V5CountdownRing ─────────────────────────────────────
+// Circular progress with days-left number inside. Used for promises.
+function V5CountdownRing({daysLeft,totalDays,size,color}){
+  var theme=useThemeColors();
+  var dl=daysLeft||0;
+  var td=totalDays||10;
+  var pct=((td-dl)/td)*100;
+  var c=color||theme.accent;
+  return <V5ActivityRing size={size||44} stroke={4} value={pct} color={c}>
+    <Text style={{fontFamily:FF.sansBold,fontSize:12,fontWeight:'700',letterSpacing:-0.2,color:c}}>{dl}d</Text>
+  </V5ActivityRing>;
+}
+
+// ─── V5MonoNum ───────────────────────────────────────────
+// Number rendered in JetBrains Mono with tabular figures. Used in
+// ledger contexts and engineered-feel hero numbers.
+function V5MonoNum({children,size,weight,color,style}){
+  var theme=useThemeColors();
+  var sz=size||24;
+  var w=weight||'700';
+  var fam=FF.mono;
+  if(w==='500'||w===500)fam=FF.monoMed;
+  else if(w==='600'||w===600)fam=FF.monoSemi;
+  else if(w==='700'||w===700||w==='bold')fam=FF.monoBold;
+  return <Text style={[{
+    fontFamily:fam,fontSize:sz,fontWeight:w,letterSpacing:-sz*0.02,
+    color:color||theme.text,fontVariant:['tabular-nums'],
+  },style]}>{children}</Text>;
 }
 
 function MemberStatChip({label,value}){
